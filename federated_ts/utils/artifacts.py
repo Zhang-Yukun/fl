@@ -4,7 +4,7 @@ Example:
     Save experiment parameters in the default YAML format::
 
         from pathlib import Path
-        from federated_ts.artifacts import save_experiment_config
+        from federated_ts.utils.artifacts import save_experiment_config
 
         paths = save_experiment_config({"training": {"lr": 0.001}}, Path("outputs/run"))
         assert paths[0].name == "config.yaml"

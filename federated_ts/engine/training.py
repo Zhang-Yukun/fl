@@ -7,7 +7,7 @@ from typing import Iterable
 import torch
 from torch import nn
 
-from federated_ts.metrics import mae, mape, mse
+from federated_ts.utils.metrics import mae, mape, mse
 
 
 def train_one_epoch(model: nn.Module, loader: Iterable, optimizer: torch.optim.Optimizer, device: torch.device) -> float:

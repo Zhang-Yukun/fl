@@ -1,9 +1,9 @@
 import numpy as np
 import torch
 
-from federated_ts.data import Standardizer, WindowDataset, split_array
-from federated_ts.metrics import mae, mape, mse
-from federated_ts.models import build_model
+from federated_ts.datasets.rare_earth import Standardizer, WindowDataset, split_array
+from federated_ts.utils.metrics import mae, mape, mse
+from federated_ts.modeling.forecasting import build_model
 
 
 def test_standardizer_and_window_dataset():

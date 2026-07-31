@@ -10,15 +10,15 @@ from typing import Any
 import torch
 from loguru import logger
 
-from federated_ts.attacks import attack_success_rate, dlg_attack, idlg_attack
-from federated_ts.client import FederatedClient
-from federated_ts.data import build_federated_loaders
-from federated_ts.logging_utils import setup_logging
-from federated_ts.models import build_model
-from federated_ts.serialization import serialize_model, state_num_bytes, state_num_parameters
-from federated_ts.server import EarlyStopper, FederatedServer, RoundRecord
-from federated_ts.tracking import Tracker
-from federated_ts.training import evaluate, train_one_epoch
+from federated_ts.security.attacks import attack_success_rate, dlg_attack, idlg_attack
+from federated_ts.federated.client import FederatedClient
+from federated_ts.datasets.rare_earth import build_federated_loaders
+from federated_ts.utils.logging import setup_logging
+from federated_ts.modeling.forecasting import build_model
+from federated_ts.utils.serialization import serialize_model, state_num_bytes, state_num_parameters
+from federated_ts.federated.server import EarlyStopper, FederatedServer, RoundRecord
+from federated_ts.utils.tracking import Tracker
+from federated_ts.engine.training import evaluate, train_one_epoch
 
 
 def resolve_device(config: dict[str, Any]) -> torch.device:

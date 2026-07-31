@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 
-from federated_ts.algorithms import run_centralized, run_federated
-from federated_ts.config import load_config
+from federated_ts.federated.algorithms import run_centralized, run_federated
+from federated_ts.utils.config import load_config
 
 
 def main() -> None:

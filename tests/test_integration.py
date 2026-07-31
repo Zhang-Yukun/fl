@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from federated_ts.algorithms import run_federated
-from federated_ts.config import load_config
+from federated_ts.federated.algorithms import run_federated
+from federated_ts.utils.config import load_config
 
 
 def test_one_round_federated_run(tmp_path):

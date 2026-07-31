@@ -17,12 +17,16 @@ expected to be at least 6x compared with dense FedAvg uploads.
 
 ## Main Modules
 
-- `federated_ts.config`: nested YAML loading and CLI overrides.
-- `federated_ts.data`: rare-earth CSV loading and sliding-window datasets.
-- `federated_ts.serialization`: ordered parameter serialization and sparse updates.
-- `federated_ts.algorithms`: centralized training, FedAvg, compressed FedAvg.
-- `federated_ts.attacks`: DLG and iDLG-style gradient reconstruction attacks.
-- `federated_ts.grpc_service`: gRPC transport helpers for multi-process training.
+- `federated_ts.utils.config`: nested YAML loading and CLI overrides.
+- `federated_ts.utils.artifacts`: experiment parameter artifacts in YAML/JSON/TOML.
+- `federated_ts.utils.serialization`: ordered parameter serialization and sparse updates.
+- `federated_ts.datasets.rare_earth`: rare-earth CSV loading and sliding-window datasets.
+- `federated_ts.modeling.forecasting`: forecasting model registry and implementations.
+- `federated_ts.engine.training`: local train/evaluate loops.
+- `federated_ts.federated.algorithms`: centralized training, FedAvg, compressed FedAvg.
+- `federated_ts.federated.client` and `federated_ts.federated.server`: FL endpoint logic.
+- `federated_ts.security.attacks`: DLG and iDLG-style gradient reconstruction attacks.
+- `federated_ts.communication.grpc_service`: gRPC transport helpers for multi-process training.
 
 
 ## Multi-Process gRPC

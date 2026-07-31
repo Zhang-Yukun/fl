@@ -8,8 +8,8 @@ from typing import Any
 
 import torch
 
-from federated_ts.models import build_model
-from federated_ts.serialization import (
+from federated_ts.modeling.forecasting import build_model
+from federated_ts.utils.serialization import (
     SparseUpdate,
     StateDict,
     compress_topk,
@@ -19,7 +19,7 @@ from federated_ts.serialization import (
     state_num_parameters,
     subtract_state,
 )
-from federated_ts.training import first_batch_gradient, train_one_epoch
+from federated_ts.engine.training import first_batch_gradient, train_one_epoch
 
 
 @dataclass

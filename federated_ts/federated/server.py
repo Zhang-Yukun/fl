@@ -10,9 +10,9 @@ from typing import Any
 import torch
 from loguru import logger
 
-from federated_ts.artifacts import save_experiment_config
-from federated_ts.models import build_model
-from federated_ts.serialization import (
+from federated_ts.utils.artifacts import save_experiment_config
+from federated_ts.modeling.forecasting import build_model
+from federated_ts.utils.serialization import (
     StateDict,
     add_update,
     average_states,
@@ -21,7 +21,7 @@ from federated_ts.serialization import (
     state_num_bytes,
     state_num_parameters,
 )
-from federated_ts.training import evaluate
+from federated_ts.engine.training import evaluate
 
 
 @dataclass

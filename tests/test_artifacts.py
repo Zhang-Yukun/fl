@@ -3,7 +3,7 @@ import tomllib
 
 import yaml
 
-from federated_ts.artifacts import normalize_config_formats, save_experiment_config
+from federated_ts.utils.artifacts import normalize_config_formats, save_experiment_config
 
 
 def test_normalize_config_formats_defaults_and_deduplicates():

@@ -9,12 +9,12 @@ from typing import Any
 
 from loguru import logger
 
-from federated_ts.algorithms import resolve_device
-from federated_ts.client import FederatedClient
-from federated_ts.data import build_federated_loaders
-from federated_ts.grpc_service import FederatedRpcClient, FederatedRpcServer
-from federated_ts.logging_utils import setup_logging
-from federated_ts.server import EarlyStopper, FederatedServer
+from federated_ts.federated.algorithms import resolve_device
+from federated_ts.federated.client import FederatedClient
+from federated_ts.datasets.rare_earth import build_federated_loaders
+from federated_ts.communication.grpc_service import FederatedRpcClient, FederatedRpcServer
+from federated_ts.utils.logging import setup_logging
+from federated_ts.federated.server import EarlyStopper, FederatedServer
 
 
 class GrpcFederatedCoordinator:

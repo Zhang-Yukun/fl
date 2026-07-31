@@ -1,7 +1,7 @@
 import torch
 
-from federated_ts.models import build_model
-from federated_ts.serialization import compress_topk, decompress_topk, serialize_model, state_num_bytes, subtract_state
+from federated_ts.modeling.forecasting import build_model
+from federated_ts.utils.serialization import compress_topk, decompress_topk, serialize_model, state_num_bytes, subtract_state
 
 
 def test_state_serialization_and_sparse_ratio():

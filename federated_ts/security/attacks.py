@@ -8,8 +8,8 @@ from typing import Any
 import torch
 from torch import nn
 
-from federated_ts.models import build_model
-from federated_ts.serialization import StateDict, load_serialized
+from federated_ts.modeling.forecasting import build_model
+from federated_ts.utils.serialization import StateDict, load_serialized
 
 
 @dataclass
