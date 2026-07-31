@@ -24,6 +24,8 @@ class SparseUpdate:
 
     @property
     def nbytes(self) -> int:
+        """Return serialized sparse payload size in bytes."""
+
         return self.indices.numel() * self.indices.element_size() + self.values.numel() * self.values.element_size()
 
 
@@ -40,14 +42,32 @@ def load_serialized(model: torch.nn.Module, state: StateDict, device: torch.devi
 
 
 def subtract_state(new: StateDict, old: StateDict) -> StateDict:
+    """Return ``new - old`` for every tensor in a state dict.
+
+    Example:
+        Use this to build a client update before sparse compression.
+    """
+
     return OrderedDict((name, new[name] - old[name]) for name in old.keys())
 
 
 def add_update(state: StateDict, update: StateDict, scale: float = 1.0) -> StateDict:
+    """Apply an update to a state dict.
+
+    Example:
+        ``next_state = add_update(global_state, averaged_update)``.
+    """
+
     return OrderedDict((name, state[name] + update[name] * scale) for name in state.keys())
 
 
 def average_states(states: Iterable[StateDict], weights: Iterable[float] | None = None) -> StateDict:
+    """Weighted average dense model states for standard FedAvg.
+
+    Example:
+        ``average_states(client_states, weights=[10, 20, 30])``.
+    """
+
     states = list(states)
     if not states:
         raise ValueError("Cannot average an empty state list")
@@ -63,6 +83,8 @@ def average_states(states: Iterable[StateDict], weights: Iterable[float] | None 
 
 
 def state_num_bytes(state: StateDict) -> int:
+    """Return the dense serialized size of a state dict in bytes."""
+
     return sum(tensor.numel() * tensor.element_size() for tensor in state.values())
 
 
@@ -88,6 +110,12 @@ def compress_topk(update: StateDict, fraction: float) -> SparseUpdate:
 
 
 def decompress_topk(sparse: SparseUpdate) -> StateDict:
+    """Reconstruct a dense update state from a top-k sparse payload.
+
+    Example:
+        ``dense_update = decompress_topk(compress_topk(update, 0.05))``.
+    """
+
     flat = torch.zeros(sparse.total_numel, dtype=sparse.values.dtype)
     flat[sparse.indices] = sparse.values
     result = OrderedDict()

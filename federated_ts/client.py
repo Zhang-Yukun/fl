@@ -50,12 +50,21 @@ class FederatedClient:
     """Local trainer that receives global parameters and returns an update."""
 
     def __init__(self, client_id: str, train_loader, config: dict[str, Any], device: torch.device):
+        """Create a client bound to one local training loader."""
+
         self.client_id = client_id
         self.train_loader = train_loader
         self.config = config
         self.device = device
 
     def train(self, global_state: StateDict, compressed: bool = False) -> ClientResult:
+        """Train locally from global weights and return a dense or sparse payload.
+
+        Example:
+            ``client.train(state, compressed=False)`` implements standard FedAvg
+            client behavior by uploading a full dense model state.
+        """
+
         model = build_model(self.config).to(self.device)
         load_serialized(model, global_state, self.device)
         optimizer = torch.optim.Adam(model.parameters(), lr=float(self.config["training"].get("lr", 1e-3)))
@@ -93,6 +102,12 @@ class FederatedClient:
         )
 
     def gradient_sample(self, global_state: StateDict):
+        """Return first-batch gradients for DLG/iDLG evaluation.
+
+        Example:
+            ``grads, x, y = client.gradient_sample(server_state)``.
+        """
+
         model = build_model(self.config).to(self.device)
         load_serialized(model, copy.deepcopy(global_state), self.device)
         return first_batch_gradient(model, self.train_loader, self.device)

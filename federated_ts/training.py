@@ -11,6 +11,12 @@ from federated_ts.metrics import mae, mape, mse
 
 
 def train_one_epoch(model: nn.Module, loader: Iterable, optimizer: torch.optim.Optimizer, device: torch.device) -> float:
+    """Train one local epoch and return sample-weighted MSE loss.
+
+    Example:
+        ``loss = train_one_epoch(model, train_loader, optimizer, device)``.
+    """
+
     model.train()
     criterion = nn.MSELoss()
     total_loss = 0.0
@@ -29,6 +35,12 @@ def train_one_epoch(model: nn.Module, loader: Iterable, optimizer: torch.optim.O
 
 @torch.no_grad()
 def evaluate(model: nn.Module, loader: Iterable, device: torch.device) -> dict[str, float]:
+    """Evaluate a forecasting model and return MSE, MAE, and MAPE.
+
+    Example:
+        ``metrics = evaluate(model, val_loader, torch.device("cpu"))``.
+    """
+
     model.eval()
     preds = []
     targets = []

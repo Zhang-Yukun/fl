@@ -21,19 +21,31 @@ OXIDE_COLUMNS = {
 
 @dataclass
 class Standardizer:
+    """Feature-wise standardization statistics.
+
+    Example:
+        ``scaler = Standardizer.fit(values); scaled = scaler.transform(values)``.
+    """
+
     mean: np.ndarray
     std: np.ndarray
 
     @classmethod
     def fit(cls, values: np.ndarray) -> "Standardizer":
+        """Estimate mean and standard deviation from training values."""
+
         std = values.std(axis=0)
         std[std == 0] = 1.0
         return cls(values.mean(axis=0), std)
 
     def transform(self, values: np.ndarray) -> np.ndarray:
+        """Scale raw values with stored statistics."""
+
         return (values - self.mean) / self.std
 
     def inverse_transform(self, values: np.ndarray) -> np.ndarray:
+        """Map standardized values back to the original price scale."""
+
         return values * self.std + self.mean
 
 
@@ -41,6 +53,8 @@ class WindowDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     """Sliding-window dataset returning encoder and prediction windows."""
 
     def __init__(self, values: np.ndarray, seq_len: int, pred_len: int):
+        """Create sliding windows from a normalized time-series array."""
+
         if values.ndim == 1:
             values = values[:, None]
         if len(values) < seq_len + pred_len:
@@ -50,9 +64,13 @@ class WindowDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.pred_len = pred_len
 
     def __len__(self) -> int:
+        """Return the number of valid sliding windows."""
+
         return len(self.values) - self.seq_len - self.pred_len + 1
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return one input and prediction target window pair."""
+
         x = self.values[index : index + self.seq_len]
         y = self.values[index + self.seq_len : index + self.seq_len + self.pred_len]
         return torch.from_numpy(x), torch.from_numpy(y)
@@ -71,6 +89,12 @@ def read_price_frame(csv_path: str | Path) -> pd.DataFrame:
 
 
 def split_array(values: np.ndarray, train_ratio: float, val_ratio: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Split an array into train, validation, and test partitions.
+
+    Example:
+        ``train, val, test = split_array(values, 0.7, 0.15)``.
+    """
+
     train_end = int(len(values) * train_ratio)
     val_end = train_end + int(len(values) * val_ratio)
     return values[:train_end], values[train_end:val_end], values[val_end:]
@@ -85,6 +109,12 @@ def make_loaders(
     val_ratio: float,
     num_workers: int = 0,
 ) -> tuple[DataLoader, DataLoader, DataLoader, Standardizer]:
+    """Build train/validation/test DataLoaders from one time-series array.
+
+    Example:
+        ``train, val, test, scaler = make_loaders(values, 21, 7, 32, 0.7, 0.15)``.
+    """
+
     train_raw, val_raw, test_raw = split_array(values, train_ratio, val_ratio)
     scaler = Standardizer.fit(train_raw)
     train = scaler.transform(train_raw)
@@ -134,12 +164,18 @@ class _ConcatLoader:
     """Small iterable that presents multiple DataLoaders as one validation/test stream."""
 
     def __init__(self, loaders: list[DataLoader]):
+        """Store loaders that should be iterated as one stream."""
+
         self.loaders = loaders
 
     def __iter__(self):
+        """Yield batches from each wrapped loader in order."""
+
         for loader in self.loaders:
             yield from loader
 
     def __len__(self) -> int:
+        """Return the total number of batches across wrapped loaders."""
+
         return sum(len(loader) for loader in self.loaders)
 

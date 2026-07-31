@@ -10,6 +10,7 @@ from typing import Any
 import torch
 from loguru import logger
 
+from federated_ts.artifacts import save_experiment_config
 from federated_ts.models import build_model
 from federated_ts.serialization import (
     StateDict,
@@ -41,6 +42,12 @@ class ClientCommunicationRecord:
 
 @dataclass
 class RoundRecord:
+    """Metrics and communication metadata for one federated round.
+
+    Example:
+        Records are serialized into ``metrics.json`` after training.
+    """
+
     round: int
     algorithm: str
     train_loss: float
@@ -66,12 +73,20 @@ class RoundRecord:
 
 @dataclass
 class EarlyStopper:
+    """Validation-loss early stopping helper.
+
+    Example:
+        ``stopper.update(val_mse)`` returns ``True`` when patience is exhausted.
+    """
+
     patience: int
     min_delta: float = 0.0
     best: float = float("inf")
     bad_rounds: int = 0
 
     def update(self, value: float) -> bool:
+        """Update the best metric and report whether training should stop."""
+
         if value < self.best - self.min_delta:
             self.best = value
             self.bad_rounds = 0
@@ -93,6 +108,8 @@ class FederatedServer:
     history: list[RoundRecord] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        """Build the initial global model after dataclass initialization."""
+
         self.model = build_model(self.config).to(self.device)
         self.global_state = serialize_model(self.model)
         logger.info(
@@ -102,10 +119,14 @@ class FederatedServer:
         )
 
     def aggregate_dense(self, results) -> None:
+        """Aggregate full client model states with FedAvg."""
+
         weights = [result.num_samples for result in results]
         self.global_state = average_states([result.state for result in results], weights)
 
     def aggregate_sparse(self, results) -> None:
+        """Aggregate sparse client updates for compressed FedAvg."""
+
         weights = [result.num_samples for result in results]
         total = float(sum(weights))
         update = None
@@ -116,10 +137,14 @@ class FederatedServer:
         self.global_state = add_update(self.global_state, update)
 
     def evaluate_global(self) -> dict[str, float]:
+        """Evaluate the current global model on the server validation set."""
+
         self.model.load_state_dict(self.global_state)
         return evaluate(self.model, self.val_loader, self.device)
 
     def test_global(self) -> dict[str, float]:
+        """Evaluate the current global model on the server test set."""
+
         self.model.load_state_dict(self.global_state)
         return evaluate(self.model, self.test_loader, self.device)
 
@@ -131,6 +156,12 @@ class FederatedServer:
         round_time_seconds: float,
         elapsed_time_seconds: float,
     ) -> RoundRecord:
+        """Create and log a round record with communication metadata.
+
+        Example:
+            Called once after client aggregation and validation evaluation.
+        """
+
         model_bytes = state_num_bytes(self.global_state)
         model_parameters = state_num_parameters(self.global_state)
         total_download_bytes = sum(result.download_bytes for result in results)
@@ -208,10 +239,18 @@ class FederatedServer:
         return record
 
     def save(self, output_dir: str | Path, config: dict[str, Any]) -> None:
+        """Persist model, experiment parameters, and metric history.
+
+        Example:
+            ``server.save("outputs/run", config)`` writes ``model.pt``,
+            ``metrics.json``, and parameter files such as ``config.yaml``.
+        """
+
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.global_state, output_dir / "model.pt")
-        with (output_dir / "config.json").open("w", encoding="utf-8") as handle:
-            json.dump(config, handle, ensure_ascii=False, indent=2)
+        config_formats = config.get("artifacts", {}).get("config_formats")
+        saved_configs = save_experiment_config(config, output_dir, config_formats)
+        logger.info("Saved experiment config artifacts: {}", [str(path) for path in saved_configs])
         with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
             json.dump([asdict(record) for record in self.history], handle, ensure_ascii=False, indent=2)

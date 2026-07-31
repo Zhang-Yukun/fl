@@ -21,6 +21,8 @@ class GrpcFederatedCoordinator:
     """Server-side coordinator that aggregates updates when all clients report."""
 
     def __init__(self, config: dict[str, Any]):
+        """Initialize server-side state for multi-process training."""
+
         self.config = config
         self.output_dir = Path(config["experiment"]["output_dir"])
         setup_logging(self.output_dir, config.get("runtime", {}).get("log_level", "INFO"))
@@ -39,6 +41,8 @@ class GrpcFederatedCoordinator:
         self.lock = threading.Lock()
 
     def get_global(self) -> dict[str, Any]:
+        """Return the current global payload for remote clients."""
+
         with self.lock:
             return {
                 "round": self.round_index,
@@ -48,6 +52,8 @@ class GrpcFederatedCoordinator:
             }
 
     def submit_update(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Accept one remote client update and aggregate when all clients arrive."""
+
         with self.lock:
             if self.stopped:
                 return {"accepted": False, "stop": True, "round": self.round_index}

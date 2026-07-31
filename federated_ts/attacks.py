@@ -14,12 +14,20 @@ from federated_ts.serialization import StateDict, load_serialized
 
 @dataclass
 class AttackResult:
+    """Outcome of one gradient reconstruction attack.
+
+    Example:
+        ``AttackResult("DLG", 0.2, False)`` records a failed attack.
+    """
+
     name: str
     reconstruction_mse: float
     success: bool
 
 
 def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_grads: list[torch.Tensor]) -> torch.Tensor:
+    """Compute squared distance between dummy and intercepted gradients."""
+
     criterion = nn.MSELoss()
     pred = model(x)
     loss = criterion(pred, y)
@@ -93,6 +101,12 @@ def idlg_attack(
 
 
 def attack_success_rate(results: list[AttackResult]) -> float:
+    """Compute the fraction of successful attacks.
+
+    Example:
+        ``attack_success_rate([AttackResult("DLG", 0.0, True)]) == 1.0``.
+    """
+
     if not results:
         return 0.0
     return sum(result.success for result in results) / len(results)

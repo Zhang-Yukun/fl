@@ -11,6 +11,8 @@ from loguru import logger
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge two mappings without mutating either input."""
+
     merged = copy.deepcopy(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
@@ -21,6 +23,8 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def _load_one(path: Path) -> dict[str, Any]:
+    """Load one YAML file and validate that its root is a mapping."""
+
     with path.open("r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
     if not isinstance(data, dict):
@@ -44,6 +48,8 @@ def _resolve_includes(data: dict[str, Any], base_dir: Path) -> dict[str, Any]:
 
 
 def _parse_scalar(raw: str) -> Any:
+    """Parse a command-line override value using YAML scalar rules."""
+
     try:
         return yaml.safe_load(raw)
     except yaml.YAMLError:
@@ -51,6 +57,8 @@ def _parse_scalar(raw: str) -> Any:
 
 
 def _set_dotted(config: dict[str, Any], dotted_key: str, value: Any) -> None:
+    """Set a nested mapping value addressed by a dotted key."""
+
     keys = dotted_key.split(".")
     cursor = config
     for key in keys[:-1]:

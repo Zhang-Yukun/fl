@@ -22,6 +22,12 @@ from federated_ts.training import evaluate, train_one_epoch
 
 
 def resolve_device(config: dict[str, Any]) -> torch.device:
+    """Resolve the configured torch device with a CPU fallback.
+
+    Example:
+        ``resolve_device({"runtime": {"device": "cpu"}})`` returns a CPU device.
+    """
+
     requested = str(config.get("runtime", {}).get("device", "cpu"))
     if requested.startswith("cuda") and not torch.cuda.is_available():
         logger.warning("CUDA requested but unavailable; falling back to CPU")
@@ -41,6 +47,8 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
 
 
 def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
+    """Flatten one round record into wandb-friendly scalar keys."""
+
     data = asdict(record)
     clients = data.pop("clients")
     payload = {f"round/{key}": value for key, value in data.items()}
@@ -53,6 +61,12 @@ def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
 
 
 def run_centralized(config: dict[str, Any]) -> dict[str, float]:
+    """Run centralized training over all client datasets.
+
+    Example:
+        ``run_centralized(config)`` returns test metrics such as MSE and MAE.
+    """
+
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
     tracker = Tracker(config)
@@ -106,6 +120,13 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
 
 
 def run_federated(config: dict[str, Any]) -> dict[str, Any]:
+    """Run single-process federated training.
+
+    Example:
+        Set ``federated.algorithm=fedavg`` for standard dense FedAvg, or
+        ``compressed_fedavg`` for sparse uploads.
+    """
+
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
     tracker = Tracker(config)

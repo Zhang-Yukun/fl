@@ -10,6 +10,12 @@ from federated_ts.config import load_config
 
 
 def main() -> None:
+    """Parse command-line arguments and launch the requested training mode.
+
+    Example:
+        ``python -m scripts.train --config configs/test.yaml``.
+    """
+
     parser = argparse.ArgumentParser(description="Federated rare-earth price forecasting")
     parser.add_argument("--config", default="configs/default.yaml", help="Path to YAML config")
     parser.add_argument("--mode", choices=["federated", "centralized"], default=None)

@@ -35,3 +35,13 @@ python -m scripts.client --client-id Nd2O3 --config configs/default.yaml
 python -m scripts.client --client-id CeO2 --config configs/default.yaml
 python -m scripts.client --client-id La2O3 --config configs/default.yaml
 ```
+
+## Experiment Artifacts
+
+Experiment parameters are saved as `config.yaml` by default. To save multiple
+parameter formats, set `artifacts.config_formats`, for example:
+
+```yaml
+artifacts:
+  config_formats: [yaml, json, toml]
+```

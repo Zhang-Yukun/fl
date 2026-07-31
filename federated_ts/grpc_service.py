@@ -21,10 +21,14 @@ except Exception:  # pragma: no cover
 
 
 def _dumps(value: Any) -> bytes:
+    """Serialize an RPC payload with pickle."""
+
     return pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def _loads(value: bytes) -> Any:
+    """Deserialize an RPC payload created by ``_dumps``."""
+
     return pickle.loads(value)
 
 
@@ -32,6 +36,8 @@ class FederatedRpcServer:
     """Minimal gRPC server exposing ``GetGlobal`` and ``SubmitUpdate``."""
 
     def __init__(self, address: str, get_global: Callable[[], Any], submit_update: Callable[[Any], Any]):
+        """Create a generic gRPC server around coordinator callbacks."""
+
         if grpc is None:
             raise RuntimeError("grpcio is not installed")
         self.address = address
@@ -53,14 +59,20 @@ class FederatedRpcServer:
         self.server.add_generic_rpc_handlers((grpc.method_handlers_generic_handler("FederatedService", handlers),))
 
     def start(self) -> None:
+        """Start listening for federated RPC requests."""
+
         self.server.add_insecure_port(self.address)
         self.server.start()
         logger.info("gRPC server listening on {}", self.address)
 
     def wait(self) -> None:
+        """Block until the gRPC server terminates."""
+
         self.server.wait_for_termination()
 
     def stop(self, grace: int = 0) -> None:
+        """Stop the gRPC server after the optional grace period."""
+
         self.server.stop(grace)
 
 
@@ -68,6 +80,8 @@ class FederatedRpcClient:
     """Client helper for the generic gRPC service."""
 
     def __init__(self, address: str):
+        """Create RPC stubs for a federated server address."""
+
         if grpc is None:
             raise RuntimeError("grpcio is not installed")
         self.channel = grpc.insecure_channel(address)
@@ -75,8 +89,12 @@ class FederatedRpcClient:
         self.submit_update_rpc = self.channel.unary_unary("/FederatedService/SubmitUpdate")
 
     def get_global(self) -> Any:
+        """Fetch the current global model payload from the server."""
+
         return _loads(self.get_global_rpc(b""))
 
     def submit_update(self, update: Any) -> Any:
+        """Submit one client update payload to the server."""
+
         return _loads(self.submit_update_rpc(_dumps(update)))
 

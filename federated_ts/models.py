@@ -11,6 +11,12 @@ from torch import nn
 
 @dataclass
 class ModelSpec:
+    """Registry item pairing a model name with a builder.
+
+    Example:
+        ``ModelSpec("mlp", lambda cfg: ForecastMLP(4, 2, 1))``.
+    """
+
     name: str
     builder: Callable[[dict[str, Any]], nn.Module]
 
@@ -19,6 +25,8 @@ class ForecastMLP(nn.Module):
     """A compact baseline forecaster mapping ``[batch, seq_len, channels]`` to future values."""
 
     def __init__(self, seq_len: int, pred_len: int, channels: int, hidden_size: int = 64, dropout: float = 0.1):
+        """Create the MLP baseline with fixed input/output window sizes."""
+
         super().__init__()
         self.seq_len = seq_len
         self.pred_len = pred_len
@@ -32,6 +40,8 @@ class ForecastMLP(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Predict future windows from input windows."""
+
         return self.net(x).reshape(x.shape[0], self.pred_len, self.channels)
 
 
@@ -39,6 +49,8 @@ class LSTMForecaster(nn.Module):
     """LSTM forecaster with an autoregressive-size projection head."""
 
     def __init__(self, seq_len: int, pred_len: int, channels: int, hidden_size: int = 64, num_layers: int = 1):
+        """Create the LSTM forecaster with a projection head."""
+
         super().__init__()
         self.pred_len = pred_len
         self.channels = channels
@@ -46,6 +58,8 @@ class LSTMForecaster(nn.Module):
         self.head = nn.Linear(hidden_size, pred_len * channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Predict future windows using the final LSTM hidden state."""
+
         _, (hidden, _) = self.lstm(x)
         return self.head(hidden[-1]).reshape(x.shape[0], self.pred_len, self.channels)
 
