@@ -34,3 +34,15 @@ Run a short smoke test with overrides:
 ```bash
 conda run -n torch_env python -m scripts.train --config configs/rawdata2_soteriafl.yaml --override federated.rounds=2 --override attack.frequency_rounds=1 --override attack.steps=1
 ```
+
+## FedLab-Style Top-k Compression
+
+FedLab is the Zenglin Xu related framework reference used here for communication-efficient FL structure. Its compression extension point includes Top-k communication compression. The local `sparse_fedavg` / `compressed_fedavg` path implements the same core Top-k selection idea for model updates: each client sends the largest-magnitude `topk_fraction` coordinates plus their indices, and the server reconstructs sparse updates before FedAvg-weighted aggregation.
+
+Run the rawdata2 full PatchTST Top-k experiment from `src`:
+
+```bash
+conda run -n torch_env python -m scripts.train --config configs/rawdata2_fedlab_topk.yaml
+```
+
+The default attack configuration now evaluates DLG and iDLG every federated round with 300 optimization steps on `cuda:0`.
