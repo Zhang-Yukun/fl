@@ -16,7 +16,7 @@ def _check_python_tree(root: Path):
 
 
 def test_public_api_has_docstrings():
-    src_dir = Path(__file__).parents[1]
+    src_dir = Path(__file__).parents[2]
     missing = _check_python_tree(src_dir / "federated_ts")
     missing.extend(f"scripts/{item}" for item in _check_python_tree(src_dir / "scripts"))
     assert not missing

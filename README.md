@@ -49,3 +49,14 @@ parameter formats, set `artifacts.config_formats`, for example:
 artifacts:
   config_formats: [yaml, json, toml]
 ```
+
+## Test Layout
+
+Tests mirror the package structure so each functional area has a matching test
+folder:
+
+- `tests/utils/` for config, artifacts, metrics, and serialization.
+- `tests/datasets/` for rare-earth data loading and window datasets.
+- `tests/modeling/` for forecasting model construction.
+- `tests/federated/` for FedAvg and compressed FedAvg behavior.
+- `tests/docs/` for docstring coverage checks.

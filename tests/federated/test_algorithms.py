@@ -6,7 +6,7 @@ from federated_ts.utils.config import load_config
 
 
 def test_one_round_federated_run(tmp_path):
-    config = load_config(Path(__file__).parents[1] / "configs" / "test.yaml")
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml")
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
     assert result["rounds"] == 1
@@ -22,7 +22,7 @@ def test_one_round_federated_run(tmp_path):
 
 
 def test_standard_fedavg_uses_dense_uploads(tmp_path):
-    config = load_config(Path(__file__).parents[1] / "configs" / "test.yaml", ["federated.algorithm=fedavg"])
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["federated.algorithm=fedavg"])
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
     assert result["last_upload_compression_ratio"] == 1.0
@@ -33,7 +33,7 @@ def test_standard_fedavg_uses_dense_uploads(tmp_path):
 
 def test_config_artifact_formats_are_configurable(tmp_path):
     config = load_config(
-        Path(__file__).parents[1] / "configs" / "test.yaml",
+        Path(__file__).parents[2] / "configs" / "test.yaml",
         ["artifacts.config_formats=[yaml,json,toml]"],
     )
     config["experiment"]["output_dir"] = str(tmp_path)
