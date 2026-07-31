@@ -47,8 +47,8 @@ Output directory: `outputs/rawdata2_patchtst_fedavg/`
 The recorded 2026-07-31 FedAvg attack results above were produced with the earlier lightweight attack setting: `frequency_rounds=50`, `steps=5`, `model_mode=train`, and CPU execution. That setup was only a smoke-level attack sanity check. The current experiment configs have been strengthened for compression/privacy exploration:
 
 - `runtime.device: cuda:0`
-- FedAvg attack frequency: every 10 rounds
-- SoteriaFL attack frequency: every 5 rounds
+- FedAvg attack frequency: every 1 round
+- SoteriaFL attack frequency: every 1 round
 - DLG/iDLG optimization steps: 300
 - Attack model mode: `eval`, to avoid dropout randomness during reconstruction evaluation
 - Attack seed: 2026
@@ -86,3 +86,60 @@ Output directory: `outputs/rawdata2_soteriafl_smoke/`
 - Test MAPE: 17.12576001882553
 
 Detailed metrics, logs, configs, attacks, and model files remain in the output directories above. Those directories are intentionally git-ignored to avoid committing large generated artifacts.
+
+
+## Every-Round Attack Compression Runs
+
+Run date: 2026-07-31
+
+These runs use full PatchTST on `cuda:0`, evaluate DLG and iDLG every federated round, and use `attack.steps=300`. They are short 5-round probes intended to measure compression/attack behavior before launching long runs.
+
+### FedLab-Style Top-k Sparse FedAvg
+
+Command:
+
+```bash
+conda run -n torch_env python -m scripts.train --config configs/rawdata2_fedlab_topk.yaml --override experiment.output_dir=outputs/rawdata2_fedlab_topk_attack5 --override federated.rounds=5 --override training.patience=5
+```
+
+Output directory: `outputs/rawdata2_fedlab_topk_attack5/`
+
+- Algorithm: `sparse_fedavg` with Top-k update upload
+- Top-k fraction: 0.05
+- Rounds completed: 5
+- Runtime: 111.3734 seconds
+- Upload compression ratio: 6.666676236899415
+- Total communication ratio: 1.7391308629399944
+- Attack evaluations: 10
+- DLG/iDLG attack success rate at `1e-4`: 0.0
+- Average finite reconstruction MSE: 1.1044986069202423
+- Minimum finite reconstruction MSE: 0.4481804370880127
+- Test MSE: 0.002961103105917573
+- Test MAE: 0.022901087999343872
+- Test MAPE: 2.718646638095379
+
+### SoteriaFL-Style Random-k Local-DP Probe
+
+Command:
+
+```bash
+conda run -n torch_env python -m scripts.train --config configs/rawdata2_soteriafl.yaml --override experiment.output_dir=outputs/rawdata2_soteriafl_attack5 --override federated.rounds=5 --override training.patience=5
+```
+
+Output directory: `outputs/rawdata2_soteriafl_attack5/`
+
+- Algorithm: `soteriafl` with clipped/noisy update and unbiased random-k upload
+- Top-k/random-k fraction: 0.05
+- Noise multiplier: 0.05
+- Rounds completed: 5
+- Runtime: 110.3381 seconds
+- Upload compression ratio: 6.666676236899415
+- Total communication ratio: 1.7391308629399944
+- Attack evaluations: 10
+- DLG/iDLG attack success rate at `1e-4`: 0.0
+- Finite attack MSE count: 4 / 10
+- Average finite reconstruction MSE: 1.0701223462820053
+- Minimum finite reconstruction MSE: 0.5142163038253784
+- Test metrics: NaN
+
+The SoteriaFL-style random-k local-DP probe is currently numerically unstable for full PatchTST with `topk_fraction=0.05` and `noise_multiplier=0.05`; validation metrics became NaN from round 2 onward. This should be treated as a negative/stability result for the current hyperparameters, not as a privacy success.
