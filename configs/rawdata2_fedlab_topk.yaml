@@ -7,7 +7,7 @@ experiment:
 
 federated:
   algorithm: sparse_fedavg
-  rounds: 30
+  rounds: 500
   local_epochs: 1
   topk_fraction: 0.05
 
