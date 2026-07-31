@@ -70,6 +70,20 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     raise ValueError(f"Unknown federated algorithm: {algorithm}")
 
 
+def _should_run_attack(config: dict[str, Any], round_index: int, max_rounds: int) -> bool:
+    """Return whether attack evaluation should run on this round.
+
+    Example:
+        ``frequency_rounds=50`` runs at rounds 0, 50, 100, and the final round.
+    """
+
+    attack_cfg = config.get("attack", {})
+    if not attack_cfg.get("enabled", True):
+        return False
+    frequency = int(attack_cfg.get("frequency_rounds", 1))
+    return round_index == 0 or round_index == max_rounds - 1 or (frequency > 0 and round_index % frequency == 0)
+
+
 def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
     """Flatten one round record into wandb-friendly scalar keys."""
 
@@ -215,9 +229,13 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             elapsed_time_seconds=time.perf_counter() - start_time,
         )
         tracker.log(_wandb_round_payload(record), step=round_index)
-        if config.get("attack", {}).get("enabled", True):
+        if _should_run_attack(config, round_index, max_rounds):
+            attack_cfg = config.get("attack", {})
             attack_start = time.perf_counter()
-            grads, real_x, real_y = clients[0].gradient_sample(server.global_state)
+            grads, real_x, real_y = clients[0].gradient_sample(
+                server.global_state,
+                max_samples=int(attack_cfg.get("max_samples", 1)),
+            )
             round_attacks = [
                 dlg_attack(config, server.global_state, grads, real_x, real_y, device),
                 idlg_attack(config, server.global_state, grads, real_x, real_y, device),
@@ -241,6 +259,12 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     server.save(output_dir, config)
     tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
     tracker.finish()
+    attack_records = [
+        {"name": result.name, "reconstruction_mse": result.reconstruction_mse, "success": result.success}
+        for result in attack_results
+    ]
+    with (output_dir / "attack_results.json").open("w", encoding="utf-8") as handle:
+        json.dump(attack_records, handle, ensure_ascii=False, indent=2)
     summary = {
         "test": test_metrics,
         "rounds": len(server.history),
@@ -249,6 +273,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         "last_total_communication_ratio": server.history[-1].total_communication_ratio if server.history else 0.0,
         "last_communication_ratio": server.history[-1].communication_ratio if server.history else 0.0,
         "attack_success_rate": attack_success_rate(attack_results),
+        "attack_evaluations": len(attack_records),
     }
     with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)

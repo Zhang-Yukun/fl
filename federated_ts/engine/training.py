@@ -52,12 +52,25 @@ def evaluate(model: nn.Module, loader: Iterable, device: torch.device) -> dict[s
     return {"mse": mse(pred, target), "mae": mae(pred, target), "mape": mape(pred, target)}
 
 
-def first_batch_gradient(model: nn.Module, loader: Iterable, device: torch.device) -> tuple[list[torch.Tensor], torch.Tensor, torch.Tensor]:
-    """Return gradients for the first batch, useful for reconstruction attacks."""
+def first_batch_gradient(
+    model: nn.Module,
+    loader: Iterable,
+    device: torch.device,
+    max_samples: int | None = None,
+) -> tuple[list[torch.Tensor], torch.Tensor, torch.Tensor]:
+    """Return gradients for the first batch, useful for reconstruction attacks.
+
+    Example:
+        ``first_batch_gradient(model, loader, device, max_samples=1)`` limits
+        DLG/iDLG reconstruction cost to one sample.
+    """
 
     model.train()
     criterion = nn.MSELoss()
     x, y = next(iter(loader))
+    if max_samples is not None:
+        x = x[:max_samples]
+        y = y[:max_samples]
     x = x.to(device)
     y = y.to(device)
     model.zero_grad(set_to_none=True)

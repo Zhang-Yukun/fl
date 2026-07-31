@@ -41,3 +41,21 @@ def test_config_artifact_formats_are_configurable(tmp_path):
     assert (tmp_path / "config.yaml").exists()
     assert (tmp_path / "config.json").exists()
     assert (tmp_path / "config.toml").exists()
+
+
+def test_federated_run_saves_attack_results(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "attack.enabled=true",
+            "attack.frequency_rounds=1",
+            "attack.max_samples=1",
+            "attack.steps=1",
+            "federated.rounds=1",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
+    assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
+    assert result["attack_evaluations"] == 2

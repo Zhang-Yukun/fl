@@ -43,8 +43,10 @@ federated:
   topk_fraction: 0.05
 
 attack:
-  enabled: false
-  steps: 20
+  enabled: true
+  frequency_rounds: 50
+  max_samples: 1
+  steps: 5
   lr: 0.1
   success_mse_threshold: 0.0001
 
