@@ -12,8 +12,10 @@ from federated_ts.modeling.forecasting import build_model
 from federated_ts.utils.serialization import (
     SparseUpdate,
     StateDict,
+    compress_randomk,
     compress_topk,
     load_serialized,
+    privatize_state_update,
     serialize_model,
     state_num_bytes,
     state_num_parameters,
@@ -38,6 +40,9 @@ class ClientResult:
     upload_bytes: int = 0
     upload_parameters: int = 0
     payload_kind: str = "dense_state"
+    compressor: str = "none"
+    privacy_clip_norm: float = 0.0
+    privacy_noise_multiplier: float = 0.0
 
     @property
     def sent_bytes(self) -> int:
@@ -85,13 +90,30 @@ class FederatedClient:
         )
         if compressed:
             update = subtract_state(local_state, global_state)
-            sparse = compress_topk(update, float(self.config["federated"].get("topk_fraction", 0.05)))
+            fraction = float(self.config["federated"].get("topk_fraction", 0.05))
+            payload_kind = "sparse_update"
+            compressor = "topk"
+            privacy_clip_norm = 0.0
+            privacy_noise_multiplier = 0.0
+            if str(self.config["federated"].get("algorithm", "fedavg")).lower() == "soteriafl":
+                privacy_cfg = self.config.get("privacy", {})
+                privacy_clip_norm = float(privacy_cfg.get("clip_norm", 1.0))
+                privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.1))
+                update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
+                sparse = compress_randomk(update, fraction)
+                payload_kind = "soteriafl_randomk_dp_update"
+                compressor = "randomk_unbiased"
+            else:
+                sparse = compress_topk(update, fraction)
             return ClientResult(
                 **common,
                 sparse_update=sparse,
                 upload_bytes=sparse.nbytes,
                 upload_parameters=sparse.values.numel(),
-                payload_kind="sparse_update",
+                payload_kind=payload_kind,
+                compressor=compressor,
+                privacy_clip_norm=privacy_clip_norm,
+                privacy_noise_multiplier=privacy_noise_multiplier,
             )
         return ClientResult(
             **common,

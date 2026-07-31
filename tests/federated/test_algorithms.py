@@ -59,3 +59,23 @@ def test_federated_run_saves_attack_results(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert result["attack_evaluations"] == 2
+
+
+def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=soteriafl",
+            "federated.rounds=1",
+            "privacy.clip_norm=1.0",
+            "privacy.noise_multiplier=0.0",
+            "attack.enabled=false",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    assert result["last_upload_compression_ratio"] >= 6.0
+    assert all(client["payload_kind"] == "soteriafl_randomk_dp_update" for client in metrics[0]["clients"])
+    assert all(client["compressor"] == "randomk_unbiased" for client in metrics[0]["clients"])
+    assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])

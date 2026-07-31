@@ -1,0 +1,22 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_soteriafl
+  mode: federated
+  output_dir: outputs/rawdata2_soteriafl
+
+federated:
+  algorithm: soteriafl
+  rounds: 30
+  local_epochs: 1
+  topk_fraction: 0.05
+
+privacy:
+  clip_norm: 1.0
+  noise_multiplier: 0.05
+
+attack:
+  enabled: true
+  frequency_rounds: 10
+  max_samples: 1
+  steps: 3

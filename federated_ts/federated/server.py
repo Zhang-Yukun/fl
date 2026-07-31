@@ -38,6 +38,9 @@ class ClientCommunicationRecord:
     upload_parameters: int
     dense_upload_reference_bytes: int
     dense_upload_reference_parameters: int
+    compressor: str
+    privacy_clip_norm: float
+    privacy_noise_multiplier: float
 
 
 @dataclass
@@ -185,6 +188,9 @@ class FederatedServer:
                 upload_parameters=result.upload_parameters,
                 dense_upload_reference_bytes=result.dense_bytes,
                 dense_upload_reference_parameters=result.dense_parameters,
+                compressor=result.compressor,
+                privacy_clip_norm=result.privacy_clip_norm,
+                privacy_noise_multiplier=result.privacy_noise_multiplier,
             )
             for result in results
         ]
@@ -225,11 +231,14 @@ class FederatedServer:
         )
         for client in client_records:
             logger.info(
-                "Round {} client={} samples={} payload={} loss={:.6f} upload={}B/{} params download={}B/{} params",
+                "Round {} client={} samples={} payload={} compressor={} clip_norm={} noise_multiplier={} loss={:.6f} upload={}B/{} params download={}B/{} params",
                 round_index,
                 client.client_id,
                 client.num_samples,
                 client.payload_kind,
+                client.compressor,
+                client.privacy_clip_norm,
+                client.privacy_noise_multiplier,
                 client.loss,
                 client.upload_bytes,
                 client.upload_parameters,

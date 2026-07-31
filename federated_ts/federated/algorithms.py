@@ -65,7 +65,7 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
     if algorithm == "fedavg":
         return False
-    if algorithm in {"compressed_fedavg", "sparse_fedavg"}:
+    if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl"}:
         return True
     raise ValueError(f"Unknown federated algorithm: {algorithm}")
 
