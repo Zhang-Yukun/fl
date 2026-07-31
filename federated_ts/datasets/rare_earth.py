@@ -128,10 +128,86 @@ def make_loaders(
     )
 
 
+def read_value_frame(csv_path: str | Path) -> pd.DataFrame:
+    """Read a single-client CSV with ``date`` and ``value`` columns.
+
+    Example:
+        ``frame = read_value_frame("clients/Nd2O3/train.csv")``.
+    """
+
+    frame = pd.read_csv(csv_path)
+    if not {"date", "value"}.issubset(frame.columns):
+        raise ValueError("CSV must contain 'date' and 'value' columns")
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
+    return frame.sort_values("date").ffill().bfill().dropna(subset=["value"]).reset_index(drop=True)
+
+
+def make_loaders_from_splits(
+    train_values: np.ndarray,
+    val_values: np.ndarray,
+    test_values: np.ndarray,
+    seq_len: int,
+    pred_len: int,
+    batch_size: int,
+    num_workers: int = 0,
+) -> tuple[DataLoader, DataLoader, DataLoader, Standardizer]:
+    """Build DataLoaders from pre-split train/validation/test arrays.
+
+    Example:
+        ``make_loaders_from_splits(train, val, test, 21, 7, 64)`` uses only
+        ``train`` to fit scaling statistics.
+    """
+
+    scaler = Standardizer.fit(train_values)
+    train = scaler.transform(train_values)
+    val = scaler.transform(val_values)
+    test = scaler.transform(test_values)
+    return (
+        DataLoader(WindowDataset(train, seq_len, pred_len), batch_size=batch_size, shuffle=True, num_workers=num_workers),
+        DataLoader(WindowDataset(val, seq_len, pred_len), batch_size=batch_size, shuffle=False, num_workers=num_workers),
+        DataLoader(WindowDataset(test, seq_len, pred_len), batch_size=batch_size, shuffle=False, num_workers=num_workers),
+        scaler,
+    )
+
+
+def build_federated_loaders_from_split_dir(data_cfg: dict[str, Any]) -> tuple[dict[str, DataLoader], DataLoader, DataLoader]:
+    """Build loaders from ``split_dir/clients/<client>/{train,val,test}.csv``.
+
+    Example:
+        Configure ``data.split_dir: ../data/rare_earth_rawdata2`` to use
+        preprocessed chronological 8:1:1 splits.
+    """
+
+    split_dir = Path(data_cfg["split_dir"])
+    clients = data_cfg.get("clients", list(OXIDE_COLUMNS.keys()))
+    seq_len = int(data_cfg.get("seq_len", 21))
+    pred_len = int(data_cfg.get("pred_len", 7))
+    batch_size = int(data_cfg.get("batch_size", 32))
+    num_workers = int(data_cfg.get("num_workers", 0))
+    train_loaders: dict[str, DataLoader] = {}
+    val_loaders = []
+    test_loaders = []
+    for client in clients:
+        client_dir = split_dir / "clients" / client
+        train = read_value_frame(client_dir / "train.csv")[["value"]].to_numpy(dtype="float32")
+        val = read_value_frame(client_dir / "val.csv")[["value"]].to_numpy(dtype="float32")
+        test = read_value_frame(client_dir / "test.csv")[["value"]].to_numpy(dtype="float32")
+        train_loader, val_loader, test_loader, _ = make_loaders_from_splits(
+            train, val, test, seq_len, pred_len, batch_size, num_workers
+        )
+        train_loaders[client] = train_loader
+        val_loaders.append(val_loader)
+        test_loaders.append(test_loader)
+    return train_loaders, _ConcatLoader(val_loaders), _ConcatLoader(test_loaders)
+
+
 def build_federated_loaders(config: dict[str, Any]) -> tuple[dict[str, DataLoader], DataLoader, DataLoader]:
-    """Build one train loader per oxide client and shared server validation/test loaders."""
+    """Build one train loader per client and shared server validation/test loaders."""
 
     data_cfg = config["data"]
+    if "split_dir" in data_cfg:
+        return build_federated_loaders_from_split_dir(data_cfg)
     frame = read_price_frame(data_cfg["csv_path"])
     clients = data_cfg.get("clients", list(OXIDE_COLUMNS.keys()))
     seq_len = int(data_cfg.get("seq_len", 21))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 import torch
 from loguru import logger
 
+from federated_ts.utils.artifacts import save_experiment_config
 from federated_ts.security.attacks import attack_success_rate, dlg_attack, idlg_attack
 from federated_ts.federated.client import FederatedClient
 from federated_ts.datasets.rare_earth import build_federated_loaders
@@ -87,17 +89,29 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     })
     optimizer = torch.optim.Adam(model.parameters(), lr=float(config["training"].get("lr", 1e-3)))
     stopper = EarlyStopper(int(config["training"].get("patience", 5)))
+    history = []
     for epoch in range(int(config["training"].get("epochs", 10))):
         epoch_start = time.perf_counter()
         loss = sum(train_one_epoch(model, loader, optimizer, device) for loader in train_loaders.values()) / len(train_loaders)
         metrics = evaluate(model, val_loader, device)
+        epoch_time = time.perf_counter() - epoch_start
         elapsed = time.perf_counter() - start_time
+        epoch_record = {
+            "epoch": epoch,
+            "train_loss": loss,
+            "val_mse": metrics["mse"],
+            "val_mae": metrics["mae"],
+            "val_mape": metrics["mape"],
+            "epoch_time_seconds": epoch_time,
+            "elapsed_time_seconds": elapsed,
+        }
+        history.append(epoch_record)
         logger.info(
             "Centralized epoch {} loss={:.6f} val_mse={:.6f} time={:.2f}s elapsed={:.2f}s",
             epoch,
             loss,
             metrics["mse"],
-            time.perf_counter() - epoch_start,
+            epoch_time,
             elapsed,
         )
         tracker.log({
@@ -105,16 +119,24 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
             "epoch/val_mse": metrics["mse"],
             "epoch/val_mae": metrics["mae"],
             "epoch/val_mape": metrics["mape"],
-            "epoch/time_seconds": time.perf_counter() - epoch_start,
+            "epoch/time_seconds": epoch_time,
             "run/elapsed_time_seconds": elapsed,
         }, step=epoch)
         if stopper.update(metrics["mse"]):
+            logger.info("Centralized early stopping at epoch {}", epoch)
             break
     torch.save(model.state_dict(), output_dir / "centralized_model.pt")
     test_metrics = evaluate(model, test_loader, device)
     total_elapsed = time.perf_counter() - start_time
+    config_formats = config.get("artifacts", {}).get("config_formats")
+    saved_configs = save_experiment_config(config, output_dir, config_formats)
+    logger.info("Saved centralized config artifacts: {}", [str(path) for path in saved_configs])
+    with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
+        json.dump({"history": history, "test": test_metrics, "epochs": len(history), "total_time_seconds": total_elapsed}, handle, ensure_ascii=False, indent=2)
     tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
     tracker.finish()
+    with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
+        json.dump({"test": test_metrics, "epochs": len(history), "total_time_seconds": total_elapsed}, handle, ensure_ascii=False, indent=2)
     logger.info("Centralized training finished in {:.2f}s with test metrics {}", total_elapsed, test_metrics)
     return test_metrics
 
@@ -204,5 +226,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         "last_communication_ratio": server.history[-1].communication_ratio if server.history else 0.0,
         "attack_success_rate": attack_success_rate(attack_results),
     }
+    with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
+        json.dump(summary, handle, ensure_ascii=False, indent=2)
     logger.info("Finished experiment: {}", summary)
     return summary

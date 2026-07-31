@@ -60,3 +60,24 @@ folder:
 - `tests/modeling/` for forecasting model construction.
 - `tests/federated/` for FedAvg and compressed FedAvg behavior.
 - `tests/docs/` for docstring coverage checks.
+
+## Rawdata2 PatchTST Experiment
+
+Prepare the latest CBC rawdata2 Excel files into chronological 8:1:1 splits:
+
+```bash
+python -m scripts.prepare_rawdata2 \
+  --raw-dir ../Time-Series-Prediction/dataset/data_preprocess/rawdata2 \
+  --output-dir ../data/rare_earth_rawdata2
+```
+
+Run PatchTST centralized training and standard dense FedAvg with 500 maximum
+epochs/rounds and early stopping patience 50:
+
+```bash
+python -m scripts.run_rawdata2_patchtst --config configs/rawdata2_patchtst.yaml
+```
+
+Generated data is stored under `../data/rare_earth_rawdata2`; experiment
+artifacts are stored under `outputs/rawdata2_patchtst_centralized`,
+`outputs/rawdata2_patchtst_fedavg`, and `outputs/rawdata2_patchtst_summary.json`.

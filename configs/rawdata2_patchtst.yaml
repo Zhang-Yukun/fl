@@ -1,0 +1,58 @@
+experiment:
+  name: rawdata2_patchtst
+  mode: federated
+  output_dir: outputs/rawdata2_patchtst_fedavg
+
+runtime:
+  device: cpu
+  log_level: INFO
+
+data:
+  split_dir: ../data/rare_earth_rawdata2
+  clients: [Nd2O3, CeO2, La2O3]
+  seq_len: 21
+  pred_len: 7
+  batch_size: 1024
+  num_workers: 0
+
+model:
+  name: patchtst
+  channels: 1
+  patch_len: 7
+  stride: 4
+  d_model: 32
+  n_heads: 4
+  e_layers: 1
+  d_ff: 64
+  dropout: 0.1
+
+training:
+  lr: 0.001
+  epochs: 500
+  patience: 50
+  min_delta: 0.0
+
+federated:
+  algorithm: fedavg
+  rounds: 500
+  local_epochs: 1
+  topk_fraction: 0.05
+
+attack:
+  enabled: false
+  steps: 20
+  lr: 0.1
+  success_mse_threshold: 0.0001
+
+tracking:
+  enabled: false
+  offline: true
+  project: federated-rare-earth
+
+artifacts:
+  config_formats: [yaml, json]
+
+grpc:
+  address: 0.0.0.0:50051
+  server_address: 127.0.0.1:50051
+  poll_seconds: 1.0
