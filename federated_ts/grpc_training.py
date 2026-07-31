@@ -32,6 +32,8 @@ class GrpcFederatedCoordinator:
         self.max_rounds = int(config["federated"].get("rounds", 20))
         self.stopper = EarlyStopper(int(config["training"].get("patience", 5)), float(config["training"].get("min_delta", 0.0)))
         self.round_index = 0
+        self.start_time = time.perf_counter()
+        self.round_start_time = time.perf_counter()
         self.pending = {}
         self.stopped = False
         self.lock = threading.Lock()
@@ -61,9 +63,16 @@ class GrpcFederatedCoordinator:
                 else:
                     self.server.aggregate_dense(results)
                 metrics = self.server.evaluate_global()
-                self.server.record_round(self.round_index, results, metrics)
+                self.server.record_round(
+                    self.round_index,
+                    results,
+                    metrics,
+                    round_time_seconds=time.perf_counter() - self.round_start_time,
+                    elapsed_time_seconds=time.perf_counter() - self.start_time,
+                )
                 self.pending = {}
                 self.round_index += 1
+                self.round_start_time = time.perf_counter()
                 self.stopped = self.round_index >= self.max_rounds or self.stopper.update(metrics["mse"])
                 if self.stopped:
                     self.server.save(self.output_dir, self.config)

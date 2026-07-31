@@ -9,19 +9,41 @@ from typing import Any
 import torch
 
 from federated_ts.models import build_model
-from federated_ts.serialization import SparseUpdate, StateDict, compress_topk, load_serialized, serialize_model, subtract_state
+from federated_ts.serialization import (
+    SparseUpdate,
+    StateDict,
+    compress_topk,
+    load_serialized,
+    serialize_model,
+    state_num_bytes,
+    state_num_parameters,
+    subtract_state,
+)
 from federated_ts.training import first_batch_gradient, train_one_epoch
 
 
 @dataclass
 class ClientResult:
+    """Payload and communication metadata returned by one client update."""
+
     client_id: str
     num_samples: int
     loss: float
     state: StateDict | None = None
     sparse_update: SparseUpdate | None = None
     dense_bytes: int = 0
-    sent_bytes: int = 0
+    dense_parameters: int = 0
+    download_bytes: int = 0
+    download_parameters: int = 0
+    upload_bytes: int = 0
+    upload_parameters: int = 0
+    payload_kind: str = "dense_state"
+
+    @property
+    def sent_bytes(self) -> int:
+        """Backward-compatible alias for upload bytes."""
+
+        return self.upload_bytes
 
 
 class FederatedClient:
@@ -41,15 +63,36 @@ class FederatedClient:
         for _ in range(int(self.config["federated"].get("local_epochs", 1))):
             losses.append(train_one_epoch(model, self.train_loader, optimizer, self.device))
         local_state = serialize_model(model)
-        dense_bytes = sum(t.numel() * t.element_size() for t in local_state.values())
+        dense_bytes = state_num_bytes(local_state)
+        dense_parameters = state_num_parameters(local_state)
+        common = dict(
+            client_id=self.client_id,
+            num_samples=len(self.train_loader.dataset),
+            loss=float(sum(losses) / len(losses)),
+            dense_bytes=dense_bytes,
+            dense_parameters=dense_parameters,
+            download_bytes=state_num_bytes(global_state),
+            download_parameters=state_num_parameters(global_state),
+        )
         if compressed:
             update = subtract_state(local_state, global_state)
             sparse = compress_topk(update, float(self.config["federated"].get("topk_fraction", 0.05)))
-            return ClientResult(self.client_id, len(self.train_loader.dataset), float(sum(losses) / len(losses)), sparse_update=sparse, dense_bytes=dense_bytes, sent_bytes=sparse.nbytes)
-        return ClientResult(self.client_id, len(self.train_loader.dataset), float(sum(losses) / len(losses)), state=local_state, dense_bytes=dense_bytes, sent_bytes=dense_bytes)
+            return ClientResult(
+                **common,
+                sparse_update=sparse,
+                upload_bytes=sparse.nbytes,
+                upload_parameters=sparse.values.numel(),
+                payload_kind="sparse_update",
+            )
+        return ClientResult(
+            **common,
+            state=local_state,
+            upload_bytes=dense_bytes,
+            upload_parameters=dense_parameters,
+            payload_kind="dense_state",
+        )
 
     def gradient_sample(self, global_state: StateDict):
         model = build_model(self.config).to(self.device)
         load_serialized(model, copy.deepcopy(global_state), self.device)
         return first_batch_gradient(model, self.train_loader, self.device)
-

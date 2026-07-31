@@ -66,6 +66,12 @@ def state_num_bytes(state: StateDict) -> int:
     return sum(tensor.numel() * tensor.element_size() for tensor in state.values())
 
 
+def state_num_parameters(state: StateDict) -> int:
+    """Return the number of scalar values carried by a serialized state."""
+
+    return sum(tensor.numel() for tensor in state.values())
+
+
 def compress_topk(update: StateDict, fraction: float) -> SparseUpdate:
     """Compress an update with global top-k magnitude sparsification."""
 
