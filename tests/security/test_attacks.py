@@ -1,6 +1,7 @@
 import torch
 
 from federated_ts.modeling.forecasting import build_model
+from federated_ts.engine.training import first_batch_gradient
 from federated_ts.security.attacks import dlg_attack, idlg_attack
 from federated_ts.utils.serialization import serialize_model
 
@@ -22,7 +23,7 @@ def _tiny_patchtst_config():
             "activation": "gelu",
             "dropout": 0.0,
         },
-        "attack": {"steps": 1, "lr": 0.01, "success_mse_threshold": 1e-4},
+        "attack": {"steps": 1, "lr": 0.01, "success_mse_threshold": 1e-4, "model_mode": "eval", "seed": 7},
     }
 
 
@@ -41,3 +42,22 @@ def test_gradient_attacks_run_on_vendored_patchtst():
 
     assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
     assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
+
+
+def test_attack_gradient_sampling_supports_eval_mode():
+    config = _tiny_patchtst_config()
+    config["model"]["dropout"] = 0.5
+    device = torch.device("cpu")
+    x = torch.randn(2, 8, 1)
+    y = torch.randn(2, 2, 1)
+    loader = [(x, y)]
+
+    torch.manual_seed(11)
+    model_a = build_model(config).to(device)
+    grads_a, sample_x_a, _ = first_batch_gradient(model_a, loader, device, max_samples=1, model_mode="eval")
+    torch.manual_seed(11)
+    model_b = build_model(config).to(device)
+    grads_b, sample_x_b, _ = first_batch_gradient(model_b, loader, device, max_samples=1, model_mode="eval")
+
+    assert torch.allclose(sample_x_a, sample_x_b)
+    assert all(torch.allclose(left, right) for left, right in zip(grads_a, grads_b))

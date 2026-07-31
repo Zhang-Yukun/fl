@@ -42,6 +42,34 @@ Output directory: `outputs/rawdata2_patchtst_fedavg/`
 - Test MAE: 0.019473237916827202
 - Test MAPE: 2.327566035091877
 
+## Attack Configuration Note
+
+The recorded 2026-07-31 FedAvg attack results above were produced with the earlier lightweight attack setting: `frequency_rounds=50`, `steps=5`, `model_mode=train`, and CPU execution. That setup was only a smoke-level attack sanity check. The current experiment configs have been strengthened for compression/privacy exploration:
+
+- `runtime.device: cuda:0`
+- FedAvg attack frequency: every 10 rounds
+- SoteriaFL attack frequency: every 5 rounds
+- DLG/iDLG optimization steps: 300
+- Attack model mode: `eval`, to avoid dropout randomness during reconstruction evaluation
+- Attack seed: 2026
+
+New full runs should be compared against this stronger attack setting, not against the old smoke setting.
+
+### GPU Strong-Attack Smoke
+
+A one-round FedAvg smoke run verified the strengthened attack path on `cuda:0` with full PatchTST and `attack.steps=300`:
+
+```bash
+conda run -n torch_env python -m scripts.train --config configs/rawdata2_patchtst.yaml --override experiment.output_dir=outputs/rawdata2_patchtst_gpu_attack_smoke --override experiment.mode=federated --override federated.rounds=1 --override training.patience=1 --override attack.frequency_rounds=1
+```
+
+- Attack runtime: 18.7609 seconds
+- DLG reconstruction MSE: 0.1506103128194809
+- iDLG reconstruction MSE: 0.22638416290283203
+- Attack success rate under `success_mse_threshold=1e-4`: 0.0
+
+This confirms the prior zero success rate was not caused by a broken attack pipeline; the earlier attack was too lightweight and used a very strict success threshold.
+
 ## SoteriaFL Smoke
 
 Output directory: `outputs/rawdata2_soteriafl_smoke/`

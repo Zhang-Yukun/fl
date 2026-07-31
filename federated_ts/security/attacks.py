@@ -35,6 +35,31 @@ def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, targe
     return sum(torch.mean((grad - target.to(grad.device)) ** 2) for grad, target in zip(grads, target_grads))
 
 
+def _prepare_attack_model(config: dict[str, Any], state: StateDict, device: torch.device) -> nn.Module:
+    """Build the attacked model with the configured deterministic mode.
+
+    Example:
+        ``model = _prepare_attack_model(config, state, device)`` loads global
+        weights and switches to eval mode when ``attack.model_mode=eval``.
+    """
+
+    attack_cfg = config.get("attack", {})
+    seed = attack_cfg.get("seed")
+    if seed is not None:
+        torch.manual_seed(int(seed))
+        if device.type == "cuda":
+            torch.cuda.manual_seed_all(int(seed))
+    model = build_model(config).to(device)
+    load_serialized(model, state, device)
+    if str(attack_cfg.get("model_mode", "train")) == "eval":
+        model.eval()
+    else:
+        model.train()
+    for param in model.parameters():
+        param.requires_grad_(True)
+    return model
+
+
 def dlg_attack(
     config: dict[str, Any],
     state: StateDict,
@@ -49,10 +74,7 @@ def dlg_attack(
     steps = int(attack_cfg.get("steps", 30))
     lr = float(attack_cfg.get("lr", 0.1))
     threshold = float(attack_cfg.get("success_mse_threshold", 1e-4))
-    model = build_model(config).to(device)
-    load_serialized(model, state, device)
-    for param in model.parameters():
-        param.requires_grad_(True)
+    model = _prepare_attack_model(config, state, device)
     dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
     dummy_y = torch.randn_like(real_y, device=device, requires_grad=True)
     optimizer = torch.optim.Adam([dummy_x, dummy_y], lr=lr)
@@ -85,8 +107,7 @@ def idlg_attack(
     steps = int(attack_cfg.get("steps", 30))
     lr = float(attack_cfg.get("lr", 0.1))
     threshold = float(attack_cfg.get("success_mse_threshold", 1e-4))
-    model = build_model(config).to(device)
-    load_serialized(model, state, device)
+    model = _prepare_attack_model(config, state, device)
     dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
     fixed_y = real_y.to(device)
     optimizer = torch.optim.Adam([dummy_x], lr=lr)

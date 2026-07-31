@@ -4,7 +4,7 @@ experiment:
   output_dir: outputs/rawdata2_patchtst_fedavg
 
 runtime:
-  device: cpu
+  device: cuda:0
   log_level: INFO
   num_threads: 4
   num_interop_threads: 1
@@ -44,11 +44,13 @@ federated:
 
 attack:
   enabled: true
-  frequency_rounds: 50
+  frequency_rounds: 10
   max_samples: 1
-  steps: 5
-  lr: 0.1
+  steps: 300
+  lr: 0.05
   success_mse_threshold: 0.0001
+  model_mode: eval
+  seed: 2026
 
 tracking:
   enabled: false

@@ -17,6 +17,9 @@ privacy:
 
 attack:
   enabled: true
-  frequency_rounds: 10
+  frequency_rounds: 5
   max_samples: 1
-  steps: 3
+  steps: 300
+  lr: 0.05
+  model_mode: eval
+  seed: 2026

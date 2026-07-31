@@ -132,4 +132,10 @@ class FederatedClient:
 
         model = build_model(self.config).to(self.device)
         load_serialized(model, copy.deepcopy(global_state), self.device)
-        return first_batch_gradient(model, self.train_loader, self.device, max_samples=max_samples)
+        return first_batch_gradient(
+            model,
+            self.train_loader,
+            self.device,
+            max_samples=max_samples,
+            model_mode=str(self.config.get("attack", {}).get("model_mode", "train")),
+        )
