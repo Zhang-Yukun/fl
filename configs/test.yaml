@@ -1,0 +1,20 @@
+includes: default.yaml
+
+experiment:
+  output_dir: outputs/test_run
+
+data:
+  batch_size: 16
+
+model:
+  hidden_size: 16
+
+federated:
+  rounds: 1
+  local_epochs: 1
+  topk_fraction: 0.05
+
+attack:
+  enabled: false
+  steps: 2
+

@@ -1,0 +1,53 @@
+experiment:
+  name: rare_earth_three_client
+  mode: federated
+  output_dir: outputs/rare_earth_three_client
+
+runtime:
+  device: cpu
+  log_level: INFO
+
+data:
+  csv_path: ../Time-Series-Prediction/dataset/XT_data/new_train.csv
+  clients: [Nd2O3, CeO2, La2O3]
+  seq_len: 21
+  pred_len: 7
+  batch_size: 32
+  train_ratio: 0.7
+  val_ratio: 0.15
+  num_workers: 0
+
+model:
+  name: mlp
+  channels: 1
+  hidden_size: 64
+  dropout: 0.1
+
+training:
+  lr: 0.001
+  epochs: 10
+  patience: 5
+  min_delta: 0.0
+
+federated:
+  algorithm: compressed_fedavg
+  rounds: 20
+  local_epochs: 1
+  topk_fraction: 0.05
+
+attack:
+  enabled: true
+  steps: 20
+  lr: 0.1
+  success_mse_threshold: 0.0001
+
+tracking:
+  enabled: false
+  offline: true
+  project: federated-rare-earth
+
+
+grpc:
+  address: 0.0.0.0:50051
+  server_address: 127.0.0.1:50051
+  poll_seconds: 1.0
