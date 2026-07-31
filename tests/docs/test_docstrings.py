@@ -5,6 +5,8 @@ from pathlib import Path
 def _check_python_tree(root: Path):
     missing = []
     for path in root.rglob("*.py"):
+        if "reference_patchtst" in path.parts:
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         if not ast.get_docstring(tree):
             missing.append(f"{path.relative_to(root)}:module")

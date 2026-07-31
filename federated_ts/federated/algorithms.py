@@ -23,6 +23,28 @@ from federated_ts.utils.tracking import Tracker
 from federated_ts.engine.training import evaluate, train_one_epoch
 
 
+def configure_torch_runtime(config: dict[str, Any]) -> None:
+    """Apply CPU thread limits from runtime config before training starts.
+
+    Example:
+        ``configure_torch_runtime({"runtime": {"num_threads": 4}})`` limits
+        PyTorch intra-op CPU work to four threads.
+    """
+
+    runtime_cfg = config.get("runtime", {})
+    num_threads = runtime_cfg.get("num_threads")
+    interop_threads = runtime_cfg.get("num_interop_threads")
+    if num_threads is not None:
+        torch.set_num_threads(int(num_threads))
+        logger.info("Set torch num_threads={}", int(num_threads))
+    if interop_threads is not None:
+        try:
+            torch.set_num_interop_threads(int(interop_threads))
+            logger.info("Set torch num_interop_threads={}", int(interop_threads))
+        except RuntimeError as exc:
+            logger.warning("Could not set torch interop threads after runtime start: {}", exc)
+
+
 def resolve_device(config: dict[str, Any]) -> torch.device:
     """Resolve the configured torch device with a CPU fallback.
 
@@ -71,6 +93,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
 
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
+    configure_torch_runtime(config)
     tracker = Tracker(config)
     start_time = time.perf_counter()
     device = resolve_device(config)
@@ -151,6 +174,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
 
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
+    configure_torch_runtime(config)
     tracker = Tracker(config)
     start_time = time.perf_counter()
     device = resolve_device(config)

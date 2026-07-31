@@ -6,24 +6,28 @@ experiment:
 runtime:
   device: cpu
   log_level: INFO
+  num_threads: 4
+  num_interop_threads: 1
 
 data:
   split_dir: ../data/rare_earth_rawdata2
   clients: [Nd2O3, CeO2, La2O3]
   seq_len: 21
   pred_len: 7
-  batch_size: 1024
+  batch_size: 128
   num_workers: 0
 
 model:
   name: patchtst
   channels: 1
-  patch_len: 7
-  stride: 4
-  d_model: 32
+  patch_len: 16
+  stride: 8
+  d_model: 384
   n_heads: 4
-  e_layers: 1
-  d_ff: 64
+  e_layers: 2
+  d_ff: 2048
+  factor: 3
+  activation: gelu
   dropout: 0.1
 
 training:
