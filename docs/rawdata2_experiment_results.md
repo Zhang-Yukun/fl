@@ -118,6 +118,33 @@ Output directory: `outputs/rawdata2_fedlab_topk_attack5/`
 - Test MAE: 0.022901087999343872
 - Test MAPE: 2.718646638095379
 
+### FedLab-Style Top-k Sparse FedAvg 30-Round Run
+
+Command:
+
+```bash
+conda run -n torch_env python -m scripts.train --config configs/rawdata2_fedlab_topk.yaml --override experiment.output_dir=outputs/rawdata2_fedlab_topk_attack30
+```
+
+Output directory: `outputs/rawdata2_fedlab_topk_attack30/`
+
+- Algorithm: `sparse_fedavg` with Top-k update upload
+- Top-k fraction: 0.05
+- Rounds completed: 30
+- Runtime: 632.1551 seconds
+- Upload compression ratio: 6.666676236899415
+- Total communication ratio: 1.7391308629399944
+- Attack evaluations: 60 (DLG 30 + iDLG 30, every round)
+- DLG attack success rate at `1e-4`: 0.0
+- DLG average reconstruction MSE: 1.1209555685520172
+- DLG minimum reconstruction MSE: 0.849487841129303
+- iDLG attack success rate at `1e-4`: 0.0
+- iDLG average reconstruction MSE: 1.4839166820049285
+- iDLG minimum reconstruction MSE: 0.9376352429389954
+- Test MSE: 0.003715549362823367
+- Test MAE: 0.02532796934247017
+- Test MAPE: 2.9567522928118706
+
 ### SoteriaFL-Style Random-k Local-DP Probe
 
 Command:
