@@ -71,13 +71,16 @@ python -m scripts.prepare_rawdata2 \
   --output-dir ../data/rare_earth_rawdata2
 ```
 
-Run PatchTST centralized training and standard dense FedAvg with 500 maximum
-epochs/rounds and early stopping patience 50:
+Run each rawdata2 experiment separately with 500 maximum epochs/rounds
+and early stopping patience 50:
 
 ```bash
-python -m scripts.run_rawdata2_patchtst --config configs/rawdata2_patchtst.yaml
+bash scripts/run_rawdata2_centralized.sh
+bash scripts/run_rawdata2_fedavg.sh
+bash scripts/run_rawdata2_fedlab_topk.sh
 ```
 
-Generated data is stored under `../data/rare_earth_rawdata2`; experiment
-artifacts are stored under `outputs/rawdata2_patchtst_centralized`,
-`outputs/rawdata2_patchtst_fedavg`, and `outputs/rawdata2_patchtst_summary.json`.
+Extra overrides can be appended to any script, for example
+`--override federated.rounds=30`. Generated data is stored under
+`../data/rare_earth_rawdata2`; experiment artifacts are stored under the
+corresponding `outputs/rawdata2_*` directory.

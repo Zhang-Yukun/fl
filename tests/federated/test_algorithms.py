@@ -58,7 +58,10 @@ def test_federated_run_saves_attack_results(tmp_path):
     result = run_federated(config)
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
+    assert {"mse", "reconstruction_mse", "psnr", "ssim", "iterations", "time_seconds"} <= set(attack_results[0])
     assert result["attack_evaluations"] == 2
+    assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
+    assert result["attack_summary"]["success_rate_threshold"] == 0.03
 
 
 def test_soteriafl_uses_sparse_dp_payloads(tmp_path):

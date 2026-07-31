@@ -2,7 +2,7 @@ import torch
 
 from federated_ts.modeling.forecasting import build_model
 from federated_ts.engine.training import first_batch_gradient
-from federated_ts.security.attacks import dlg_attack, idlg_attack
+from federated_ts.security.attacks import dlg_attack, idlg_attack, summarize_attack_results
 from federated_ts.utils.serialization import serialize_model
 
 
@@ -23,7 +23,15 @@ def _tiny_patchtst_config():
             "activation": "gelu",
             "dropout": 0.0,
         },
-        "attack": {"steps": 1, "lr": 0.01, "success_mse_threshold": 1e-4, "model_mode": "eval", "seed": 7},
+        "attack": {
+            "steps": 1,
+            "lr": 0.01,
+            "success_mse_threshold": 0.01,
+            "success_rate_threshold": 0.03,
+            "data_range": 1.0,
+            "model_mode": "eval",
+            "seed": 7,
+        },
     }
 
 
@@ -42,6 +50,20 @@ def test_gradient_attacks_run_on_vendored_patchtst():
 
     assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
     assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
+    for result in (dlg, idlg):
+        assert result.mse == result.reconstruction_mse
+        assert torch.isfinite(torch.tensor(result.psnr))
+        assert torch.isfinite(torch.tensor(result.ssim))
+        assert result.iterations == 1
+        assert result.time_seconds >= 0.0
+        assert result.success_threshold == 0.01
+        record = result.to_record()
+        assert record["mse"] == record["reconstruction_mse"]
+        assert {"psnr", "ssim", "iterations", "time_seconds", "gradient_mse"} <= set(record)
+
+    summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
+    assert set(summary["methods"]) == {"DLG", "iDLG"}
+    assert summary["success_rate_threshold"] == 0.03
 
 
 def test_attack_gradient_sampling_supports_eval_mode():

@@ -48,7 +48,9 @@ attack:
   max_samples: 1
   steps: 300
   lr: 0.05
-  success_mse_threshold: 0.0001
+  success_mse_threshold: 0.01
+  success_rate_threshold: 0.03
+  data_range: 1.0
   model_mode: eval
   seed: 2026
 

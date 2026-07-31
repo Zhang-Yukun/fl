@@ -5,7 +5,9 @@ Run date: 2026-07-31
 ## Commands
 
 ```bash
-conda run -n torch_env python -m scripts.run_rawdata2_patchtst
+bash scripts/run_rawdata2_centralized.sh
+bash scripts/run_rawdata2_fedavg.sh
+bash scripts/run_rawdata2_fedlab_topk.sh
 conda run -n torch_env python -m scripts.run_rawdata2_soteriafl --override experiment.output_dir=outputs/rawdata2_soteriafl_smoke --override federated.rounds=2 --override training.patience=2 --override attack.frequency_rounds=1 --override attack.steps=1 --override attack.max_samples=1
 ```
 

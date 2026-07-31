@@ -12,7 +12,7 @@ import torch
 from loguru import logger
 
 from federated_ts.utils.artifacts import save_experiment_config
-from federated_ts.security.attacks import attack_success_rate, dlg_attack, idlg_attack
+from federated_ts.security.attacks import attack_success_rate, dlg_attack, idlg_attack, summarize_attack_results
 from federated_ts.federated.client import FederatedClient
 from federated_ts.datasets.rare_earth import build_federated_loaders
 from federated_ts.utils.logging import setup_logging
@@ -241,12 +241,18 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
                 idlg_attack(config, server.global_state, grads, real_x, real_y, device),
             ]
             attack_results.extend(round_attacks)
-            attack_payload = {
-                f"attack/{result.name}/reconstruction_mse": result.reconstruction_mse for result in round_attacks
-            }
-            attack_payload.update({
-                f"attack/{result.name}/success": float(result.success) for result in round_attacks
-            })
+            attack_payload = {}
+            for result in round_attacks:
+                prefix = f"attack/{result.name}"
+                attack_payload[f"{prefix}/mse"] = result.mse
+                attack_payload[f"{prefix}/reconstruction_mse"] = result.reconstruction_mse
+                attack_payload[f"{prefix}/psnr"] = result.psnr
+                attack_payload[f"{prefix}/ssim"] = result.ssim
+                attack_payload[f"{prefix}/iterations"] = result.iterations
+                attack_payload[f"{prefix}/time_seconds"] = result.time_seconds
+                attack_payload[f"{prefix}/gradient_mse"] = result.gradient_mse
+                attack_payload[f"{prefix}/success"] = float(result.success)
+                attack_payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(attack_results, result.name)
             attack_payload["attack/time_seconds"] = time.perf_counter() - attack_start
             attack_payload["attack/success_rate_so_far"] = attack_success_rate(attack_results)
             tracker.log(attack_payload, step=round_index)
@@ -259,12 +265,13 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     server.save(output_dir, config)
     tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
     tracker.finish()
-    attack_records = [
-        {"name": result.name, "reconstruction_mse": result.reconstruction_mse, "success": result.success}
-        for result in attack_results
-    ]
+    attack_records = [result.to_record() for result in attack_results]
     with (output_dir / "attack_results.json").open("w", encoding="utf-8") as handle:
         json.dump(attack_records, handle, ensure_ascii=False, indent=2)
+    attack_summary = summarize_attack_results(
+        attack_results,
+        float(config.get("attack", {}).get("success_rate_threshold", 0.03)),
+    )
     summary = {
         "test": test_metrics,
         "rounds": len(server.history),
@@ -272,8 +279,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         "last_upload_compression_ratio": server.history[-1].upload_compression_ratio if server.history else 0.0,
         "last_total_communication_ratio": server.history[-1].total_communication_ratio if server.history else 0.0,
         "last_communication_ratio": server.history[-1].communication_ratio if server.history else 0.0,
-        "attack_success_rate": attack_success_rate(attack_results),
+        "attack_success_rate": attack_summary["overall_success_rate"],
         "attack_evaluations": len(attack_records),
+        "attack_summary": attack_summary,
     }
     with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
