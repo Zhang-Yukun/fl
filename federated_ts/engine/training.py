@@ -83,5 +83,6 @@ def first_batch_gradient(
     y = y.to(device)
     model.zero_grad(set_to_none=True)
     loss = criterion(model(x), y)
-    grads = torch.autograd.grad(loss, tuple(model.parameters()), create_graph=False)
+    trainable_parameters = tuple(parameter for parameter in model.parameters() if parameter.requires_grad)
+    grads = torch.autograd.grad(loss, trainable_parameters, create_graph=False)
     return [grad.detach().cpu() for grad in grads], x.detach().cpu(), y.detach().cpu()

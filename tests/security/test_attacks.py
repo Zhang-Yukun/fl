@@ -90,3 +90,16 @@ def test_attack_gradient_sampling_supports_eval_mode():
 
     assert torch.allclose(sample_x_a, sample_x_b)
     assert all(torch.allclose(left, right) for left, right in zip(grads_a, grads_b))
+
+
+def test_attack_gradient_sampling_supports_fedpetuning_trainable_subset():
+    config = _tiny_patchtst_config()
+    config["federated"] = {"algorithm": "fedpetuning"}
+    config["model"]["peft"] = {"enabled": True, "method": "fedpetuning", "bottleneck_dim": 4, "train_head": True}
+    device = torch.device("cpu")
+    model = build_model(config).to(device)
+    x = torch.randn(1, 8, 1)
+    y = torch.randn(1, 2, 1)
+    grads, _, _ = first_batch_gradient(model, [(x, y)], device, max_samples=1, model_mode="eval")
+    assert grads
+    assert len(grads) == sum(1 for parameter in model.parameters() if parameter.requires_grad)

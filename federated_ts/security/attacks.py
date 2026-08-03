@@ -56,7 +56,8 @@ def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, targe
     criterion = nn.MSELoss()
     pred = model(x)
     loss = criterion(pred, y)
-    grads = torch.autograd.grad(loss, tuple(model.parameters()), create_graph=True)
+    trainable_parameters = tuple(parameter for parameter in model.parameters() if parameter.requires_grad)
+    grads = torch.autograd.grad(loss, trainable_parameters, create_graph=True)
     return sum(torch.mean((grad - target.to(grad.device)) ** 2) for grad, target in zip(grads, target_grads))
 
 
@@ -83,8 +84,6 @@ def _prepare_attack_model(config: dict[str, Any], state: StateDict, device: torc
         model.eval()
     else:
         model.train()
-    for param in model.parameters():
-        param.requires_grad_(True)
     return model
 
 
