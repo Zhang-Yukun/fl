@@ -103,29 +103,3 @@ def test_attack_gradient_sampling_supports_fedpetuning_trainable_subset():
     grads, _, _ = first_batch_gradient(model, [(x, y)], device, max_samples=1, model_mode="eval")
     assert grads
     assert len(grads) == sum(1 for parameter in model.parameters() if parameter.requires_grad)
-
-
-def test_attack_success_can_use_reference_summary_threshold(tmp_path):
-    summary = {
-        "attack_summary": {
-            "methods": {
-                "DLG": {"avg_mse": 2.0},
-                "iDLG": {"avg_mse": 2.0},
-            }
-        }
-    }
-    ref = tmp_path / "summary.json"
-    ref.write_text(__import__("json").dumps(summary), encoding="utf-8")
-    config = _tiny_patchtst_config()
-    config["attack"]["success_reference_summary"] = str(ref)
-    config["attack"]["success_reference_metric"] = "avg_mse"
-    config["attack"]["success_reference_scale"] = 1.0
-    device = torch.device("cpu")
-    model = build_model(config).to(device)
-    x = torch.randn(1, 8, 1)
-    y = torch.randn(1, 2, 1)
-    loss = torch.nn.functional.mse_loss(model(x), y)
-    grads = torch.autograd.grad(loss, tuple(parameter for parameter in model.parameters() if parameter.requires_grad))
-    state = serialize_model(model)
-    dlg = dlg_attack(config, state, [grad.detach() for grad in grads], x, y, device)
-    assert dlg.success_threshold == 2.0

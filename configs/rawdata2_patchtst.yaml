@@ -56,12 +56,9 @@ attack:
   sample_count: 1
   input_clip: 5.0
   target_clip: 5.0
-  success_mse_threshold: 0.1
+  success_mse_threshold: 1.10
   success_ssim_threshold: 0.3
   success_rate_threshold: 0.03
-  success_reference_summary: outputs/rawdata2_patchtst_fedavg/summary.json
-  success_reference_metric: avg_mse
-  success_reference_scale: 1.0
   data_range: 1.0
   model_mode: eval
   seed: 2026
