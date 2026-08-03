@@ -17,16 +17,16 @@ privacy:
 
 attack:
   enabled: true
-  frequency_rounds: 1
+  frequency_rounds: 5
   max_samples: 1
   steps: 500
   lr: 0.05
   optimizer: adam
-  restarts: 2
+  restarts: 1
   lbfgs_history_size: 20
   client_selection: round_robin
-  clients_per_round: 2
-  sample_count: 2
+  clients_per_round: 1
+  sample_count: 1
   input_clip: 5.0
   target_clip: 5.0
   success_mse_threshold: 0.1
