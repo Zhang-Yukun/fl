@@ -1,0 +1,16 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_secure_quantized_fedavg
+  mode: federated
+  output_dir: outputs/rawdata2_secure_quantized_fedavg
+
+federated:
+  algorithm: secure_quantized_fedavg
+  rounds: 500
+  local_epochs: 1
+  quantization_dtype: float16
+
+privacy:
+  clip_norm: 10.0
+  noise_multiplier: 0.0001

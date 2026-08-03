@@ -15,6 +15,7 @@ from federated_ts.utils.serialization import (
     StateDict,
     compress_randomk,
     compress_topk,
+    quantize_state_update,
     load_serialized,
     privatize_state_update,
     serialize_model,
@@ -102,6 +103,24 @@ class FederatedClient:
             download_bytes=state_num_bytes(global_state),
             download_parameters=state_num_parameters(global_state),
         )
+        algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
+        if algorithm == "secure_quantized_fedavg":
+            update = subtract_state(local_state, global_state)
+            privacy_cfg = self.config.get("privacy", {})
+            privacy_clip_norm = float(privacy_cfg.get("clip_norm", 0.0))
+            privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.0))
+            update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
+            quantized = quantize_state_update(update, dtype=str(self.config.get("federated", {}).get("quantization_dtype", "float16")))
+            return ClientResult(
+                **common,
+                state=quantized,
+                upload_bytes=state_num_bytes(quantized),
+                upload_parameters=state_num_parameters(quantized),
+                payload_kind="quantized_update",
+                compressor=str(self.config.get("federated", {}).get("quantization_dtype", "float16")) + "_quantized_dense",
+                privacy_clip_norm=privacy_clip_norm,
+                privacy_noise_multiplier=privacy_noise_multiplier,
+            )
         if compressed:
             update = subtract_state(local_state, global_state)
             fraction = float(self.config["federated"].get("topk_fraction", 0.05))
@@ -109,7 +128,6 @@ class FederatedClient:
             compressor = "topk"
             privacy_clip_norm = 0.0
             privacy_noise_multiplier = 0.0
-            algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
             if algorithm in {"soteriafl", "dp_topk_fedavg"}:
                 privacy_cfg = self.config.get("privacy", {})
                 privacy_clip_norm = float(privacy_cfg.get("clip_norm", 1.0))

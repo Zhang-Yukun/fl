@@ -19,6 +19,7 @@ from federated_ts.utils.serialization import (
     add_update,
     average_states,
     decompress_topk,
+    dequantize_state_update,
     serialize_model,
     state_num_bytes,
     state_num_parameters,
@@ -154,6 +155,12 @@ class FederatedServer:
             for name in results[0].state.keys():
                 updated_state[name] = sum(result.state[name] * weight for result, weight in zip(results, weights))
             self.global_state = updated_state
+            return weights
+        if algorithm == "secure_quantized_fedavg":
+            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
+            dense_updates = [dequantize_state_update(result.state) for result in results]
+            averaged_update = average_states(dense_updates, sample_weights)
+            self.global_state = add_update(self.global_state, averaged_update)
             return weights
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         self.global_state = average_states([result.state for result in results], sample_weights)

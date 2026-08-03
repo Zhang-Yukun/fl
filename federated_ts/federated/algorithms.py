@@ -54,7 +54,7 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     """Return whether the configured FL algorithm compresses client uploads."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if algorithm in {"fedavg", "fedaware", "fedpetuning"}:
+    if algorithm in {"fedavg", "fedaware", "fedpetuning", "secure_quantized_fedavg"}:
         return False
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl", "dp_topk_fedavg"}:
         return True
@@ -137,6 +137,22 @@ def _protect_attack_gradients(
             flat = flat * scale
         if noise_multiplier > 0 and clip_norm > 0:
             flat = flat + torch.randn(flat.shape, generator=generator, dtype=flat.dtype) * (noise_multiplier * clip_norm)
+
+    if algorithm == "secure_quantized_fedavg":
+        privacy_cfg = config.get("privacy", {})
+        clip_norm = float(privacy_cfg.get("clip_norm", 0.0))
+        noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.0))
+        if clip_norm > 0:
+            norm = torch.linalg.vector_norm(flat)
+            scale = min(1.0, float(clip_norm / (norm + 1e-12)))
+            flat = flat * scale
+        if noise_multiplier > 0 and clip_norm > 0:
+            flat = flat + torch.randn(flat.shape, generator=generator, dtype=flat.dtype) * (noise_multiplier * clip_norm)
+        quant_dtype = str(config.get("federated", {}).get("quantization_dtype", "float16")).lower()
+        if quant_dtype == "float16":
+            flat = flat.to(torch.float16).to(torch.float32)
+        elif quant_dtype == "bfloat16":
+            flat = flat.to(torch.bfloat16).to(torch.float32)
 
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "dp_topk_fedavg", "soteriafl"}:
         fraction = float(config.get("federated", {}).get("topk_fraction", 0.05))

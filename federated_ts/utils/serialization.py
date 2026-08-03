@@ -211,6 +211,35 @@ def privatize_state_update(
     return private
 
 
+def quantize_state_update(update: StateDict, dtype: str = "float16") -> StateDict:
+    """Quantize a dense update tensor-by-tensor for milder communication reduction.
+
+    Example:
+        ``quantize_state_update(update, dtype="float16")`` halves the
+        upload payload while keeping a dense update structure.
+    """
+
+    quantized_dtype = {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }.get(str(dtype).lower())
+    if quantized_dtype is None:
+        raise ValueError(f"Unsupported quantization dtype: {dtype}")
+    return OrderedDict((name, tensor.detach().cpu().clone().to(quantized_dtype)) for name, tensor in update.items())
+
+
+def dequantize_state_update(update: StateDict) -> StateDict:
+    """Restore a quantized dense update to float32 tensors for aggregation.
+
+    Example:
+        ``dequantize_state_update(quantized_update)`` prepares uploaded values
+        for server-side FedAvg aggregation.
+    """
+
+    return OrderedDict((name, tensor.detach().cpu().clone().to(torch.float32)) for name, tensor in update.items())
+
+
 def privatize_sparse_update(sparse: SparseUpdate, clip_norm: float, noise_multiplier: float) -> SparseUpdate:
     """Clip and perturb sparse values with Gaussian local-DP style noise.
 

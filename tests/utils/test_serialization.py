@@ -6,6 +6,8 @@ from federated_ts.utils.serialization import (
     compress_randomk,
     compress_topk,
     decompress_topk,
+    dequantize_state_update,
+    quantize_state_update,
     privatize_sparse_update,
     privatize_state_update,
     serialize_model,
@@ -57,3 +59,14 @@ def test_privatize_state_update_clips_before_noise():
     assert torch.isclose(torch.linalg.vector_norm(clipped["w"]), torch.tensor(1.0))
     private = privatize_state_update(update, clip_norm=1.0, noise_multiplier=0.0)
     assert torch.allclose(private["w"], clipped["w"])
+
+
+def test_quantize_state_update_reduces_payload_size_and_restores_float32():
+    update = {"w": torch.tensor([1.0, -2.0, 3.5], dtype=torch.float32)}
+    quantized = quantize_state_update(update, dtype="float16")
+    restored = dequantize_state_update(quantized)
+
+    assert quantized["w"].dtype == torch.float16
+    assert restored["w"].dtype == torch.float32
+    assert state_num_bytes(quantized) < state_num_bytes(update)
+    assert torch.allclose(restored["w"], update["w"], atol=1e-3)
