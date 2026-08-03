@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -88,9 +90,33 @@ def _prepare_attack_model(config: dict[str, Any], state: StateDict, device: torc
 
 
 def _attack_threshold(config: dict[str, Any]) -> float:
-    """Return the normalized-MSE success threshold used by the draft protocol."""
+    """Return the fallback normalized-MSE success threshold."""
 
     return float(config.get("attack", {}).get("success_mse_threshold", 0.01))
+
+
+def _reference_threshold(config: dict[str, Any], name: str) -> float | None:
+    """Return an optional FedAvg-reference threshold for one attack method."""
+
+    attack_cfg = config.get("attack", {})
+    summary_path = attack_cfg.get("success_reference_summary")
+    metric_name = str(attack_cfg.get("success_reference_metric", "avg_mse"))
+    scale = float(attack_cfg.get("success_reference_scale", 1.0))
+    if not summary_path:
+        return None
+    path = Path(summary_path)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        return None
+    try:
+        summary = json.loads(path.read_text(encoding="utf-8"))
+        value = summary["attack_summary"]["methods"][name][metric_name]
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if value is None:
+        return None
+    return float(value) * scale
 
 
 def _attack_ssim_threshold(config: dict[str, Any]) -> float | None:
@@ -191,7 +217,9 @@ def _attack_loop(
     attack_cfg = config.get("attack", {})
     steps = int(attack_cfg.get("steps", 300))
     lr = float(attack_cfg.get("lr", 0.1))
-    threshold = _attack_threshold(config)
+    threshold = _reference_threshold(config, name)
+    if threshold is None:
+        threshold = _attack_threshold(config)
     ssim_threshold = _attack_ssim_threshold(config)
     data_range = _attack_data_range(config)
     optimizer_name = str(attack_cfg.get("optimizer", "adam")).lower()
