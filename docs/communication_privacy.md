@@ -2,10 +2,10 @@
 
 ## Literature Scope
 
-FedAWARE is the Xu et al. adaptive weighted aggregation method used as the repository's Xu-related comparison algorithm. It keeps dense client uploads like FedAvg, but the server replaces fixed sample-count averaging with adaptive client weights derived from client update geometry. The concrete privacy/compression algorithm implemented elsewhere in this repository is the SoteriaFL-style component below, and it is not claimed as a Zenglin Xu paper.
+FedAWARE is kept in this repository only as a supplementary Xu-related adaptive aggregation baseline. For the rare-earth compression-plus-security experiments, the default comparison path is the SoteriaFL-style private random-k upload algorithm below, because it directly changes both communication volume and leakage resistance.
 
 
-## Xu et al. Comparison Algorithm
+## Supplementary Xu et al. Baseline
 
 The `fedaware` algorithm path implements a FedAWARE-style adaptive weighted aggregation step:
 
@@ -16,7 +16,7 @@ The `fedaware` algorithm path implements a FedAWARE-style adaptive weighted aggr
 5. The adaptive weights are blended with the standard sample-count FedAvg prior using `fedaware.alpha`.
 6. The weighted dense update is applied to the global model.
 
-This keeps the training contract close to FedAvg while making the comparison algorithm explicitly tied to Xu et al. rather than to the earlier FedLab framework paper.
+This keeps the training contract close to FedAvg and is preserved as a supplementary Xu et al. adaptive aggregation baseline, but it is no longer the repository's default compression/privacy comparison run.
 
 ## Implemented Algorithm Component
 

@@ -58,12 +58,13 @@ def first_batch_gradient(
     device: torch.device,
     max_samples: int | None = None,
     model_mode: str = "train",
+    batch_index: int = 0,
 ) -> tuple[list[torch.Tensor], torch.Tensor, torch.Tensor]:
-    """Return gradients for the first batch, useful for reconstruction attacks.
+    """Return gradients for a selected batch, useful for reconstruction attacks.
 
     Example:
-        ``first_batch_gradient(model, loader, device, max_samples=1, model_mode="eval")``
-        limits DLG/iDLG reconstruction cost to one deterministic sample.
+        ``first_batch_gradient(model, loader, device, max_samples=1, model_mode="eval", batch_index=2)``
+        attacks the third batch from the current loader order.
     """
 
     if model_mode == "eval":
@@ -71,7 +72,10 @@ def first_batch_gradient(
     else:
         model.train()
     criterion = nn.MSELoss()
-    x, y = next(iter(loader))
+    iterator = iter(loader)
+    x = y = None
+    for _ in range(max(0, int(batch_index)) + 1):
+        x, y = next(iterator)
     if max_samples is not None:
         x = x[:max_samples]
         y = y[:max_samples]
@@ -81,4 +85,3 @@ def first_batch_gradient(
     loss = criterion(model(x), y)
     grads = torch.autograd.grad(loss, tuple(model.parameters()), create_graph=False)
     return [grad.detach().cpu() for grad in grads], x.detach().cpu(), y.detach().cpu()
-

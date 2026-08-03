@@ -25,7 +25,12 @@ def _tiny_patchtst_config():
         },
         "attack": {
             "steps": 1,
-            "lr": 0.01,
+            "lr": 0.05,
+            "optimizer": "lbfgs",
+            "restarts": 1,
+            "lbfgs_history_size": 5,
+            "input_clip": 5.0,
+            "target_clip": 5.0,
             "success_mse_threshold": 0.01,
             "success_rate_threshold": 0.03,
             "data_range": 1.0,
@@ -64,6 +69,8 @@ def test_gradient_attacks_run_on_vendored_patchtst():
     summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
     assert set(summary["methods"]) == {"DLG", "iDLG"}
     assert summary["success_rate_threshold"] == 0.03
+    assert summary["methods"]["DLG"]["total_count"] == 1
+    assert "avg_gradient_mse" in summary["methods"]["DLG"]
 
 
 def test_attack_gradient_sampling_supports_eval_mode():

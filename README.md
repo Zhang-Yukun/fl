@@ -12,8 +12,8 @@ conda run -n torch_env python -m pytest tests
 ```
 
 The default smoke config uses compressed FedAvg with top-k sparse updates. The
-main rawdata2 comparison scripts are separated into centralized training,
-standard FedAvg, and Xu et al.'s FedAWARE aggregation.
+main rawdata2 comparison scripts are now separated into centralized training,
+standard FedAvg, and the compression-plus-security SoteriaFL baseline.
 
 ## Main Modules
 
@@ -84,10 +84,10 @@ and early stopping patience 50:
 ```bash
 bash scripts/run_rawdata2_centralized.sh
 bash scripts/run_rawdata2_fedavg.sh
-bash scripts/run_rawdata2_fedaware.sh
+bash scripts/run_rawdata2_soteriafl.sh
 ```
 
 Extra overrides can be appended to any script, for example
 `--override federated.rounds=30`. Generated data is stored under
 `../data/rare_earth_rawdata2`; experiment artifacts are stored under the
-corresponding `outputs/rawdata2_*` directory. The FedAWARE comparison run uses Xu et al.'s adaptive weighted aggregation configuration in `configs/rawdata2_fedaware.yaml`.
+corresponding `outputs/rawdata2_*` directory. `configs/rawdata2_soteriafl.yaml` is the default compression/privacy comparison config; `configs/rawdata2_fedaware.yaml` remains available as a supplementary Xu-related adaptive aggregation baseline.

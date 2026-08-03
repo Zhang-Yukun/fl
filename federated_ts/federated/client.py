@@ -123,11 +123,12 @@ class FederatedClient:
             payload_kind="dense_state",
         )
 
-    def gradient_sample(self, global_state: StateDict, max_samples: int | None = None):
-        """Return first-batch gradients for DLG/iDLG evaluation.
+    def gradient_sample(self, global_state: StateDict, max_samples: int | None = None, batch_index: int = 0):
+        """Return gradients for a selected batch for DLG/iDLG evaluation.
 
         Example:
-            ``grads, x, y = client.gradient_sample(server_state, max_samples=1)``.
+            ``grads, x, y = client.gradient_sample(server_state, max_samples=1, batch_index=2)``
+            extracts the third batch from the current loader order.
         """
 
         model = build_model(self.config).to(self.device)
@@ -138,4 +139,5 @@ class FederatedClient:
             self.device,
             max_samples=max_samples,
             model_mode=str(self.config.get("attack", {}).get("model_mode", "train")),
+            batch_index=batch_index,
         )

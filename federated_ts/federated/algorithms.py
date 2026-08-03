@@ -24,12 +24,7 @@ from federated_ts.engine.training import evaluate, train_one_epoch
 
 
 def configure_torch_runtime(config: dict[str, Any]) -> None:
-    """Apply CPU thread limits from runtime config before training starts.
-
-    Example:
-        ``configure_torch_runtime({"runtime": {"num_threads": 4}})`` limits
-        PyTorch intra-op CPU work to four threads.
-    """
+    """Apply CPU thread limits from runtime config before training starts."""
 
     runtime_cfg = config.get("runtime", {})
     num_threads = runtime_cfg.get("num_threads")
@@ -46,11 +41,7 @@ def configure_torch_runtime(config: dict[str, Any]) -> None:
 
 
 def resolve_device(config: dict[str, Any]) -> torch.device:
-    """Resolve the configured torch device with a CPU fallback.
-
-    Example:
-        ``resolve_device({"runtime": {"device": "cpu"}})`` returns a CPU device.
-    """
+    """Resolve the configured torch device with a CPU fallback."""
 
     requested = str(config.get("runtime", {}).get("device", "cpu"))
     if requested.startswith("cuda") and not torch.cuda.is_available():
@@ -71,17 +62,27 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
 
 
 def _should_run_attack(config: dict[str, Any], round_index: int, max_rounds: int) -> bool:
-    """Return whether attack evaluation should run on this round.
-
-    Example:
-        ``frequency_rounds=50`` runs at rounds 0, 50, 100, and the final round.
-    """
+    """Return whether attack evaluation should run on this round."""
 
     attack_cfg = config.get("attack", {})
     if not attack_cfg.get("enabled", True):
         return False
     frequency = int(attack_cfg.get("frequency_rounds", 1))
     return round_index == 0 or round_index == max_rounds - 1 or (frequency > 0 and round_index % frequency == 0)
+
+
+def _select_attack_clients(clients: list[FederatedClient], config: dict[str, Any], round_index: int) -> list[FederatedClient]:
+    """Select which clients should be attacked on the current round."""
+
+    attack_cfg = config.get("attack", {})
+    selection = str(attack_cfg.get("client_selection", "round_robin")).lower()
+    count = max(1, int(attack_cfg.get("clients_per_round", 1)))
+    if selection == "all":
+        return clients
+    if selection == "first":
+        return clients[:count]
+    start = round_index % len(clients)
+    return [clients[(start + offset) % len(clients)] for offset in range(min(count, len(clients)))]
 
 
 def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
@@ -99,11 +100,7 @@ def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
 
 
 def run_centralized(config: dict[str, Any]) -> dict[str, float]:
-    """Run centralized training over all client datasets.
-
-    Example:
-        ``run_centralized(config)`` returns test metrics such as MSE and MAE.
-    """
+    """Run centralized training over all client datasets."""
 
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
@@ -179,13 +176,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
 
 
 def run_federated(config: dict[str, Any]) -> dict[str, Any]:
-    """Run single-process federated training.
-
-    Example:
-        Set ``federated.algorithm=fedavg`` for standard dense FedAvg,
-        ``fedaware`` for Xu et al.'s adaptive weighted dense aggregation, or
-        ``compressed_fedavg`` for sparse uploads.
-    """
+    """Run single-process federated training."""
 
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
@@ -234,29 +225,41 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         if _should_run_attack(config, round_index, max_rounds):
             attack_cfg = config.get("attack", {})
             attack_start = time.perf_counter()
-            grads, real_x, real_y = clients[0].gradient_sample(
-                server.global_state,
-                max_samples=int(attack_cfg.get("max_samples", 1)),
-            )
-            round_attacks = [
-                dlg_attack(config, server.global_state, grads, real_x, real_y, device),
-                idlg_attack(config, server.global_state, grads, real_x, real_y, device),
-            ]
+            max_samples = int(attack_cfg.get("max_samples", 1))
+            sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
+            selected_clients = _select_attack_clients(clients, config, round_index)
+            round_attacks = []
+            for client in selected_clients:
+                for sample_index in range(sample_count):
+                    grads, real_x, real_y = client.gradient_sample(
+                        server.global_state,
+                        max_samples=max_samples,
+                        batch_index=sample_index,
+                    )
+                    round_attacks.extend([
+                        dlg_attack(config, server.global_state, grads, real_x, real_y, device),
+                        idlg_attack(config, server.global_state, grads, real_x, real_y, device),
+                    ])
             attack_results.extend(round_attacks)
-            attack_payload = {}
-            for result in round_attacks:
-                prefix = f"attack/{result.name}"
-                attack_payload[f"{prefix}/mse"] = result.mse
-                attack_payload[f"{prefix}/reconstruction_mse"] = result.reconstruction_mse
-                attack_payload[f"{prefix}/psnr"] = result.psnr
-                attack_payload[f"{prefix}/ssim"] = result.ssim
-                attack_payload[f"{prefix}/iterations"] = result.iterations
-                attack_payload[f"{prefix}/time_seconds"] = result.time_seconds
-                attack_payload[f"{prefix}/gradient_mse"] = result.gradient_mse
-                attack_payload[f"{prefix}/success"] = float(result.success)
-                attack_payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(attack_results, result.name)
-            attack_payload["attack/time_seconds"] = time.perf_counter() - attack_start
-            attack_payload["attack/success_rate_so_far"] = attack_success_rate(attack_results)
+            attack_payload: dict[str, float] = {
+                "attack/time_seconds": time.perf_counter() - attack_start,
+                "attack/evaluations_this_round": float(len(round_attacks)),
+                "attack/clients_this_round": float(len(selected_clients)),
+                "attack/samples_per_client": float(sample_count),
+                "attack/success_rate_so_far": attack_success_rate(attack_results),
+            }
+            for name in sorted({result.name for result in round_attacks}):
+                subset = [result for result in round_attacks if result.name == name]
+                prefix = f"attack/{name}"
+                attack_payload[f"{prefix}/mse"] = sum(result.mse for result in subset) / len(subset)
+                attack_payload[f"{prefix}/reconstruction_mse"] = attack_payload[f"{prefix}/mse"]
+                attack_payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
+                attack_payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
+                attack_payload[f"{prefix}/iterations"] = float(subset[0].iterations)
+                attack_payload[f"{prefix}/time_seconds"] = sum(result.time_seconds for result in subset) / len(subset)
+                attack_payload[f"{prefix}/gradient_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
+                attack_payload[f"{prefix}/success"] = sum(float(result.success) for result in subset) / len(subset)
+                attack_payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(attack_results, name)
             tracker.log(attack_payload, step=round_index)
             logger.info("Round {} attack metrics {}", round_index, attack_payload)
         if stopper.update(metrics["mse"]):

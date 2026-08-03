@@ -84,6 +84,7 @@ def test_federated_run_saves_attack_results(tmp_path):
     assert result["attack_evaluations"] == 2
     assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
+    assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 1
 
 
 def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
