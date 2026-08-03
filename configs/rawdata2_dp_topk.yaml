@@ -9,8 +9,8 @@ federated:
   algorithm: dp_topk_fedavg
   rounds: 500
   local_epochs: 1
-  topk_fraction: 0.10
+  topk_fraction: 0.20
 
 privacy:
   clip_norm: 2.0
-  noise_multiplier: 0.01
+  noise_multiplier: 0.002

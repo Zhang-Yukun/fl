@@ -1,7 +1,8 @@
+import torch
 import json
 from pathlib import Path
 
-from federated_ts.federated.algorithms import run_federated
+from federated_ts.federated.algorithms import _protect_attack_gradients, run_federated
 from federated_ts.utils.config import load_config
 
 
@@ -19,6 +20,32 @@ def test_one_round_federated_run(tmp_path):
     assert (tmp_path / "model.pt").exists()
     assert (tmp_path / "config.yaml").exists()
     assert not (tmp_path / "config.json").exists()
+
+
+def test_protect_attack_gradients_keeps_fedavg_dense_signal():
+    config = {"federated": {"algorithm": "fedavg"}, "attack": {"seed": 7}}
+    grads = [torch.tensor([[1.0, -2.0]]), torch.tensor([3.0])]
+
+    protected = _protect_attack_gradients(config, grads, round_index=0, client_index=0, sample_index=0)
+
+    assert len(protected) == len(grads)
+    assert all(torch.equal(left, right) for left, right in zip(protected, grads))
+
+
+def test_protect_attack_gradients_applies_dp_topk_mask():
+    config = {
+        "federated": {"algorithm": "dp_topk_fedavg", "topk_fraction": 0.25},
+        "privacy": {"clip_norm": 100.0, "noise_multiplier": 0.0},
+        "attack": {"seed": 11},
+    }
+    grads = [torch.tensor([1.0, -3.0, 2.0, 0.5]), torch.tensor([0.1, -0.2, 5.0, 0.3])]
+
+    protected = _protect_attack_gradients(config, grads, round_index=0, client_index=0, sample_index=0)
+    flat = torch.cat([tensor.reshape(-1) for tensor in protected])
+
+    assert torch.count_nonzero(flat).item() == 2
+    assert flat[1].item() == -3.0
+    assert flat[6].item() == 5.0
 
 
 def test_standard_fedavg_uses_dense_uploads(tmp_path):

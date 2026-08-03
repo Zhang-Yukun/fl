@@ -99,6 +99,67 @@ def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
     return payload
 
 
+def _protect_attack_gradients(
+    config: dict[str, Any],
+    grads: list[torch.Tensor],
+    round_index: int,
+    client_index: int,
+    sample_index: int,
+) -> list[torch.Tensor]:
+    """Apply the configured upload protection to intercepted attack gradients.
+
+    Example:
+        ``protected = _protect_attack_gradients(config, grads, 0, 0, 0)`` mirrors
+        the client-side clipping, noise, and sparsification seen by the server.
+    """
+
+    protected = [grad.detach().cpu().clone() for grad in grads]
+    algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
+    if not protected or algorithm in {"fedavg", "fedaware", "fedpetuning"}:
+        return protected
+
+    shapes = [tuple(grad.shape) for grad in protected]
+    flat = torch.cat([grad.reshape(-1) for grad in protected])
+    attack_cfg = config.get("attack", {})
+    seed = attack_cfg.get("seed")
+    generator = None
+    if seed is not None:
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(seed) + round_index * 1000 + client_index * 100 + sample_index)
+
+    if algorithm in {"soteriafl", "dp_topk_fedavg"}:
+        privacy_cfg = config.get("privacy", {})
+        clip_norm = float(privacy_cfg.get("clip_norm", 1.0))
+        noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.1))
+        if clip_norm > 0:
+            norm = torch.linalg.vector_norm(flat)
+            scale = min(1.0, float(clip_norm / (norm + 1e-12)))
+            flat = flat * scale
+        if noise_multiplier > 0 and clip_norm > 0:
+            flat = flat + torch.randn(flat.shape, generator=generator, dtype=flat.dtype) * (noise_multiplier * clip_norm)
+
+    if algorithm in {"compressed_fedavg", "sparse_fedavg", "dp_topk_fedavg", "soteriafl"}:
+        fraction = float(config.get("federated", {}).get("topk_fraction", 0.05))
+        total = flat.numel()
+        k = max(1, int(total * fraction))
+        sparse = torch.zeros_like(flat)
+        if algorithm == "soteriafl":
+            indices = torch.randperm(total, generator=generator)[:k]
+            sparse[indices] = flat[indices] * (float(total) / float(k))
+        else:
+            _, indices = torch.topk(flat.abs(), k)
+            sparse[indices] = flat[indices]
+        flat = sparse
+
+    rebuilt: list[torch.Tensor] = []
+    offset = 0
+    for grad, shape in zip(protected, shapes):
+        length = grad.numel()
+        rebuilt.append(flat[offset : offset + length].reshape(shape).to(dtype=grad.dtype))
+        offset += length
+    return rebuilt
+
+
 def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     """Run centralized training over all client datasets."""
 
@@ -229,16 +290,23 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
             selected_clients = _select_attack_clients(clients, config, round_index)
             round_attacks = []
-            for client in selected_clients:
+            for client_index, client in enumerate(selected_clients):
                 for sample_index in range(sample_count):
                     grads, real_x, real_y = client.gradient_sample(
                         server.global_state,
                         max_samples=max_samples,
                         batch_index=sample_index,
                     )
+                    protected_grads = _protect_attack_gradients(
+                        config,
+                        grads,
+                        round_index=round_index,
+                        client_index=client_index,
+                        sample_index=sample_index,
+                    )
                     round_attacks.extend([
-                        dlg_attack(config, server.global_state, grads, real_x, real_y, device),
-                        idlg_attack(config, server.global_state, grads, real_x, real_y, device),
+                        dlg_attack(config, server.global_state, protected_grads, real_x, real_y, device),
+                        idlg_attack(config, server.global_state, protected_grads, real_x, real_y, device),
                     ])
             attack_results.extend(round_attacks)
             attack_payload: dict[str, float] = {
