@@ -316,14 +316,15 @@ def _mean_finite(values: list[float]) -> float | None:
 
 
 def summarize_attack_results(results: list[AttackResult], success_rate_threshold: float = 0.03) -> dict[str, Any]:
-    """Summarize DLG/iDLG metrics according to the draft protocol."""
+    """Summarize DLG/iDLG metrics with reconstruction MSE as the primary view."""
 
-    methods: dict[str, dict[str, float | int | bool | None]] = {}
+    methods: dict[str, dict[str, float | int | bool | None | str]] = {}
     for name in sorted({result.name for result in results}):
         subset = [result for result in results if result.name == name]
         total = len(subset)
         success_count = sum(result.success for result in subset)
         methods[name] = {
+            "primary_metric": "reconstruction_mse",
             "success_count": success_count,
             "total_count": total,
             "success_rate": success_count / total if total else 0.0,
@@ -338,8 +339,20 @@ def summarize_attack_results(results: list[AttackResult], success_rate_threshold
             "passes": (success_count / total if total else 0.0) <= success_rate_threshold,
         }
     overall_success_rate = attack_success_rate(results)
+    overall_avg_mse = _mean_finite([result.mse for result in results])
+    overall_best_mse = _mean_finite(sorted([result.mse for result in results])[:1])
+    overall_avg_psnr = _mean_finite([result.psnr for result in results])
+    overall_avg_ssim = _mean_finite([result.ssim for result in results])
+    overall_avg_gradient_mse = _mean_finite([result.gradient_mse for result in results])
     return {
+        "primary_metric": "reconstruction_mse",
+        "primary_metric_direction": "higher_is_more_private",
         "success_rate_threshold": success_rate_threshold,
+        "overall_avg_mse": overall_avg_mse,
+        "overall_best_mse": overall_best_mse,
+        "overall_avg_psnr": overall_avg_psnr,
+        "overall_avg_ssim": overall_avg_ssim,
+        "overall_avg_gradient_mse": overall_avg_gradient_mse,
         "overall_success_rate": overall_success_rate,
         "overall_success_rate_percent": round(overall_success_rate * 100.0, 2),
         "overall_passes": overall_success_rate <= success_rate_threshold,

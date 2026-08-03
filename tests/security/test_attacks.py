@@ -68,7 +68,11 @@ def test_gradient_attacks_run_on_vendored_patchtst():
 
     summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
     assert set(summary["methods"]) == {"DLG", "iDLG"}
+    assert summary["primary_metric"] == "reconstruction_mse"
+    assert summary["primary_metric_direction"] == "higher_is_more_private"
+    assert summary["overall_avg_mse"] is not None
     assert summary["success_rate_threshold"] == 0.03
+    assert summary["methods"]["DLG"]["primary_metric"] == "reconstruction_mse"
     assert summary["methods"]["DLG"]["total_count"] == 1
     assert "avg_gradient_mse" in summary["methods"]["DLG"]
 

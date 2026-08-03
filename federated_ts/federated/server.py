@@ -20,6 +20,7 @@ from federated_ts.utils.serialization import (
     average_states,
     decompress_topk,
     dequantize_state_update,
+    quantize_state_update,
     serialize_model,
     state_num_bytes,
     state_num_parameters,
@@ -38,6 +39,8 @@ class ClientCommunicationRecord:
     payload_kind: str
     download_bytes: int
     download_parameters: int
+    dense_download_reference_bytes: int
+    dense_download_reference_parameters: int
     upload_bytes: int
     upload_parameters: int
     dense_upload_reference_bytes: int
@@ -160,7 +163,9 @@ class FederatedServer:
             weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
             dense_updates = [dequantize_state_update(result.state) for result in results]
             averaged_update = average_states(dense_updates, sample_weights)
-            self.global_state = add_update(self.global_state, averaged_update)
+            quantization_dtype = str(self.config.get("federated", {}).get("quantization_dtype", "float16"))
+            compressed_base = dequantize_state_update(quantize_state_update(self.global_state, dtype=quantization_dtype))
+            self.global_state = add_update(compressed_base, averaged_update)
             return weights
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         self.global_state = average_states([result.state for result in results], sample_weights)
@@ -212,9 +217,10 @@ class FederatedServer:
         total_download_parameters = sum(result.download_parameters for result in results)
         total_upload_bytes = sum(result.upload_bytes for result in results)
         total_upload_parameters = sum(result.upload_parameters for result in results)
+        fedavg_reference_download_bytes = sum(result.dense_download_reference_bytes for result in results)
         fedavg_reference_upload_bytes = sum(result.dense_bytes for result in results)
         fedavg_reference_upload_parameters = sum(result.dense_parameters for result in results)
-        fedavg_reference_total_bytes = total_download_bytes + fedavg_reference_upload_bytes
+        fedavg_reference_total_bytes = fedavg_reference_download_bytes + fedavg_reference_upload_bytes
         upload_ratio = fedavg_reference_upload_bytes / max(total_upload_bytes, 1)
         total_ratio = fedavg_reference_total_bytes / max(total_download_bytes + total_upload_bytes, 1)
         client_records = [
@@ -225,6 +231,8 @@ class FederatedServer:
                 payload_kind=result.payload_kind,
                 download_bytes=result.download_bytes,
                 download_parameters=result.download_parameters,
+                dense_download_reference_bytes=result.dense_download_reference_bytes,
+                dense_download_reference_parameters=result.dense_download_reference_parameters,
                 upload_bytes=result.upload_bytes,
                 upload_parameters=result.upload_parameters,
                 dense_upload_reference_bytes=result.dense_bytes,

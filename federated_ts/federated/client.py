@@ -15,6 +15,7 @@ from federated_ts.utils.serialization import (
     StateDict,
     compress_randomk,
     compress_topk,
+    dequantize_state_update,
     quantize_state_update,
     load_serialized,
     privatize_state_update,
@@ -39,6 +40,8 @@ class ClientResult:
     dense_parameters: int = 0
     download_bytes: int = 0
     download_parameters: int = 0
+    dense_download_reference_bytes: int = 0
+    dense_download_reference_parameters: int = 0
     upload_bytes: int = 0
     upload_parameters: int = 0
     payload_kind: str = "dense_state"
@@ -67,8 +70,16 @@ class FederatedClient:
     def train(self, global_state: StateDict, compressed: bool = False) -> ClientResult:
         """Train locally from global weights and return a dense or sparse payload."""
 
+        algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
+        received_global_state = global_state
+        download_state = global_state
+        if algorithm == "secure_quantized_fedavg":
+            quantization_dtype = str(self.config.get("federated", {}).get("quantization_dtype", "float16"))
+            download_state = quantize_state_update(global_state, dtype=quantization_dtype)
+            received_global_state = dequantize_state_update(download_state)
+
         model = build_model(self.config).to(self.device)
-        load_serialized(model, global_state, self.device)
+        load_serialized(model, received_global_state, self.device)
         trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
         optimizer = torch.optim.Adam(trainable_parameters, lr=float(self.config["training"].get("lr", 1e-3)))
         losses = []
@@ -89,6 +100,8 @@ class FederatedClient:
                 dense_parameters=dense_parameters,
                 download_bytes=state_num_bytes(global_trainable_state),
                 download_parameters=state_num_parameters(global_trainable_state),
+                dense_download_reference_bytes=state_num_bytes(global_trainable_state),
+                dense_download_reference_parameters=state_num_parameters(global_trainable_state),
                 upload_bytes=state_num_bytes(trainable_state),
                 upload_parameters=state_num_parameters(trainable_state),
                 payload_kind="fedpetuning_trainable_state",
@@ -100,12 +113,13 @@ class FederatedClient:
             loss=float(sum(losses) / len(losses)),
             dense_bytes=dense_bytes,
             dense_parameters=dense_parameters,
-            download_bytes=state_num_bytes(global_state),
-            download_parameters=state_num_parameters(global_state),
+            download_bytes=state_num_bytes(download_state),
+            download_parameters=state_num_parameters(download_state),
+            dense_download_reference_bytes=state_num_bytes(global_state),
+            dense_download_reference_parameters=state_num_parameters(global_state),
         )
-        algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
         if algorithm == "secure_quantized_fedavg":
-            update = subtract_state(local_state, global_state)
+            update = subtract_state(local_state, received_global_state)
             privacy_cfg = self.config.get("privacy", {})
             privacy_clip_norm = float(privacy_cfg.get("clip_norm", 0.0))
             privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.0))

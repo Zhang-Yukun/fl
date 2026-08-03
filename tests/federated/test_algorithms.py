@@ -109,7 +109,11 @@ def test_federated_run_saves_attack_results(tmp_path):
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {"mse", "reconstruction_mse", "psnr", "ssim", "iterations", "time_seconds"} <= set(attack_results[0])
     assert result["attack_evaluations"] == 2
+    assert result["attack_primary_metric"] == "reconstruction_mse"
+    assert result["attack_primary_metric_direction"] == "higher_is_more_private"
+    assert result["attack_overall_avg_mse"] is not None
     assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
+    assert result["attack_summary"]["primary_metric"] == "reconstruction_mse"
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 1
 
@@ -184,10 +188,11 @@ def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
     clients = metrics[0]["clients"]
 
     assert result["last_upload_compression_ratio"] > 1.5
-    assert result["last_total_communication_ratio"] > 1.0
+    assert result["last_total_communication_ratio"] > 1.9
     assert all(client["payload_kind"] == "quantized_update" for client in clients)
     assert all(client["compressor"] == "float16_quantized_dense" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
+    assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
 
 def test_dp_topk_uses_sparse_dp_topk_payloads(tmp_path):
     config = load_config(

@@ -330,6 +330,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
                 "attack/evaluations_this_round": float(len(round_attacks)),
                 "attack/clients_this_round": float(len(selected_clients)),
                 "attack/samples_per_client": float(sample_count),
+                "attack/overall_avg_mse_so_far": sum(result.mse for result in attack_results) / len(attack_results),
                 "attack/success_rate_so_far": attack_success_rate(attack_results),
             }
             for name in sorted({result.name for result in round_attacks}):
@@ -337,6 +338,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
                 prefix = f"attack/{name}"
                 attack_payload[f"{prefix}/mse"] = sum(result.mse for result in subset) / len(subset)
                 attack_payload[f"{prefix}/reconstruction_mse"] = attack_payload[f"{prefix}/mse"]
+                cumulative_subset = [result for result in attack_results if result.name == name]
+                attack_payload[f"{prefix}/avg_mse_so_far"] = sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
                 attack_payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
                 attack_payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
                 attack_payload[f"{prefix}/iterations"] = float(subset[0].iterations)
@@ -368,6 +371,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         "last_upload_compression_ratio": server.history[-1].upload_compression_ratio if server.history else 0.0,
         "last_total_communication_ratio": server.history[-1].total_communication_ratio if server.history else 0.0,
         "last_communication_ratio": server.history[-1].communication_ratio if server.history else 0.0,
+        "attack_primary_metric": attack_summary["primary_metric"],
+        "attack_primary_metric_direction": attack_summary["primary_metric_direction"],
+        "attack_overall_avg_mse": attack_summary["overall_avg_mse"],
         "attack_success_rate": attack_summary["overall_success_rate"],
         "attack_evaluations": len(attack_records),
         "attack_summary": attack_summary,
