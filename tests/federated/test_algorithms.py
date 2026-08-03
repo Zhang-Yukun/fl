@@ -105,3 +105,33 @@ def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
     assert all(client["payload_kind"] == "soteriafl_randomk_dp_update" for client in metrics[0]["clients"])
     assert all(client["compressor"] == "randomk_unbiased" for client in metrics[0]["clients"])
     assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])
+
+
+def test_fedpetuning_uploads_only_trainable_subset(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=fedpetuning",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "model.name=patchtst",
+            "model.channels=1",
+            "model.patch_len=4",
+            "model.stride=2",
+            "model.d_model=8",
+            "model.n_heads=1",
+            "model.e_layers=1",
+            "model.d_ff=16",
+            "model.peft.enabled=true",
+            "model.peft.method=fedpetuning",
+            "model.peft.bottleneck_dim=4",
+            "model.peft.train_head=true",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    clients = metrics[0]["clients"]
+    assert all(client["payload_kind"] == "fedpetuning_trainable_state" for client in clients)
+    assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
+    assert result["last_upload_compression_ratio"] > 1.0

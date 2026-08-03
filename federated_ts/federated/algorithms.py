@@ -54,7 +54,7 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     """Return whether the configured FL algorithm compresses client uploads."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if algorithm in {"fedavg", "fedaware"}:
+    if algorithm in {"fedavg", "fedaware", "fedpetuning"}:
         return False
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl"}:
         return True

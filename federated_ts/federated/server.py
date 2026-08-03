@@ -148,6 +148,13 @@ class FederatedServer:
                 )
             self.global_state = add_update(self.global_state, averaged_update)
             return weights
+        if algorithm == "fedpetuning":
+            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
+            updated_state = OrderedDict((name, tensor.clone()) for name, tensor in self.global_state.items())
+            for name in results[0].state.keys():
+                updated_state[name] = sum(result.state[name] * weight for result, weight in zip(results, weights))
+            self.global_state = updated_state
+            return weights
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         self.global_state = average_states([result.state for result in results], sample_weights)
         return weights

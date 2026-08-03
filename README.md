@@ -85,9 +85,14 @@ and early stopping patience 50:
 bash scripts/run_rawdata2_centralized.sh
 bash scripts/run_rawdata2_fedavg.sh
 bash scripts/run_rawdata2_soteriafl.sh
+bash scripts/run_rawdata2_fedpetuning.sh
 ```
 
 Extra overrides can be appended to any script, for example
 `--override federated.rounds=30`. Generated data is stored under
 `../data/rare_earth_rawdata2`; experiment artifacts are stored under the
 corresponding `outputs/rawdata2_*` directory. `configs/rawdata2_soteriafl.yaml` is the default compression/privacy comparison config; `configs/rawdata2_fedaware.yaml` remains available as a supplementary Xu-related adaptive aggregation baseline.
+
+An additional Xu-related communication-efficiency supplement is available in
+`configs/rawdata2_fedpetuning.yaml`, which uses a FedPETuning-style frozen
+PatchTST backbone with small trainable adapter/head parameters.

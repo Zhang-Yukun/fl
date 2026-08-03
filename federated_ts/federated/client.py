@@ -9,6 +9,7 @@ from typing import Any
 import torch
 
 from federated_ts.modeling.forecasting import build_model
+from federated_ts.utils.peft import is_fedpetuning, serialize_trainable_state, subset_state
 from federated_ts.utils.serialization import (
     SparseUpdate,
     StateDict,
@@ -63,22 +64,35 @@ class FederatedClient:
         self.device = device
 
     def train(self, global_state: StateDict, compressed: bool = False) -> ClientResult:
-        """Train locally from global weights and return a dense or sparse payload.
-
-        Example:
-            ``client.train(state, compressed=False)`` implements standard FedAvg
-            client behavior by uploading a full dense model state.
-        """
+        """Train locally from global weights and return a dense or sparse payload."""
 
         model = build_model(self.config).to(self.device)
         load_serialized(model, global_state, self.device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=float(self.config["training"].get("lr", 1e-3)))
+        trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
+        optimizer = torch.optim.Adam(trainable_parameters, lr=float(self.config["training"].get("lr", 1e-3)))
         losses = []
         for _ in range(int(self.config["federated"].get("local_epochs", 1))):
             losses.append(train_one_epoch(model, self.train_loader, optimizer, self.device))
         local_state = serialize_model(model)
         dense_bytes = state_num_bytes(local_state)
         dense_parameters = state_num_parameters(local_state)
+        if is_fedpetuning(self.config):
+            trainable_state = serialize_trainable_state(model)
+            global_trainable_state = subset_state(global_state, trainable_state.keys())
+            return ClientResult(
+                client_id=self.client_id,
+                num_samples=len(self.train_loader.dataset),
+                loss=float(sum(losses) / len(losses)),
+                state=trainable_state,
+                dense_bytes=dense_bytes,
+                dense_parameters=dense_parameters,
+                download_bytes=state_num_bytes(global_trainable_state),
+                download_parameters=state_num_parameters(global_trainable_state),
+                upload_bytes=state_num_bytes(trainable_state),
+                upload_parameters=state_num_parameters(trainable_state),
+                payload_kind="fedpetuning_trainable_state",
+                compressor="trainable_subset",
+            )
         common = dict(
             client_id=self.client_id,
             num_samples=len(self.train_loader.dataset),
@@ -124,12 +138,7 @@ class FederatedClient:
         )
 
     def gradient_sample(self, global_state: StateDict, max_samples: int | None = None, batch_index: int = 0):
-        """Return gradients for a selected batch for DLG/iDLG evaluation.
-
-        Example:
-            ``grads, x, y = client.gradient_sample(server_state, max_samples=1, batch_index=2)``
-            extracts the third batch from the current loader order.
-        """
+        """Return gradients for a selected batch for DLG/iDLG evaluation."""
 
         model = build_model(self.config).to(self.device)
         load_serialized(model, copy.deepcopy(global_state), self.device)
