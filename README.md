@@ -63,13 +63,19 @@ folder:
 
 ## Rawdata2 PatchTST Experiment
 
-Prepare the latest CBC rawdata2 Excel files into chronological 8:1:1 splits:
+Prepare the preferred `XT_data` CSV files into chronological client splits.
+`new_train.csv` is split in time order into train/validation data, and
+`test1.csv` through `test9.csv` are preserved as test windows and merged into
+the framework's default `test.csv`:
 
 ```bash
-python -m scripts.prepare_rawdata2 \
-  --raw-dir ../Time-Series-Prediction/dataset/data_preprocess/rawdata2 \
+python -m scripts.prepare_xt_data \
+  --input-dir ../Time-Series-Prediction/dataset/XT_data \
   --output-dir ../data/rare_earth_rawdata2
 ```
+
+The older CBC Excel rawdata2 preparation entry point remains available as
+`python -m scripts.prepare_rawdata2` when `XT_data` is not available.
 
 Run each rawdata2 experiment separately with 500 maximum epochs/rounds
 and early stopping patience 50:
