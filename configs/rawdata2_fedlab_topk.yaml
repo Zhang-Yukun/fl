@@ -9,7 +9,7 @@ federated:
   algorithm: sparse_fedavg
   rounds: 500
   local_epochs: 1
-  topk_fraction: 0.05
+  topk_fraction: 0.10
 
 attack:
   enabled: true
