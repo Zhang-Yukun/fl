@@ -63,7 +63,7 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     """Return whether the configured FL algorithm compresses client uploads."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if algorithm == "fedavg":
+    if algorithm in {"fedavg", "fedaware"}:
         return False
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl"}:
         return True
@@ -182,7 +182,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     """Run single-process federated training.
 
     Example:
-        Set ``federated.algorithm=fedavg`` for standard dense FedAvg, or
+        Set ``federated.algorithm=fedavg`` for standard dense FedAvg,
+        ``fedaware`` for Xu et al.'s adaptive weighted dense aggregation, or
         ``compressed_fedavg`` for sparse uploads.
     """
 
@@ -217,13 +218,14 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         round_start = time.perf_counter()
         results = [client.train(server.global_state, compressed=compressed) for client in clients]
         if compressed:
-            server.aggregate_sparse(results)
+            aggregation_weights = server.aggregate_sparse(results)
         else:
-            server.aggregate_dense(results)
+            aggregation_weights = server.aggregate_dense(results)
         metrics = server.evaluate_global()
         record = server.record_round(
             round_index,
             results,
+            aggregation_weights,
             metrics,
             round_time_seconds=time.perf_counter() - round_start,
             elapsed_time_seconds=time.perf_counter() - start_time,

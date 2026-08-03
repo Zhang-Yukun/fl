@@ -11,9 +11,9 @@ conda run -n torch_env python -m scripts.train --config configs/test.yaml
 conda run -n torch_env python -m pytest tests
 ```
 
-The default experiment uses compressed FedAvg with top-k sparse updates. With
-`topk_fraction: 0.05`, the measured single-round upload compression ratio is
-expected to be at least 6x compared with dense FedAvg uploads.
+The default smoke config uses compressed FedAvg with top-k sparse updates. The
+main rawdata2 comparison scripts are separated into centralized training,
+standard FedAvg, and Xu et al.'s FedAWARE aggregation.
 
 ## Main Modules
 
@@ -23,8 +23,9 @@ expected to be at least 6x compared with dense FedAvg uploads.
 - `federated_ts.datasets.rare_earth`: rare-earth CSV loading and sliding-window datasets.
 - `federated_ts.modeling.forecasting`: forecasting model registry and implementations.
 - `federated_ts.engine.training`: local train/evaluate loops.
-- `federated_ts.federated.algorithms`: centralized training, FedAvg, compressed FedAvg.
+- `federated_ts.federated.algorithms`: centralized training, FedAvg, FedAWARE, and compressed FedAvg.
 - `federated_ts.federated.client` and `federated_ts.federated.server`: FL endpoint logic.
+- `federated_ts.utils.aggregation`: adaptive aggregation helpers for Xu et al.'s FedAWARE weighting.
 - `federated_ts.security.attacks`: DLG and iDLG-style gradient reconstruction attacks.
 - `federated_ts.communication.grpc_service`: gRPC transport helpers for multi-process training.
 
@@ -83,10 +84,10 @@ and early stopping patience 50:
 ```bash
 bash scripts/run_rawdata2_centralized.sh
 bash scripts/run_rawdata2_fedavg.sh
-bash scripts/run_rawdata2_fedlab_topk.sh
+bash scripts/run_rawdata2_fedaware.sh
 ```
 
 Extra overrides can be appended to any script, for example
 `--override federated.rounds=30`. Generated data is stored under
 `../data/rare_earth_rawdata2`; experiment artifacts are stored under the
-corresponding `outputs/rawdata2_*` directory.
+corresponding `outputs/rawdata2_*` directory. The FedAWARE comparison run uses Xu et al.'s adaptive weighted aggregation configuration in `configs/rawdata2_fedaware.yaml`.

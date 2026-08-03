@@ -5,11 +5,12 @@ SCRIPT_DIR = Path(__file__).parents[2] / "scripts"
 
 
 def test_rawdata2_run_scripts_are_separate_and_executable():
-    """Rawdata2 centralized, FedAvg, and Top-k runs have separate bash entry points."""
+    """Rawdata2 centralized, FedAvg, and FedAWARE runs have separate bash entry points."""
 
     expected = {
         "run_rawdata2_centralized.sh": ["--mode centralized", "rawdata2_patchtst_centralized"],
         "run_rawdata2_fedavg.sh": ["--mode federated", "federated.algorithm=fedavg"],
+        "run_rawdata2_fedaware.sh": ["configs/rawdata2_fedaware.yaml"],
         "run_rawdata2_fedlab_topk.sh": ["configs/rawdata2_fedlab_topk.yaml"],
     }
     for name, markers in expected.items():
@@ -32,7 +33,17 @@ def test_rawdata2_all_script_runs_each_entrypoint():
     for script_name in (
         "scripts/run_rawdata2_centralized.sh",
         "scripts/run_rawdata2_fedavg.sh",
-        "scripts/run_rawdata2_fedlab_topk.sh",
+        "scripts/run_rawdata2_fedaware.sh",
     ):
         assert script_name in content
     assert 'bash "${run_script}" "$@"' in content
+
+
+def test_rawdata2_fedaware_python_entrypoint_exists():
+    """FedAWARE also provides a direct Python entrypoint for scripted runs."""
+
+    path = SCRIPT_DIR / "run_rawdata2_fedaware.py"
+    assert path.exists()
+    content = path.read_text(encoding="utf-8")
+    assert "configs/rawdata2_fedaware.yaml" in content
+    assert 'config["federated"]["algorithm"] = "fedaware"' in content

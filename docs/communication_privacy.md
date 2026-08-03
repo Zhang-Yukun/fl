@@ -2,7 +2,21 @@
 
 ## Literature Scope
 
-FedLab, with Zenglin Xu listed among the authors, is a flexible federated learning framework that exposes modular server, client, communication, and compression components. It is useful as a framework reference for communication-compression extensibility. The concrete privacy/compression algorithm implemented in this repository is the SoteriaFL-style component below, not claimed as a Zenglin Xu paper.
+FedAWARE is the Xu et al. adaptive weighted aggregation method used as the repository's Xu-related comparison algorithm. It keeps dense client uploads like FedAvg, but the server replaces fixed sample-count averaging with adaptive client weights derived from client update geometry. The concrete privacy/compression algorithm implemented elsewhere in this repository is the SoteriaFL-style component below, and it is not claimed as a Zenglin Xu paper.
+
+
+## Xu et al. Comparison Algorithm
+
+The `fedaware` algorithm path implements a FedAWARE-style adaptive weighted aggregation step:
+
+1. Each client receives the dense global model and performs standard local training.
+2. Each client uploads its dense local model state.
+3. The server converts each local model into a dense update `local_state - global_state`.
+4. The server solves a simplex-constrained adaptive weighting problem over the client updates.
+5. The adaptive weights are blended with the standard sample-count FedAvg prior using `fedaware.alpha`.
+6. The weighted dense update is applied to the global model.
+
+This keeps the training contract close to FedAvg while making the comparison algorithm explicitly tied to Xu et al. rather than to the earlier FedLab framework paper.
 
 ## Implemented Algorithm Component
 
@@ -35,9 +49,9 @@ Run a short smoke test with overrides:
 conda run -n torch_env python -m scripts.train --config configs/rawdata2_soteriafl.yaml --override federated.rounds=2 --override attack.frequency_rounds=1 --override attack.steps=1
 ```
 
-## FedLab-Style Top-k Compression
+## Extra Top-k Compression Baseline
 
-FedLab is the Zenglin Xu related framework reference used here for communication-efficient FL structure. Its compression extension point includes Top-k communication compression. The local `sparse_fedavg` / `compressed_fedavg` path implements the same core Top-k selection idea for model updates: each client sends the largest-magnitude `topk_fraction` coordinates plus their indices, and the server reconstructs sparse updates before FedAvg-weighted aggregation.
+The local `sparse_fedavg` / `compressed_fedavg` path remains available as an additional communication-compression baseline. It implements the core Top-k update upload idea: each client sends the largest-magnitude `topk_fraction` coordinates plus their indices, and the server reconstructs sparse updates before FedAvg-weighted aggregation. This path is kept for compression/attack analysis, but it is not the repository's Xu et al. comparison algorithm.
 
 Run the rawdata2 full PatchTST Top-k experiment from `src`:
 

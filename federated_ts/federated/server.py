@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from loguru import logger
 
 from federated_ts.utils.artifacts import save_experiment_config
 from federated_ts.modeling.forecasting import build_model
+from federated_ts.utils.aggregation import fedaware_weights
 from federated_ts.utils.serialization import (
     StateDict,
     add_update,
@@ -20,6 +22,7 @@ from federated_ts.utils.serialization import (
     serialize_model,
     state_num_bytes,
     state_num_parameters,
+    subtract_state,
 )
 from federated_ts.engine.training import evaluate
 
@@ -41,6 +44,7 @@ class ClientCommunicationRecord:
     compressor: str
     privacy_clip_norm: float
     privacy_noise_multiplier: float
+    aggregation_weight: float
 
 
 @dataclass
@@ -121,13 +125,34 @@ class FederatedServer:
             state_num_bytes(self.global_state),
         )
 
-    def aggregate_dense(self, results) -> None:
-        """Aggregate full client model states with FedAvg."""
+    def aggregate_dense(self, results) -> list[float]:
+        """Aggregate full client model states with dense FedAvg-style methods."""
 
-        weights = [result.num_samples for result in results]
-        self.global_state = average_states([result.state for result in results], weights)
+        algorithm = str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower()
+        sample_weights = [result.num_samples for result in results]
+        if algorithm == "fedaware":
+            aware_cfg = self.config.get("fedaware", {})
+            updates = [subtract_state(result.state, self.global_state) for result in results]
+            weights = fedaware_weights(
+                updates,
+                sample_weights,
+                alpha=float(aware_cfg.get("alpha", 0.5)),
+                steps=int(aware_cfg.get("steps", 50)),
+                lr=float(aware_cfg.get("lr", 0.1)),
+            )
+            averaged_update = None
+            for update, weight in zip(updates, weights):
+                scaled = OrderedDict((name, tensor * weight) for name, tensor in update.items())
+                averaged_update = scaled if averaged_update is None else OrderedDict(
+                    (name, averaged_update[name] + scaled[name]) for name in scaled
+                )
+            self.global_state = add_update(self.global_state, averaged_update)
+            return weights
+        weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
+        self.global_state = average_states([result.state for result in results], sample_weights)
+        return weights
 
-    def aggregate_sparse(self, results) -> None:
+    def aggregate_sparse(self, results) -> list[float]:
         """Aggregate sparse client updates for compressed FedAvg."""
 
         weights = [result.num_samples for result in results]
@@ -138,6 +163,7 @@ class FederatedServer:
             scaled = {name: tensor * (weight / total) for name, tensor in dense.items()}
             update = scaled if update is None else {name: update[name] + scaled[name] for name in scaled}
         self.global_state = add_update(self.global_state, update)
+        return [weight / total for weight in weights]
 
     def evaluate_global(self) -> dict[str, float]:
         """Evaluate the current global model on the server validation set."""
@@ -155,6 +181,7 @@ class FederatedServer:
         self,
         round_index: int,
         results,
+        aggregation_weights: list[float],
         metrics: dict[str, float],
         round_time_seconds: float,
         elapsed_time_seconds: float,
@@ -191,8 +218,9 @@ class FederatedServer:
                 compressor=result.compressor,
                 privacy_clip_norm=result.privacy_clip_norm,
                 privacy_noise_multiplier=result.privacy_noise_multiplier,
+                aggregation_weight=aggregation_weight,
             )
-            for result in results
+            for result, aggregation_weight in zip(results, aggregation_weights)
         ]
         record = RoundRecord(
             round=round_index,
@@ -231,7 +259,7 @@ class FederatedServer:
         )
         for client in client_records:
             logger.info(
-                "Round {} client={} samples={} payload={} compressor={} clip_norm={} noise_multiplier={} loss={:.6f} upload={}B/{} params download={}B/{} params",
+                "Round {} client={} samples={} payload={} compressor={} clip_norm={} noise_multiplier={} agg_weight={:.6f} loss={:.6f} upload={}B/{} params download={}B/{} params",
                 round_index,
                 client.client_id,
                 client.num_samples,
@@ -239,6 +267,7 @@ class FederatedServer:
                 client.compressor,
                 client.privacy_clip_norm,
                 client.privacy_noise_multiplier,
+                client.aggregation_weight,
                 client.loss,
                 client.upload_bytes,
                 client.upload_parameters,

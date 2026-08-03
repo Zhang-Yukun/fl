@@ -1,0 +1,16 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_fedaware
+  mode: federated
+  output_dir: outputs/rawdata2_fedaware
+
+federated:
+  algorithm: fedaware
+  rounds: 500
+  local_epochs: 1
+
+fedaware:
+  alpha: 0.5
+  steps: 50
+  lr: 0.1

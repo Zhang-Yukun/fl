@@ -31,6 +31,28 @@ def test_standard_fedavg_uses_dense_uploads(tmp_path):
     assert metrics[0]["total_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
 
 
+def test_fedaware_uses_dense_uploads_and_records_weights(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=fedaware",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "fedaware.alpha=1.0",
+            "fedaware.steps=10",
+            "fedaware.lr=0.2",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    clients = metrics[0]["clients"]
+    assert result["last_upload_compression_ratio"] == 1.0
+    assert all(client["payload_kind"] == "dense_state" for client in clients)
+    assert abs(sum(client["aggregation_weight"] for client in clients) - 1.0) < 1e-6
+    assert all(client["aggregation_weight"] >= 0.0 for client in clients)
+
+
 def test_config_artifact_formats_are_configurable(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",

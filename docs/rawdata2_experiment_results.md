@@ -7,9 +7,17 @@ Run date: 2026-07-31
 ```bash
 bash scripts/run_rawdata2_centralized.sh
 bash scripts/run_rawdata2_fedavg.sh
-bash scripts/run_rawdata2_fedlab_topk.sh
+bash scripts/run_rawdata2_fedaware.sh
 conda run -n torch_env python -m scripts.run_rawdata2_soteriafl --override experiment.output_dir=outputs/rawdata2_soteriafl_smoke --override federated.rounds=2 --override training.patience=2 --override attack.frequency_rounds=1 --override attack.steps=1 --override attack.max_samples=1
 ```
+
+The repository's default comparison set is now:
+
+- centralized PatchTST
+- standard `fedavg`
+- Xu et al.'s `fedaware`
+
+`fedlab_topk` and `soteriafl` remain available as extra compression/privacy baselines.
 
 ## Full PatchTST Centralized
 
