@@ -135,3 +135,23 @@ def test_fedpetuning_uploads_only_trainable_subset(tmp_path):
     assert all(client["payload_kind"] == "fedpetuning_trainable_state" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
     assert result["last_upload_compression_ratio"] > 1.0
+
+
+def test_dp_topk_uses_sparse_dp_topk_payloads(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=dp_topk_fedavg",
+            "federated.rounds=1",
+            "privacy.clip_norm=1.0",
+            "privacy.noise_multiplier=0.0",
+            "attack.enabled=false",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    assert result["last_upload_compression_ratio"] >= 6.0
+    assert all(client["payload_kind"] == "dp_topk_dp_update" for client in metrics[0]["clients"])
+    assert all(client["compressor"] == "topk_dp" for client in metrics[0]["clients"])
+    assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 runs=(
   "scripts/run_rawdata2_centralized.sh"
   "scripts/run_rawdata2_fedavg.sh"
-  "scripts/run_rawdata2_soteriafl.sh"
+  "scripts/run_rawdata2_dp_topk.sh"
 )
 
 for run_script in "${runs[@]}"; do

@@ -19,16 +19,17 @@ attack:
   enabled: true
   frequency_rounds: 1
   max_samples: 1
-  steps: 300
+  steps: 500
   lr: 0.05
   optimizer: adam
-  restarts: 1
+  restarts: 2
   lbfgs_history_size: 20
   client_selection: round_robin
-  clients_per_round: 1
-  sample_count: 1
+  clients_per_round: 2
+  sample_count: 2
   input_clip: 5.0
   target_clip: 5.0
-  success_ssim_threshold: 0.75
+  success_mse_threshold: 0.1
+  success_ssim_threshold: 0.3
   model_mode: eval
   seed: 2026

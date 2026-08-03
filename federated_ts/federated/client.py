@@ -109,14 +109,20 @@ class FederatedClient:
             compressor = "topk"
             privacy_clip_norm = 0.0
             privacy_noise_multiplier = 0.0
-            if str(self.config["federated"].get("algorithm", "fedavg")).lower() == "soteriafl":
+            algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
+            if algorithm in {"soteriafl", "dp_topk_fedavg"}:
                 privacy_cfg = self.config.get("privacy", {})
                 privacy_clip_norm = float(privacy_cfg.get("clip_norm", 1.0))
                 privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.1))
                 update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
-                sparse = compress_randomk(update, fraction)
-                payload_kind = "soteriafl_randomk_dp_update"
-                compressor = "randomk_unbiased"
+                if algorithm == "soteriafl":
+                    sparse = compress_randomk(update, fraction)
+                    payload_kind = "soteriafl_randomk_dp_update"
+                    compressor = "randomk_unbiased"
+                else:
+                    sparse = compress_topk(update, fraction)
+                    payload_kind = "dp_topk_dp_update"
+                    compressor = "topk_dp"
             else:
                 sparse = compress_topk(update, fraction)
             return ClientResult(
