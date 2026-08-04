@@ -70,3 +70,27 @@ def test_quantize_state_update_reduces_payload_size_and_restores_float32():
     assert restored["w"].dtype == torch.float32
     assert state_num_bytes(quantized) < state_num_bytes(update)
     assert torch.allclose(restored["w"], update["w"], atol=1e-3)
+
+
+def test_absmax_int8_quantization_tracks_scale_and_restores_approximately():
+    update = {"w": torch.tensor([1.0, -2.0, 3.5, -0.25], dtype=torch.float32)}
+    quantized = quantize_state_update(update, dtype="int8")
+    restored = dequantize_state_update(quantized)
+
+    assert quantized["w"].dtype == torch.int8
+    assert "w.__scale__" in quantized
+    assert state_num_bytes(quantized) < state_num_bytes(update)
+    assert restored["w"].dtype == torch.float32
+    assert torch.allclose(restored["w"], update["w"], atol=0.05)
+
+
+def test_absmax_int8_stochastic_quantization_is_seeded_and_approximately_restores():
+    update = {"w": torch.tensor([0.1, 0.9, -1.7, 3.2], dtype=torch.float32)}
+    generator_a = torch.Generator().manual_seed(7)
+    generator_b = torch.Generator().manual_seed(7)
+    quantized_a = quantize_state_update(update, dtype="int8", stochastic_rounding=True, generator=generator_a)
+    quantized_b = quantize_state_update(update, dtype="int8", stochastic_rounding=True, generator=generator_b)
+    restored = dequantize_state_update(quantized_a)
+
+    assert torch.equal(quantized_a["w"], quantized_b["w"])
+    assert torch.allclose(restored["w"], update["w"], atol=0.1)

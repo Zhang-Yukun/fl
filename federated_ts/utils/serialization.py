@@ -10,6 +10,7 @@ import torch
 
 
 StateDict = OrderedDict[str, torch.Tensor]
+QUANT_SCALE_SUFFIX = ".__scale__"
 
 
 @dataclass
@@ -211,22 +212,51 @@ def privatize_state_update(
     return private
 
 
-def quantize_state_update(update: StateDict, dtype: str = "float16") -> StateDict:
-    """Quantize a dense update tensor-by-tensor for milder communication reduction.
+def quantize_state_update(
+    update: StateDict,
+    dtype: str = "float16",
+    stochastic_rounding: bool = False,
+    generator: torch.Generator | None = None,
+) -> StateDict:
+    """Quantize a dense update tensor-by-tensor for communication reduction.
 
     Example:
         ``quantize_state_update(update, dtype="float16")`` halves the
         upload payload while keeping a dense update structure.
+
+        ``quantize_state_update(update, dtype="int8", stochastic_rounding=True)``
+        performs per-tensor absmax normalization, applies randomized rounding,
+        sends one float scale per tensor, and stores the normalized values as int8.
     """
 
+    normalized_dtype = str(dtype).lower()
     quantized_dtype = {
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
         "float32": torch.float32,
-    }.get(str(dtype).lower())
-    if quantized_dtype is None:
+    }.get(normalized_dtype)
+    if quantized_dtype is not None:
+        return OrderedDict((name, tensor.detach().cpu().clone().to(quantized_dtype)) for name, tensor in update.items())
+    if normalized_dtype not in {"int8", "qint8", "absmax_int8", "scaled_int8"}:
         raise ValueError(f"Unsupported quantization dtype: {dtype}")
-    return OrderedDict((name, tensor.detach().cpu().clone().to(quantized_dtype)) for name, tensor in update.items())
+
+    quantized: StateDict = OrderedDict()
+    for name, tensor in update.items():
+        base = tensor.detach().cpu().clone().to(torch.float32)
+        max_abs = float(base.abs().max().item())
+        scale = max(max_abs / 127.0, 1e-12)
+        normalized = torch.clamp(base / scale, -127.0, 127.0)
+        if stochastic_rounding:
+            lower = torch.floor(normalized)
+            probability = normalized - lower
+            random = torch.rand(normalized.shape, generator=generator, dtype=torch.float32)
+            rounded = lower + (random < probability).to(torch.float32)
+        else:
+            rounded = torch.round(normalized)
+        q = torch.clamp(rounded, -127.0, 127.0).to(torch.int8)
+        quantized[name] = q
+        quantized[f"{name}{QUANT_SCALE_SUFFIX}"] = torch.tensor(scale, dtype=torch.float32)
+    return quantized
 
 
 def dequantize_state_update(update: StateDict) -> StateDict:
@@ -237,7 +267,17 @@ def dequantize_state_update(update: StateDict) -> StateDict:
         for server-side FedAvg aggregation.
     """
 
-    return OrderedDict((name, tensor.detach().cpu().clone().to(torch.float32)) for name, tensor in update.items())
+    restored: StateDict = OrderedDict()
+    for name, tensor in update.items():
+        if name.endswith(QUANT_SCALE_SUFFIX):
+            continue
+        scale_name = f"{name}{QUANT_SCALE_SUFFIX}"
+        if scale_name in update:
+            scale = float(update[scale_name].detach().cpu().item())
+            restored[name] = tensor.detach().cpu().to(torch.float32) * scale
+        else:
+            restored[name] = tensor.detach().cpu().clone().to(torch.float32)
+    return restored
 
 
 def privatize_sparse_update(sparse: SparseUpdate, clip_norm: float, noise_multiplier: float) -> SparseUpdate:

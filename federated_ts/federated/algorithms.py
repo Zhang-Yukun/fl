@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import torch
+
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - numpy is expected in the training env
+    np = None
 from loguru import logger
 
 from federated_ts.utils.artifacts import save_experiment_config
@@ -38,6 +44,27 @@ def configure_torch_runtime(config: dict[str, Any]) -> None:
             logger.info("Set torch num_interop_threads={}", int(interop_threads))
         except RuntimeError as exc:
             logger.warning("Could not set torch interop threads after runtime start: {}", exc)
+
+
+def configure_random_seed(config: dict[str, Any]) -> None:
+    """Apply a deterministic seed across Python, NumPy, and torch when configured."""
+
+    runtime_cfg = config.get("runtime", {})
+    seed = runtime_cfg.get("seed")
+    if seed is None:
+        return
+    seed_value = int(seed)
+    random.seed(seed_value)
+    if np is not None:
+        np.random.seed(seed_value)
+    torch.manual_seed(seed_value)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed_value)
+    deterministic = bool(runtime_cfg.get("deterministic", True))
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = deterministic
+        torch.backends.cudnn.benchmark = not deterministic
+    logger.info("Set runtime seed={} deterministic={}", seed_value, deterministic)
 
 
 def resolve_device(config: dict[str, Any]) -> torch.device:
@@ -153,6 +180,18 @@ def _protect_attack_gradients(
             flat = flat.to(torch.float16).to(torch.float32)
         elif quant_dtype == "bfloat16":
             flat = flat.to(torch.bfloat16).to(torch.float32)
+        elif quant_dtype in {"int8", "qint8", "absmax_int8", "scaled_int8"}:
+            max_abs = float(flat.abs().max().item())
+            scale = max(max_abs / 127.0, 1e-12)
+            normalized = torch.clamp(flat / scale, -127.0, 127.0)
+            if bool(config.get("federated", {}).get("quantization_stochastic_rounding", False)):
+                lower = torch.floor(normalized)
+                probability = normalized - lower
+                random = torch.rand(normalized.shape, generator=generator, dtype=torch.float32)
+                rounded = lower + (random < probability).to(torch.float32)
+            else:
+                rounded = torch.round(normalized)
+            flat = torch.clamp(rounded, -127.0, 127.0).to(torch.int8).to(torch.float32) * scale
 
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "dp_topk_fedavg", "soteriafl"}:
         fraction = float(config.get("federated", {}).get("topk_fraction", 0.05))
@@ -182,6 +221,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
     configure_torch_runtime(config)
+    configure_random_seed(config)
     tracker = Tracker(config)
     start_time = time.perf_counter()
     device = resolve_device(config)
@@ -258,6 +298,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
     configure_torch_runtime(config)
+    configure_random_seed(config)
     tracker = Tracker(config)
     start_time = time.perf_counter()
     device = resolve_device(config)
@@ -284,7 +325,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     attack_results = []
     for round_index in range(max_rounds):
         round_start = time.perf_counter()
-        results = [client.train(server.global_state, compressed=compressed) for client in clients]
+        results = [client.train(server.global_state, compressed=compressed, round_index=round_index) for client in clients]
         if compressed:
             aggregation_weights = server.aggregate_sparse(results)
         else:

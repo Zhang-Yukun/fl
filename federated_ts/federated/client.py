@@ -67,7 +67,18 @@ class FederatedClient:
         self.config = config
         self.device = device
 
-    def train(self, global_state: StateDict, compressed: bool = False) -> ClientResult:
+    def _upload_quantization_generator(self, round_index: int) -> torch.Generator | None:
+        """Create a deterministic per-client generator for randomized upload quantization."""
+
+        seed = self.config.get("federated", {}).get("quantization_seed")
+        if seed is None:
+            return None
+        offset = sum(ord(char) for char in self.client_id)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(seed) + round_index * 1000 + offset)
+        return generator
+
+    def train(self, global_state: StateDict, compressed: bool = False, round_index: int = 0) -> ClientResult:
         """Train locally from global weights and return a dense or sparse payload."""
 
         algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
@@ -124,7 +135,12 @@ class FederatedClient:
             privacy_clip_norm = float(privacy_cfg.get("clip_norm", 0.0))
             privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.0))
             update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
-            quantized = quantize_state_update(update, dtype=str(self.config.get("federated", {}).get("quantization_dtype", "float16")))
+            quantized = quantize_state_update(
+                update,
+                dtype=str(self.config.get("federated", {}).get("quantization_dtype", "float16")),
+                stochastic_rounding=bool(self.config.get("federated", {}).get("quantization_stochastic_rounding", False)),
+                generator=self._upload_quantization_generator(round_index),
+            )
             return ClientResult(
                 **common,
                 state=quantized,

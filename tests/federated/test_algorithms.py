@@ -194,6 +194,32 @@ def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
     assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
 
+def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=secure_quantized_fedavg",
+            "federated.rounds=1",
+            "federated.quantization_dtype=int8",
+            "federated.quantization_stochastic_rounding=true",
+            "federated.quantization_seed=2026",
+            "privacy.clip_norm=10.0",
+            "privacy.noise_multiplier=0.0",
+            "attack.enabled=false",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    clients = metrics[0]["clients"]
+
+    assert result["last_upload_compression_ratio"] > 3.0
+    assert result["last_total_communication_ratio"] > 3.0
+    assert all(client["compressor"] == "int8_quantized_dense" for client in clients)
+    assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
+    assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
+
+
 def test_dp_topk_uses_sparse_dp_topk_payloads(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
