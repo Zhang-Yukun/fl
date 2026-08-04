@@ -43,6 +43,7 @@ federated:
   topk_fraction: 0.05
 
 attack:
+  target_type: update_payload
   enabled: true
   frequency_rounds: 5
   max_samples: 1

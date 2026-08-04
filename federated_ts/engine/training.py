@@ -52,6 +52,29 @@ def evaluate(model: nn.Module, loader: Iterable, device: torch.device) -> dict[s
     return {"mse": mse(pred, target), "mae": mae(pred, target), "mape": mape(pred, target)}
 
 
+def first_batch_sample(
+    loader: Iterable,
+    device: torch.device,
+    max_samples: int | None = None,
+    batch_index: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return one selected batch without computing gradients.
+
+    Example:
+        ``x, y = first_batch_sample(loader, device, max_samples=1, batch_index=2)``
+        fetches the third batch for payload-based inversion experiments.
+    """
+
+    iterator = iter(loader)
+    x = y = None
+    for _ in range(max(0, int(batch_index)) + 1):
+        x, y = next(iterator)
+    if max_samples is not None:
+        x = x[:max_samples]
+        y = y[:max_samples]
+    return x.to(device), y.to(device)
+
+
 def first_batch_gradient(
     model: nn.Module,
     loader: Iterable,

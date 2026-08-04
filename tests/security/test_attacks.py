@@ -3,13 +3,14 @@ import torch
 from federated_ts.modeling.forecasting import build_model
 from federated_ts.engine.training import first_batch_gradient
 from federated_ts.security.attacks import dlg_attack, idlg_attack, summarize_attack_results
-from federated_ts.utils.serialization import serialize_model
+from federated_ts.utils.serialization import serialize_model, subtract_state
 
 
-def _tiny_patchtst_config():
+def _tiny_patchtst_config(target_type: str = "update_payload"):
     return {
         "runtime": {"device": "cpu"},
         "data": {"seq_len": 8, "pred_len": 2},
+        "training": {"lr": 0.001},
         "model": {
             "name": "patchtst",
             "channels": 1,
@@ -24,6 +25,7 @@ def _tiny_patchtst_config():
             "dropout": 0.0,
         },
         "attack": {
+            "target_type": target_type,
             "steps": 1,
             "lr": 0.05,
             "optimizer": "lbfgs",
@@ -35,13 +37,15 @@ def _tiny_patchtst_config():
             "success_rate_threshold": 0.03,
             "data_range": 1.0,
             "model_mode": "eval",
+            "local_optimizer": "adam",
+            "local_lr": 0.001,
             "seed": 7,
         },
     }
 
 
 def test_gradient_attacks_run_on_vendored_patchtst():
-    config = _tiny_patchtst_config()
+    config = _tiny_patchtst_config(target_type="gradient")
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(1, 8, 1)
@@ -50,13 +54,14 @@ def test_gradient_attacks_run_on_vendored_patchtst():
     grads = torch.autograd.grad(loss, tuple(model.parameters()))
     state = serialize_model(model)
 
-    dlg = dlg_attack(config, state, [grad.detach() for grad in grads], x, y, device)
-    idlg = idlg_attack(config, state, [grad.detach() for grad in grads], x, y, device)
+    dlg = dlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
+    idlg = idlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
 
     assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
     assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
     for result in (dlg, idlg):
         assert result.mse == result.reconstruction_mse
+        assert result.target_type == "gradient"
         assert torch.isfinite(torch.tensor(result.psnr))
         assert torch.isfinite(torch.tensor(result.ssim))
         assert result.iterations == 1
@@ -64,12 +69,13 @@ def test_gradient_attacks_run_on_vendored_patchtst():
         assert result.success_threshold == 0.01
         record = result.to_record()
         assert record["mse"] == record["reconstruction_mse"]
-        assert {"psnr", "ssim", "iterations", "time_seconds", "gradient_mse"} <= set(record)
+        assert {"psnr", "ssim", "iterations", "time_seconds", "gradient_mse", "objective_mse", "target_type"} <= set(record)
 
     summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
     assert set(summary["methods"]) == {"DLG", "iDLG"}
     assert summary["primary_metric"] == "reconstruction_mse"
     assert summary["primary_metric_direction"] == "higher_is_more_private"
+    assert summary["target_type"] == "gradient"
     assert summary["overall_avg_mse"] is not None
     assert summary["success_rate_threshold"] == 0.03
     assert summary["methods"]["DLG"]["primary_metric"] == "reconstruction_mse"
@@ -77,8 +83,36 @@ def test_gradient_attacks_run_on_vendored_patchtst():
     assert "avg_gradient_mse" in summary["methods"]["DLG"]
 
 
+def test_update_payload_attacks_run_on_vendored_patchtst():
+    config = _tiny_patchtst_config(target_type="update_payload")
+    device = torch.device("cpu")
+    model = build_model(config).to(device)
+    x = torch.randn(1, 8, 1)
+    y = torch.randn(1, 2, 1)
+    state = serialize_model(model)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["lr"])
+    optimizer.zero_grad(set_to_none=True)
+    loss = torch.nn.functional.mse_loss(model(x), y)
+    loss.backward()
+    optimizer.step()
+    target_update = subtract_state(serialize_model(model), state)
+
+    dlg = dlg_attack(config, state, target_update, x, y, device, target_type="update_payload")
+    idlg = idlg_attack(config, state, target_update, x, y, device, target_type="update_payload")
+
+    assert dlg.target_type == "update_payload"
+    assert idlg.target_type == "update_payload"
+    assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
+    assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
+
+    summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
+    assert summary["target_type"] == "update_payload"
+    assert summary["methods"]["DLG"]["target_type"] == "update_payload"
+    assert summary["overall_avg_objective_mse"] is not None
+
+
 def test_attack_gradient_sampling_supports_eval_mode():
-    config = _tiny_patchtst_config()
+    config = _tiny_patchtst_config(target_type="gradient")
     config["model"]["dropout"] = 0.5
     device = torch.device("cpu")
     x = torch.randn(2, 8, 1)
@@ -97,7 +131,7 @@ def test_attack_gradient_sampling_supports_eval_mode():
 
 
 def test_attack_gradient_sampling_supports_fedpetuning_trainable_subset():
-    config = _tiny_patchtst_config()
+    config = _tiny_patchtst_config(target_type="gradient")
     config["federated"] = {"algorithm": "fedpetuning"}
     config["model"]["peft"] = {"enabled": True, "method": "fedpetuning", "bottleneck_dim": 4, "train_head": True}
     device = torch.device("cpu")

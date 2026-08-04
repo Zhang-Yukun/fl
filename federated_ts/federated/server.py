@@ -130,13 +130,13 @@ class FederatedServer:
         )
 
     def aggregate_dense(self, results) -> list[float]:
-        """Aggregate full client model states with dense FedAvg-style methods."""
+        """Aggregate dense client payloads for FedAvg-style methods."""
 
         algorithm = str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower()
         sample_weights = [result.num_samples for result in results]
         if algorithm == "fedaware":
             aware_cfg = self.config.get("fedaware", {})
-            updates = [subtract_state(result.state, self.global_state) for result in results]
+            updates = [result.state for result in results]
             weights = fedaware_weights(
                 updates,
                 sample_weights,
@@ -168,7 +168,8 @@ class FederatedServer:
             self.global_state = add_update(compressed_base, averaged_update)
             return weights
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-        self.global_state = average_states([result.state for result in results], sample_weights)
+        averaged_update = average_states([result.state for result in results], sample_weights)
+        self.global_state = add_update(self.global_state, averaged_update)
         return weights
 
     def aggregate_sparse(self, results) -> list[float]:

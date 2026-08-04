@@ -23,7 +23,14 @@ from federated_ts.federated.client import FederatedClient
 from federated_ts.datasets.rare_earth import build_federated_loaders
 from federated_ts.utils.logging import setup_logging
 from federated_ts.modeling.forecasting import build_model
-from federated_ts.utils.serialization import serialize_model, state_num_bytes, state_num_parameters
+from federated_ts.utils.serialization import (
+    StateDict,
+    decompress_topk,
+    dequantize_state_update,
+    serialize_model,
+    state_num_bytes,
+    state_num_parameters,
+)
 from federated_ts.federated.server import EarlyStopper, FederatedServer, RoundRecord
 from federated_ts.utils.tracking import Tracker
 from federated_ts.engine.training import evaluate, train_one_epoch
@@ -215,6 +222,31 @@ def _protect_attack_gradients(
     return rebuilt
 
 
+def _clone_state(state: StateDict) -> StateDict:
+    """Return a detached CPU clone of a serialized model state."""
+
+    return type(state)((name, tensor.detach().cpu().clone()) for name, tensor in state.items())
+
+
+def _attack_target_type(config: dict[str, Any]) -> str:
+    """Return the configured interception target for reconstruction attacks."""
+
+    return str(config.get("attack", {}).get("target_type", "update_payload")).lower()
+
+
+def _extract_attack_payload(config: dict[str, Any], result) -> StateDict:
+    """Return the actual transmitted client payload as a dense state update."""
+
+    if result.sparse_update is not None:
+        return decompress_topk(result.sparse_update)
+    if result.state is None:
+        raise ValueError(f"Client {result.client_id} did not produce an attackable payload")
+    algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
+    if algorithm == "secure_quantized_fedavg":
+        return dequantize_state_update(result.state)
+    return _clone_state(result.state)
+
+
 def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     """Run centralized training over all client datasets."""
 
@@ -307,11 +339,13 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     clients = [FederatedClient(client_id, loader, config, device) for client_id, loader in train_loaders.items()]
     compressed = is_compressed_algorithm(config)
     algorithm = str(config["federated"].get("algorithm", "fedavg"))
+    attack_target_type = _attack_target_type(config)
     logger.info(
-        "Starting federated run algorithm={} clients={} compressed_uploads={}",
+        "Starting federated run algorithm={} clients={} compressed_uploads={} attack_target_type={}",
         algorithm,
         [client.client_id for client in clients],
         compressed,
+        attack_target_type,
     )
     tracker.log({
         "run/algorithm": algorithm,
@@ -325,7 +359,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     attack_results = []
     for round_index in range(max_rounds):
         round_start = time.perf_counter()
-        results = [client.train(server.global_state, compressed=compressed, round_index=round_index) for client in clients]
+        round_base_state = _clone_state(server.global_state)
+        results = [client.train(round_base_state, compressed=compressed, round_index=round_index) for client in clients]
         if compressed:
             aggregation_weights = server.aggregate_sparse(results)
         else:
@@ -346,24 +381,30 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             max_samples = int(attack_cfg.get("max_samples", 1))
             sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
             selected_clients = _select_attack_clients(clients, config, round_index)
+            results_by_client = {result.client_id: result for result in results}
             round_attacks = []
             for client_index, client in enumerate(selected_clients):
+                result = results_by_client[client.client_id]
                 for sample_index in range(sample_count):
-                    grads, real_x, real_y = client.gradient_sample(
-                        server.global_state,
-                        max_samples=max_samples,
-                        batch_index=sample_index,
-                    )
-                    protected_grads = _protect_attack_gradients(
-                        config,
-                        grads,
-                        round_index=round_index,
-                        client_index=client_index,
-                        sample_index=sample_index,
-                    )
+                    if attack_target_type == "gradient":
+                        grads, real_x, real_y = client.gradient_sample(
+                            round_base_state,
+                            max_samples=max_samples,
+                            batch_index=sample_index,
+                        )
+                        target = _protect_attack_gradients(
+                            config,
+                            grads,
+                            round_index=round_index,
+                            client_index=client_index,
+                            sample_index=sample_index,
+                        )
+                    else:
+                        real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
+                        target = _extract_attack_payload(config, result)
                     round_attacks.extend([
-                        dlg_attack(config, server.global_state, protected_grads, real_x, real_y, device),
-                        idlg_attack(config, server.global_state, protected_grads, real_x, real_y, device),
+                        dlg_attack(config, round_base_state, target, real_x, real_y, device, target_type=attack_target_type),
+                        idlg_attack(config, round_base_state, target, real_x, real_y, device, target_type=attack_target_type),
                     ])
             attack_results.extend(round_attacks)
             attack_payload: dict[str, float] = {
@@ -412,6 +453,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         "last_upload_compression_ratio": server.history[-1].upload_compression_ratio if server.history else 0.0,
         "last_total_communication_ratio": server.history[-1].total_communication_ratio if server.history else 0.0,
         "last_communication_ratio": server.history[-1].communication_ratio if server.history else 0.0,
+        "attack_target_type": attack_summary.get("target_type", attack_target_type),
         "attack_primary_metric": attack_summary["primary_metric"],
         "attack_primary_metric_direction": attack_summary["primary_metric_direction"],
         "attack_overall_avg_mse": attack_summary["overall_avg_mse"],

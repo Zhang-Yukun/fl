@@ -24,7 +24,7 @@ from federated_ts.utils.serialization import (
     state_num_parameters,
     subtract_state,
 )
-from federated_ts.engine.training import first_batch_gradient, train_one_epoch
+from federated_ts.engine.training import first_batch_gradient, first_batch_sample, train_one_epoch
 
 
 @dataclass
@@ -44,7 +44,7 @@ class ClientResult:
     dense_download_reference_parameters: int = 0
     upload_bytes: int = 0
     upload_parameters: int = 0
-    payload_kind: str = "dense_state"
+    payload_kind: str = "dense_update"
     compressor: str = "none"
     privacy_clip_norm: float = 0.0
     privacy_noise_multiplier: float = 0.0
@@ -79,7 +79,12 @@ class FederatedClient:
         return generator
 
     def train(self, global_state: StateDict, compressed: bool = False, round_index: int = 0) -> ClientResult:
-        """Train locally from global weights and return a dense or sparse payload."""
+        """Train locally from global weights and return the transmitted payload.
+
+        Example:
+            Standard FedAvg-style clients upload dense model updates
+            ``local_state - received_global_state`` instead of full model states.
+        """
 
         algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
         received_global_state = global_state
@@ -183,12 +188,13 @@ class FederatedClient:
                 privacy_clip_norm=privacy_clip_norm,
                 privacy_noise_multiplier=privacy_noise_multiplier,
             )
+        dense_update = subtract_state(local_state, global_state)
         return ClientResult(
             **common,
-            state=local_state,
+            state=dense_update,
             upload_bytes=dense_bytes,
             upload_parameters=dense_parameters,
-            payload_kind="dense_state",
+            payload_kind="dense_update",
         )
 
     def gradient_sample(self, global_state: StateDict, max_samples: int | None = None, batch_index: int = 0):
@@ -204,3 +210,13 @@ class FederatedClient:
             model_mode=str(self.config.get("attack", {}).get("model_mode", "train")),
             batch_index=batch_index,
         )
+
+    def sample_batch(self, max_samples: int | None = None, batch_index: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return one selected local batch for payload-based reconstruction attacks.
+
+        Example:
+            ``x, y = client.sample_batch(max_samples=1, batch_index=2)`` selects
+            the third local mini-batch used for attack-side evaluation.
+        """
+
+        return first_batch_sample(self.train_loader, self.device, max_samples=max_samples, batch_index=batch_index)

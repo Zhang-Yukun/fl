@@ -1,6 +1,7 @@
-import torch
 import json
 from pathlib import Path
+
+import torch
 
 from federated_ts.federated.algorithms import _protect_attack_gradients, run_federated
 from federated_ts.utils.config import load_config
@@ -48,17 +49,17 @@ def test_protect_attack_gradients_applies_dp_topk_mask():
     assert flat[6].item() == 5.0
 
 
-def test_standard_fedavg_uses_dense_uploads(tmp_path):
+def test_standard_fedavg_uses_dense_updates(tmp_path):
     config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["federated.algorithm=fedavg"])
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
     assert result["last_upload_compression_ratio"] == 1.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    assert all(client["payload_kind"] == "dense_state" for client in metrics[0]["clients"])
+    assert all(client["payload_kind"] == "dense_update" for client in metrics[0]["clients"])
     assert metrics[0]["total_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
 
 
-def test_fedaware_uses_dense_uploads_and_records_weights(tmp_path):
+def test_fedaware_uses_dense_updates_and_records_weights(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
@@ -75,7 +76,7 @@ def test_fedaware_uses_dense_uploads_and_records_weights(tmp_path):
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     clients = metrics[0]["clients"]
     assert result["last_upload_compression_ratio"] == 1.0
-    assert all(client["payload_kind"] == "dense_state" for client in clients)
+    assert all(client["payload_kind"] == "dense_update" for client in clients)
     assert abs(sum(client["aggregation_weight"] for client in clients) - 1.0) < 1e-6
     assert all(client["aggregation_weight"] >= 0.0 for client in clients)
 
@@ -92,14 +93,18 @@ def test_config_artifact_formats_are_configurable(tmp_path):
     assert (tmp_path / "config.toml").exists()
 
 
-def test_federated_run_saves_attack_results(tmp_path):
+def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
             "attack.enabled=true",
+            "attack.target_type=update_payload",
             "attack.frequency_rounds=1",
             "attack.max_samples=1",
             "attack.steps=1",
+            "attack.optimizer=adam",
+            "attack.local_optimizer=adam",
+            "federated.algorithm=fedavg",
             "federated.rounds=1",
         ],
     )
@@ -107,15 +112,38 @@ def test_federated_run_saves_attack_results(tmp_path):
     result = run_federated(config)
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
-    assert {"mse", "reconstruction_mse", "psnr", "ssim", "iterations", "time_seconds"} <= set(attack_results[0])
+    assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
+    assert {"mse", "reconstruction_mse", "psnr", "ssim", "iterations", "time_seconds", "objective_mse"} <= set(attack_results[0])
     assert result["attack_evaluations"] == 2
+    assert result["attack_target_type"] == "update_payload"
     assert result["attack_primary_metric"] == "reconstruction_mse"
     assert result["attack_primary_metric_direction"] == "higher_is_more_private"
     assert result["attack_overall_avg_mse"] is not None
     assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
     assert result["attack_summary"]["primary_metric"] == "reconstruction_mse"
+    assert result["attack_summary"]["target_type"] == "update_payload"
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 1
+
+
+def test_federated_run_supports_legacy_gradient_attacks(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "attack.enabled=true",
+            "attack.target_type=gradient",
+            "attack.frequency_rounds=1",
+            "attack.max_samples=1",
+            "attack.steps=1",
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
+    assert {entry["target_type"] for entry in attack_results} == {"gradient"}
+    assert result["attack_target_type"] == "gradient"
 
 
 def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
@@ -168,8 +196,6 @@ def test_fedpetuning_uploads_only_trainable_subset(tmp_path):
     assert result["last_upload_compression_ratio"] > 1.0
 
 
-
-
 def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
@@ -193,6 +219,7 @@ def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
     assert all(client["compressor"] == "float16_quantized_dense" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
     assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
+
 
 def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
     config = load_config(
