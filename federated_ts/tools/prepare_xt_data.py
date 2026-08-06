@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Prepare XT_data wide CSV files into federated client splits."""
 
 from __future__ import annotations

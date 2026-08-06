@@ -6,11 +6,12 @@ from federated_ts.utils.config import load_config
 from federated_ts.communication.grpc_training import run_client
 
 
+
 def main() -> None:
     """Start one gRPC federated client from command-line arguments."""
 
     parser = argparse.ArgumentParser(description="Federated gRPC client")
-    parser.add_argument("--client-id", required=True, choices=["Nd2O3", "CeO2", "La2O3"])
+    parser.add_argument("--client-id", required=True)
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--override", action="append", default=[])
     args = parser.parse_args()

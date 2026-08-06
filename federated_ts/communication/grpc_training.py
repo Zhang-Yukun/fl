@@ -2,10 +2,10 @@
 
 Example:
     Server:
-        ``python scripts/server.py --config configs/test.yaml``
+        ``python -m federated_ts.entrypoints.server --config configs/test.yaml``
 
     Client:
-        ``python scripts/client.py --client-id Nd2O3 --config configs/test.yaml``
+        ``python -m federated_ts.entrypoints.client --client-id Nd2O3 --config configs/test.yaml``
 """
 
 from __future__ import annotations

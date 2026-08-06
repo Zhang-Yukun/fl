@@ -7,7 +7,7 @@ CeO2, and La2O3 price forecasting.
 
 ```bash
 cd src
-conda run -n torch_env python -m scripts.train --config configs/test.yaml
+conda run -n torch_env python -m federated_ts.entrypoints.train --config configs/test.yaml
 conda run -n torch_env python -m pytest tests
 ```
 
@@ -35,10 +35,10 @@ standard FedAvg, and a simple compression-plus-security DP-TopK baseline.
 Start one server and three clients in separate shells or nodes:
 
 ```bash
-python -m scripts.server --config configs/default.yaml
-python -m scripts.client --client-id Nd2O3 --config configs/default.yaml
-python -m scripts.client --client-id CeO2 --config configs/default.yaml
-python -m scripts.client --client-id La2O3 --config configs/default.yaml
+python -m federated_ts.entrypoints.server --config configs/default.yaml
+python -m federated_ts.entrypoints.client --client-id Nd2O3 --config configs/default.yaml
+python -m federated_ts.entrypoints.client --client-id CeO2 --config configs/default.yaml
+python -m federated_ts.entrypoints.client --client-id La2O3 --config configs/default.yaml
 ```
 
 ## Experiment Artifacts
@@ -70,13 +70,13 @@ Prepare the preferred `XT_data` CSV files into chronological client splits.
 the framework's default `test.csv`:
 
 ```bash
-python -m scripts.prepare_xt_data \
+python -m federated_ts.tools.prepare_xt_data \
   --input-dir ../Time-Series-Prediction/dataset/XT_data \
   --output-dir ../data/rare_earth_rawdata2
 ```
 
 The older CBC Excel rawdata2 preparation entry point remains available as
-`python -m scripts.prepare_rawdata2` when `XT_data` is not available.
+`python -m federated_ts.tools.prepare_rawdata2` when `XT_data` is not available.
 
 Run each rawdata2 experiment separately with 500 maximum epochs/rounds
 and early stopping patience 50:
@@ -93,3 +93,12 @@ Extra overrides can be appended to any script, for example
 `--override federated.rounds=30`. Generated data is stored under
 `../data/rare_earth_rawdata2`; experiment artifacts are stored under the
 corresponding `outputs/rawdata2_*` directory. `configs/rawdata2_dp_topk.yaml` is the simple default compression/privacy comparison config; `configs/rawdata2_soteriafl.yaml` remains available as a random-k local-DP baseline, and `configs/rawdata2_fedaware.yaml` remains available as a supplementary adaptive aggregation baseline.
+
+## Reproduce
+
+```bash
+bash scripts/scripts/run_repro_pat50_centralized.sh
+bash scripts/run_repro_pat50_fedavg.sh
+bash scripts/run_repro_pat50_qint8_bidir.sh
+python -m federated_ts.tools.compare_experiment_results outputs/repro_pat50/fedavg_seed2026_pat50_payloadv1 outputs/repro_pat50/secure_qint8_bidir_seed2026_pat50_payloadv1
+```

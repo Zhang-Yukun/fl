@@ -13,7 +13,7 @@ def main() -> None:
     """Parse command-line arguments and launch the requested training mode.
 
     Example:
-        ``python -m scripts.train --config configs/test.yaml``.
+        ``python -m federated_ts.entrypoints.train --config configs/test.yaml``.
     """
 
     parser = argparse.ArgumentParser(description="Federated rare-earth price forecasting")

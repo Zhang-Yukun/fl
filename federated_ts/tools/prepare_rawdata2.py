@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Prepare rawdata2 rare-earth Excel files into federated train/val/test splits."""
 
 from __future__ import annotations

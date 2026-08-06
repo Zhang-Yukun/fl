@@ -40,13 +40,13 @@ Each round records client names, payload type, compressor, upload/download bytes
 Run a quick SoteriaFL experiment from `src`:
 
 ```bash
-conda run -n torch_env python -m scripts.train --config configs/rawdata2_soteriafl.yaml
+conda run -n torch_env python -m federated_ts.entrypoints.train --config configs/rawdata2_soteriafl.yaml
 ```
 
 Run a short smoke test with overrides:
 
 ```bash
-conda run -n torch_env python -m scripts.train --config configs/rawdata2_soteriafl.yaml --override federated.rounds=2 --override attack.frequency_rounds=1 --override attack.steps=1
+conda run -n torch_env python -m federated_ts.entrypoints.train --config configs/rawdata2_soteriafl.yaml --override federated.rounds=2 --override attack.frequency_rounds=1 --override attack.steps=1
 ```
 
 ## Extra Top-k Compression Baseline
@@ -56,7 +56,7 @@ The local `sparse_fedavg` / `compressed_fedavg` path remains available as an add
 Run the rawdata2 full PatchTST Top-k experiment from `src`:
 
 ```bash
-conda run -n torch_env python -m scripts.train --config configs/rawdata2_fedlab_topk.yaml
+conda run -n torch_env python -m federated_ts.entrypoints.train --config configs/rawdata2_fedlab_topk.yaml
 ```
 
 The default attack configuration now evaluates DLG and iDLG every federated round with 300 optimization steps on `cuda:0`.

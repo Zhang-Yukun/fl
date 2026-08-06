@@ -43,11 +43,28 @@ def test_rawdata2_all_script_runs_each_entrypoint():
     assert 'bash "${run_script}" "$@"' in content
 
 
-def test_rawdata2_fedaware_python_entrypoint_exists():
-    """FedAWARE also provides a direct Python entrypoint for supplementary runs."""
+def test_formal_suite_script_exists_and_lists_all_requested_runs():
+    """The formal suite script should run the requested nine experiments sequentially."""
 
-    path = SCRIPT_DIR / "run_rawdata2_fedaware.py"
+    path = SCRIPT_DIR / "run_formal_centralized_fedavg_qint8_suite.sh"
     assert path.exists()
+    assert path.stat().st_mode & 0o111
     content = path.read_text(encoding="utf-8")
-    assert "configs/rawdata2_fedaware.yaml" in content
-    assert 'config["federated"]["algorithm"] = "fedaware"' in content
+    for marker in (
+        "centralized",
+        "fedavg_single_sync",
+        "fedavg_single_async",
+        "fedavg_grpc_sync",
+        "fedavg_grpc_async",
+        "qint8_single_sync",
+        "qint8_single_async",
+        "qint8_grpc_sync",
+        "qint8_grpc_async",
+        "configs/rawdata2_patchtst.yaml",
+        "configs/rawdata2_secure_quantized_fedavg.yaml",
+        "federated.quantization_dtype=int8",
+        "-m federated_ts.entrypoints.train",
+        "-m federated_ts.entrypoints.server",
+        "-m federated_ts.entrypoints.client",
+    ):
+        assert marker in content
