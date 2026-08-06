@@ -362,3 +362,54 @@ def test_client_prefers_local_steps_over_local_epochs(monkeypatch):
 
     assert calls == {"steps": 1, "epochs": 0}
     assert result.loss == 1.25
+
+
+def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
+    sync_dir = tmp_path / "sync"
+    async_dir = tmp_path / "async"
+    overrides = [
+        "federated.algorithm=fedavg",
+        "federated.rounds=1",
+        "training.patience=1",
+        "attack.enabled=true",
+        "attack.target_type=update_payload",
+        "attack.frequency_rounds=1",
+        "attack.max_samples=1",
+        "attack.sample_count=1",
+        "attack.clients_per_round=1",
+        "attack.client_selection=first",
+        "attack.steps=1",
+        "attack.optimizer=adam",
+        "attack.local_optimizer=adam",
+        "tracking.enabled=false",
+        "runtime.device=cpu",
+        "runtime.seed=2026",
+        "runtime.deterministic=true",
+        "data.shuffle_train=false",
+        "model.dropout=0.0",
+    ]
+    sync_config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["experiment.output_dir=" + str(sync_dir), *overrides])
+    async_config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(async_dir),
+            *overrides,
+            "attack.async_enabled=true",
+            "attack.async_workers=1",
+            "attack.async_device=cpu",
+        ],
+    )
+
+    sync_summary = run_federated(sync_config)
+    async_summary = run_federated(async_config)
+    sync_attacks = json.loads((sync_dir / "attack_results.json").read_text(encoding="utf-8"))
+    async_attacks = json.loads((async_dir / "attack_results.json").read_text(encoding="utf-8"))
+
+    assert sync_summary["test"]["mse"] == pytest.approx(async_summary["test"]["mse"])
+    assert sync_summary["attack_overall_avg_mse"] == pytest.approx(async_summary["attack_overall_avg_mse"])
+    assert sync_summary["attack_success_rate"] == pytest.approx(async_summary["attack_success_rate"])
+    assert [entry["name"] for entry in sync_attacks] == [entry["name"] for entry in async_attacks]
+    for sync_entry, async_entry in zip(sync_attacks, async_attacks):
+        assert sync_entry["target_type"] == async_entry["target_type"]
+        assert sync_entry["mse"] == pytest.approx(async_entry["mse"])
+        assert sync_entry["objective_mse"] == pytest.approx(async_entry["objective_mse"])

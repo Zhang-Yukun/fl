@@ -22,14 +22,12 @@ from loguru import logger
 from federated_ts.communication.grpc_service import FederatedRpcClient, FederatedRpcServer
 from federated_ts.datasets.rare_earth import build_federated_loaders
 from federated_ts.federated.algorithms import (
+    AsyncAttackManager,
     _attack_target_type,
+    _build_attack_round_task,
     _clone_state,
-    _extract_attack_payload,
-    _protect_attack_gradients,
     _round_history_communication_summary,
     _wandb_cumulative_communication_payload,
-    _select_attack_clients,
-    _should_run_attack,
     _wandb_round_payload,
     configure_random_seed,
     configure_torch_runtime,
@@ -37,7 +35,7 @@ from federated_ts.federated.algorithms import (
 )
 from federated_ts.federated.client import ClientResult, FederatedClient
 from federated_ts.federated.server import EarlyStopper, FederatedServer
-from federated_ts.security.attacks import attack_success_rate, dlg_attack, idlg_attack, summarize_attack_results
+from federated_ts.security.attacks import summarize_attack_results
 from federated_ts.utils.logging import setup_logging
 from federated_ts.utils.serialization import state_num_bytes, state_num_parameters
 from federated_ts.utils.tracking import Tracker
@@ -121,7 +119,8 @@ class GrpcFederatedCoordinator:
         self.pending: dict[str, Any] = {}
         self.stopped = False
         self.lock = threading.Lock()
-        self.attack_results = []
+        self.attack_manager = AsyncAttackManager(config, self.tracker)
+        self.attack_results = self.attack_manager.attack_results
         self.attack_target_type = _attack_target_type(config)
         self.tracker.log({
             'run/algorithm': str(config['federated'].get('algorithm', 'fedavg')),
@@ -144,74 +143,26 @@ class GrpcFederatedCoordinator:
             }
 
     def _run_attacks(self, round_index: int, round_base_state: dict[str, Any], results) -> None:
-        """Run server-side attack evaluation using the same logic as local FedAvg."""
+        """Queue server-side attack evaluation without blocking aggregation or validation."""
 
-        if not _should_run_attack(self.config, round_index, self.max_rounds):
-            return
-        attack_cfg = self.config.get('attack', {})
-        attack_start = time.perf_counter()
-        max_samples = int(attack_cfg.get('max_samples', 1))
-        sample_count = max(1, int(attack_cfg.get('sample_count', 1)))
-        selected_clients = _select_attack_clients(self.attack_clients, self.config, round_index)
-        results_by_client = {result.client_id: result for result in results}
-        round_attacks = []
-        for client_index, client in enumerate(selected_clients):
-            result = results_by_client[client.client_id]
-            for sample_index in range(sample_count):
-                reference_inputs = None
-                if self.attack_target_type == 'gradient':
-                    grads, real_x, real_y = client.gradient_sample(
-                        round_base_state,
-                        max_samples=max_samples,
-                        batch_index=sample_index,
-                    )
-                    target = _protect_attack_gradients(
-                        self.config,
-                        grads,
-                        round_index=round_index,
-                        client_index=client_index,
-                        sample_index=sample_index,
-                    )
-                else:
-                    real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
-                    target = _extract_attack_payload(self.config, result)
-                    reference_inputs = client.train_reference_inputs()
-                round_attacks.extend([
-                    dlg_attack(self.config, round_base_state, target, real_x, real_y, self.device, target_type=self.attack_target_type, reference_inputs=reference_inputs),
-                    idlg_attack(self.config, round_base_state, target, real_x, real_y, self.device, target_type=self.attack_target_type, reference_inputs=reference_inputs),
-                ])
-        self.attack_results.extend(round_attacks)
-        attack_payload: dict[str, float] = {
-            'attack/time_seconds': time.perf_counter() - attack_start,
-            'attack/evaluations_this_round': float(len(round_attacks)),
-            'attack/clients_this_round': float(len(selected_clients)),
-            'attack/samples_per_client': float(sample_count),
-            'attack/overall_avg_mse_so_far': sum(result.mse for result in self.attack_results) / len(self.attack_results),
-            'attack/success_rate_so_far': attack_success_rate(self.attack_results),
-        }
-        for name in sorted({result.name for result in round_attacks}):
-            subset = [result for result in round_attacks if result.name == name]
-            prefix = f'attack/{name}'
-            attack_payload[f'{prefix}/mse'] = sum(result.mse for result in subset) / len(subset)
-            attack_payload[f'{prefix}/reconstruction_mse'] = attack_payload[f'{prefix}/mse']
-            cumulative_subset = [result for result in self.attack_results if result.name == name]
-            attack_payload[f'{prefix}/avg_mse_so_far'] = sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
-            attack_payload[f'{prefix}/psnr'] = sum(result.psnr for result in subset) / len(subset)
-            attack_payload[f'{prefix}/ssim'] = sum(result.ssim for result in subset) / len(subset)
-            attack_payload[f'{prefix}/iterations'] = float(subset[0].iterations)
-            attack_payload[f'{prefix}/time_seconds'] = sum(result.time_seconds for result in subset) / len(subset)
-            attack_payload[f'{prefix}/gradient_mse'] = sum(result.gradient_mse for result in subset) / len(subset)
-            attack_payload[f'{prefix}/success'] = sum(float(result.success) for result in subset) / len(subset)
-            attack_payload[f'{prefix}/success_rate_so_far'] = attack_success_rate(self.attack_results, name)
-        self.tracker.log(attack_payload, step=round_index)
-        logger.info('Round {} attack metrics {}', round_index, attack_payload)
+        task = _build_attack_round_task(
+            self.config,
+            self.attack_clients,
+            results,
+            round_index,
+            self.max_rounds,
+            round_base_state,
+            self.attack_target_type,
+        )
+        self.attack_manager.submit(task)
 
     def _finalize(self) -> None:
         """Persist final model artifacts and a summary compatible with the main FL path."""
 
         test_metrics = self.server.test_global()
-        total_elapsed = time.perf_counter() - self.start_time
         self.server.save(self.output_dir, self.config)
+        self.attack_manager.finalize()
+        total_elapsed = time.perf_counter() - self.start_time
         attack_records = [result.to_record() for result in self.attack_results]
         with (self.output_dir / 'attack_results.json').open('w', encoding='utf-8') as handle:
             json.dump(attack_records, handle, ensure_ascii=False, indent=2)

@@ -6,7 +6,8 @@ import json
 import os
 import random
 import time
-from dataclasses import asdict
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -319,6 +320,262 @@ def _extract_attack_payload(config: dict[str, Any], result) -> StateDict:
     return _clone_state(result.state)
 
 
+@dataclass
+class AttackSampleTask:
+    """Immutable attack inputs captured from one round before async execution."""
+
+    client_id: str
+    round_index: int
+    sample_index: int
+    target_type: str
+    round_base_state: StateDict
+    target: list[torch.Tensor] | StateDict
+    real_x: torch.Tensor
+    real_y: torch.Tensor
+    reference_inputs: torch.Tensor | None = None
+
+
+@dataclass
+class AttackRoundTask:
+    """One round of attack work detached from the training hot path."""
+
+    round_index: int
+    clients_this_round: int
+    samples_per_client: int
+    samples: list[AttackSampleTask]
+
+
+@dataclass
+class AttackRoundResult:
+    """Completed attack artifacts for one training round."""
+
+    round_index: int
+    time_seconds: float
+    clients_this_round: int
+    samples_per_client: int
+    attacks: list[Any]
+
+
+def _clone_attack_target(target: list[torch.Tensor] | StateDict) -> list[torch.Tensor] | StateDict:
+    """Detach and clone an intercepted attack target onto CPU memory."""
+
+    if isinstance(target, list):
+        return [tensor.detach().cpu().clone() for tensor in target]
+    return _clone_state(target)
+
+
+def _resolve_attack_device(config: dict[str, Any]) -> torch.device:
+    """Resolve the device used for asynchronous attack evaluation."""
+
+    attack_cfg = config.get("attack", {})
+    requested = str(attack_cfg.get("async_device", "cpu")).lower()
+    if requested == "same":
+        requested = str(config.get("runtime", {}).get("device", "cpu"))
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        logger.warning("Async attack device {} unavailable; falling back to CPU", requested)
+        requested = "cpu"
+    return torch.device(requested)
+
+
+def _build_attack_round_task(
+    config: dict[str, Any],
+    clients: list[FederatedClient],
+    results,
+    round_index: int,
+    max_rounds: int,
+    round_base_state: StateDict,
+    attack_target_type: str,
+) -> AttackRoundTask | None:
+    """Capture one round of attack inputs as immutable CPU snapshots."""
+
+    if not _should_run_attack(config, round_index, max_rounds):
+        return None
+    attack_cfg = config.get("attack", {})
+    max_samples = int(attack_cfg.get("max_samples", 1))
+    sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
+    selected_clients = _select_attack_clients(clients, config, round_index)
+    results_by_client = {result.client_id: result for result in results}
+    samples: list[AttackSampleTask] = []
+    for client_index, client in enumerate(selected_clients):
+        result = results_by_client[client.client_id]
+        for sample_index in range(sample_count):
+            reference_inputs = None
+            if attack_target_type == "gradient":
+                grads, real_x, real_y = client.gradient_sample(
+                    round_base_state,
+                    max_samples=max_samples,
+                    batch_index=sample_index,
+                )
+                target = _protect_attack_gradients(
+                    config,
+                    grads,
+                    round_index=round_index,
+                    client_index=client_index,
+                    sample_index=sample_index,
+                )
+            else:
+                real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
+                target = _extract_attack_payload(config, result)
+                reference_inputs = client.train_reference_inputs()
+            samples.append(
+                AttackSampleTask(
+                    client_id=client.client_id,
+                    round_index=round_index,
+                    sample_index=sample_index,
+                    target_type=attack_target_type,
+                    round_base_state=_clone_state(round_base_state),
+                    target=_clone_attack_target(target),
+                    real_x=real_x.detach().cpu().clone(),
+                    real_y=real_y.detach().cpu().clone(),
+                    reference_inputs=None if reference_inputs is None else reference_inputs.detach().cpu().clone(),
+                )
+            )
+    return AttackRoundTask(
+        round_index=round_index,
+        clients_this_round=len(selected_clients),
+        samples_per_client=sample_count,
+        samples=samples,
+    )
+
+
+def _execute_attack_round_task(
+    config: dict[str, Any],
+    task: AttackRoundTask,
+    attack_device: torch.device,
+) -> AttackRoundResult:
+    """Run one detached round of DLG/iDLG evaluation from frozen snapshots."""
+
+    start = time.perf_counter()
+    attacks = []
+    for sample in task.samples:
+        attacks.extend([
+            dlg_attack(
+                config,
+                sample.round_base_state,
+                sample.target,
+                sample.real_x,
+                sample.real_y,
+                attack_device,
+                target_type=sample.target_type,
+                reference_inputs=sample.reference_inputs,
+            ),
+            idlg_attack(
+                config,
+                sample.round_base_state,
+                sample.target,
+                sample.real_x,
+                sample.real_y,
+                attack_device,
+                target_type=sample.target_type,
+                reference_inputs=sample.reference_inputs,
+            ),
+        ])
+    return AttackRoundResult(
+        round_index=task.round_index,
+        time_seconds=time.perf_counter() - start,
+        clients_this_round=task.clients_this_round,
+        samples_per_client=task.samples_per_client,
+        attacks=attacks,
+    )
+
+
+def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: list[Any]) -> dict[str, float]:
+    """Build per-round and cumulative attack metrics for tracking/logging."""
+
+    round_attacks = round_result.attacks
+    payload: dict[str, float] = {
+        "attack/time_seconds": round_result.time_seconds,
+        "attack/evaluations_this_round": float(len(round_attacks)),
+        "attack/clients_this_round": float(round_result.clients_this_round),
+        "attack/samples_per_client": float(round_result.samples_per_client),
+        "attack/overall_avg_mse_so_far": sum(result.mse for result in cumulative_results) / len(cumulative_results),
+        "attack/success_rate_so_far": attack_success_rate(cumulative_results),
+    }
+    for name in sorted({result.name for result in round_attacks}):
+        subset = [result for result in round_attacks if result.name == name]
+        prefix = f"attack/{name}"
+        payload[f"{prefix}/mse"] = sum(result.mse for result in subset) / len(subset)
+        payload[f"{prefix}/reconstruction_mse"] = payload[f"{prefix}/mse"]
+        cumulative_subset = [result for result in cumulative_results if result.name == name]
+        payload[f"{prefix}/avg_mse_so_far"] = sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
+        payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
+        payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
+        payload[f"{prefix}/iterations"] = float(subset[0].iterations)
+        payload[f"{prefix}/time_seconds"] = sum(result.time_seconds for result in subset) / len(subset)
+        payload[f"{prefix}/gradient_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
+        payload[f"{prefix}/success"] = sum(float(result.success) for result in subset) / len(subset)
+        payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(cumulative_results, name)
+    return payload
+
+
+class AsyncAttackManager:
+    """Queue attack evaluations away from the training hot path and drain them in order."""
+
+    def __init__(self, config: dict[str, Any], tracker: Tracker):
+        self.config = config
+        self.tracker = tracker
+        self.attack_results: list[Any] = []
+        self.attack_device = _resolve_attack_device(config)
+        attack_cfg = config.get("attack", {})
+        self.async_enabled = bool(attack_cfg.get("async_enabled", False))
+        self.pending_round_order: list[int] = []
+        self.pending_futures: dict[int, Future] = {}
+        self.completed_rounds: dict[int, AttackRoundResult] = {}
+        self.executor: ThreadPoolExecutor | None = None
+        if attack_cfg.get("enabled", True) and self.async_enabled:
+            workers = max(1, int(attack_cfg.get("async_workers", 1)))
+            self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="attack")
+            logger.info("Async attack manager enabled with workers={} device={}", workers, self.attack_device)
+
+    def submit(self, task: AttackRoundTask | None) -> None:
+        """Run or enqueue one round of attack work."""
+
+        if task is None:
+            return
+        self.pending_round_order.append(task.round_index)
+        if self.executor is None:
+            self.completed_rounds[task.round_index] = _execute_attack_round_task(self.config, task, self.attack_device)
+        else:
+            self.pending_futures[task.round_index] = self.executor.submit(
+                _execute_attack_round_task,
+                self.config,
+                task,
+                self.attack_device,
+            )
+            logger.info(
+                "Round {} submitted async attack job with {} evaluations on {}",
+                task.round_index,
+                len(task.samples) * 2,
+                self.attack_device,
+            )
+        self.drain_completed(wait=False)
+
+    def drain_completed(self, wait: bool = False) -> None:
+        """Collect finished futures and log any now-complete rounds in round order."""
+
+        for round_index, future in list(self.pending_futures.items()):
+            if wait or future.done():
+                self.completed_rounds[round_index] = future.result()
+                del self.pending_futures[round_index]
+        while self.pending_round_order and self.pending_round_order[0] in self.completed_rounds:
+            round_index = self.pending_round_order.pop(0)
+            round_result = self.completed_rounds.pop(round_index)
+            self.attack_results.extend(round_result.attacks)
+            payload = _round_attack_payload(round_result, self.attack_results)
+            self.tracker.log(payload, step=round_index)
+            logger.info("Round {} attack metrics {}", round_index, payload)
+
+    def finalize(self) -> None:
+        """Wait for outstanding attack work and shut down the executor."""
+
+        if self.pending_futures:
+            logger.info("Waiting for {} async attack rounds to finish", len(self.pending_futures))
+        self.drain_completed(wait=True)
+        if self.executor is not None:
+            self.executor.shutdown(wait=True)
+            self.executor = None
+
+
 def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     """Run centralized training over all client datasets."""
 
@@ -428,7 +685,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     })
     stopper = EarlyStopper(int(config["training"].get("patience", 5)), float(config["training"].get("min_delta", 0.0)))
     max_rounds = int(config["federated"].get("rounds", 20))
-    attack_results = []
+    attack_manager = AsyncAttackManager(config, tracker)
     for round_index in range(max_rounds):
         round_start = time.perf_counter()
         round_base_state = _clone_state(server.global_state)
@@ -447,77 +704,30 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             elapsed_time_seconds=time.perf_counter() - start_time,
         )
         tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(server.history)}, step=round_index)
-        if _should_run_attack(config, round_index, max_rounds):
-            attack_cfg = config.get("attack", {})
-            attack_start = time.perf_counter()
-            max_samples = int(attack_cfg.get("max_samples", 1))
-            sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
-            selected_clients = _select_attack_clients(clients, config, round_index)
-            results_by_client = {result.client_id: result for result in results}
-            round_attacks = []
-            for client_index, client in enumerate(selected_clients):
-                result = results_by_client[client.client_id]
-                for sample_index in range(sample_count):
-                    reference_inputs = None
-                    if attack_target_type == "gradient":
-                        grads, real_x, real_y = client.gradient_sample(
-                            round_base_state,
-                            max_samples=max_samples,
-                            batch_index=sample_index,
-                        )
-                        target = _protect_attack_gradients(
-                            config,
-                            grads,
-                            round_index=round_index,
-                            client_index=client_index,
-                            sample_index=sample_index,
-                        )
-                    else:
-                        real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
-                        target = _extract_attack_payload(config, result)
-                        reference_inputs = client.train_reference_inputs()
-                    round_attacks.extend([
-                        dlg_attack(config, round_base_state, target, real_x, real_y, device, target_type=attack_target_type, reference_inputs=reference_inputs),
-                        idlg_attack(config, round_base_state, target, real_x, real_y, device, target_type=attack_target_type, reference_inputs=reference_inputs),
-                    ])
-            attack_results.extend(round_attacks)
-            attack_payload: dict[str, float] = {
-                "attack/time_seconds": time.perf_counter() - attack_start,
-                "attack/evaluations_this_round": float(len(round_attacks)),
-                "attack/clients_this_round": float(len(selected_clients)),
-                "attack/samples_per_client": float(sample_count),
-                "attack/overall_avg_mse_so_far": sum(result.mse for result in attack_results) / len(attack_results),
-                "attack/success_rate_so_far": attack_success_rate(attack_results),
-            }
-            for name in sorted({result.name for result in round_attacks}):
-                subset = [result for result in round_attacks if result.name == name]
-                prefix = f"attack/{name}"
-                attack_payload[f"{prefix}/mse"] = sum(result.mse for result in subset) / len(subset)
-                attack_payload[f"{prefix}/reconstruction_mse"] = attack_payload[f"{prefix}/mse"]
-                cumulative_subset = [result for result in attack_results if result.name == name]
-                attack_payload[f"{prefix}/avg_mse_so_far"] = sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
-                attack_payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
-                attack_payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
-                attack_payload[f"{prefix}/iterations"] = float(subset[0].iterations)
-                attack_payload[f"{prefix}/time_seconds"] = sum(result.time_seconds for result in subset) / len(subset)
-                attack_payload[f"{prefix}/gradient_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
-                attack_payload[f"{prefix}/success"] = sum(float(result.success) for result in subset) / len(subset)
-                attack_payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(attack_results, name)
-            tracker.log(attack_payload, step=round_index)
-            logger.info("Round {} attack metrics {}", round_index, attack_payload)
+        attack_task = _build_attack_round_task(
+            config,
+            clients,
+            results,
+            round_index,
+            max_rounds,
+            round_base_state,
+            attack_target_type,
+        )
+        attack_manager.submit(attack_task)
         if stopper.update(metrics["mse"]):
             logger.info("Early stopping at round {}", round_index)
             break
     test_metrics = server.test_global()
+    attack_manager.finalize()
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
     tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
     tracker.finish()
-    attack_records = [result.to_record() for result in attack_results]
+    attack_records = [result.to_record() for result in attack_manager.attack_results]
     with (output_dir / "attack_results.json").open("w", encoding="utf-8") as handle:
         json.dump(attack_records, handle, ensure_ascii=False, indent=2)
     attack_summary = summarize_attack_results(
-        attack_results,
+        attack_manager.attack_results,
         float(config.get("attack", {}).get("success_rate_threshold", 0.03)),
     )
     summary = {
