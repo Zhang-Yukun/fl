@@ -24,7 +24,7 @@ from federated_ts.utils.serialization import (
     state_num_parameters,
     subtract_state,
 )
-from federated_ts.engine.training import first_batch_gradient, first_batch_sample, train_one_epoch
+from federated_ts.engine.training import first_batch_gradient, first_batch_sample, train_n_steps, train_one_epoch
 
 
 @dataclass
@@ -40,10 +40,18 @@ class ClientResult:
     dense_parameters: int = 0
     download_bytes: int = 0
     download_parameters: int = 0
+    parameter_download_bytes: int = 0
+    parameter_download_parameters: int = 0
     dense_download_reference_bytes: int = 0
     dense_download_reference_parameters: int = 0
     upload_bytes: int = 0
     upload_parameters: int = 0
+    parameter_upload_bytes: int = 0
+    parameter_upload_parameters: int = 0
+    transport_download_bytes: int = 0
+    transport_upload_bytes: int = 0
+    transport_download_overhead_bytes: int = 0
+    transport_upload_overhead_bytes: int = 0
     payload_kind: str = "dense_update"
     compressor: str = "none"
     privacy_clip_norm: float = 0.0
@@ -99,8 +107,12 @@ class FederatedClient:
         trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
         optimizer = torch.optim.Adam(trainable_parameters, lr=float(self.config["training"].get("lr", 1e-3)))
         losses = []
-        for _ in range(int(self.config["federated"].get("local_epochs", 1))):
-            losses.append(train_one_epoch(model, self.train_loader, optimizer, self.device))
+        local_steps = self.config["federated"].get("local_steps")
+        if local_steps is not None:
+            losses.append(train_n_steps(model, self.train_loader, optimizer, self.device, int(local_steps)))
+        else:
+            for _ in range(int(self.config["federated"].get("local_epochs", 1))):
+                losses.append(train_one_epoch(model, self.train_loader, optimizer, self.device))
         local_state = serialize_model(model)
         dense_bytes = state_num_bytes(local_state)
         dense_parameters = state_num_parameters(local_state)
@@ -116,10 +128,16 @@ class FederatedClient:
                 dense_parameters=dense_parameters,
                 download_bytes=state_num_bytes(global_trainable_state),
                 download_parameters=state_num_parameters(global_trainable_state),
+                parameter_download_bytes=state_num_bytes(global_trainable_state),
+                parameter_download_parameters=state_num_parameters(global_trainable_state),
                 dense_download_reference_bytes=state_num_bytes(global_trainable_state),
                 dense_download_reference_parameters=state_num_parameters(global_trainable_state),
                 upload_bytes=state_num_bytes(trainable_state),
                 upload_parameters=state_num_parameters(trainable_state),
+                parameter_upload_bytes=state_num_bytes(trainable_state),
+                parameter_upload_parameters=state_num_parameters(trainable_state),
+                transport_download_bytes=state_num_bytes(global_trainable_state),
+                transport_upload_bytes=state_num_bytes(trainable_state),
                 payload_kind="fedpetuning_trainable_state",
                 compressor="trainable_subset",
             )
@@ -131,6 +149,9 @@ class FederatedClient:
             dense_parameters=dense_parameters,
             download_bytes=state_num_bytes(download_state),
             download_parameters=state_num_parameters(download_state),
+            parameter_download_bytes=state_num_bytes(download_state),
+            parameter_download_parameters=state_num_parameters(download_state),
+            transport_download_bytes=state_num_bytes(download_state),
             dense_download_reference_bytes=state_num_bytes(global_state),
             dense_download_reference_parameters=state_num_parameters(global_state),
         )
@@ -151,6 +172,9 @@ class FederatedClient:
                 state=quantized,
                 upload_bytes=state_num_bytes(quantized),
                 upload_parameters=state_num_parameters(quantized),
+                parameter_upload_bytes=state_num_bytes(quantized),
+                parameter_upload_parameters=state_num_parameters(quantized),
+                transport_upload_bytes=state_num_bytes(quantized),
                 payload_kind="quantized_update",
                 compressor=str(self.config.get("federated", {}).get("quantization_dtype", "float16")) + "_quantized_dense",
                 privacy_clip_norm=privacy_clip_norm,
@@ -183,6 +207,9 @@ class FederatedClient:
                 sparse_update=sparse,
                 upload_bytes=sparse.nbytes,
                 upload_parameters=sparse.values.numel(),
+                parameter_upload_bytes=sparse.nbytes,
+                parameter_upload_parameters=sparse.values.numel(),
+                transport_upload_bytes=sparse.nbytes,
                 payload_kind=payload_kind,
                 compressor=compressor,
                 privacy_clip_norm=privacy_clip_norm,
@@ -194,6 +221,9 @@ class FederatedClient:
             state=dense_update,
             upload_bytes=dense_bytes,
             upload_parameters=dense_parameters,
+            parameter_upload_bytes=dense_bytes,
+            parameter_upload_parameters=dense_parameters,
+            transport_upload_bytes=dense_bytes,
             payload_kind="dense_update",
         )
 

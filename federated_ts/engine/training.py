@@ -33,6 +33,48 @@ def train_one_epoch(model: nn.Module, loader: Iterable, optimizer: torch.optim.O
     return total_loss / max(total, 1)
 
 
+def train_n_steps(
+    model: nn.Module,
+    loader: Iterable,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    steps: int,
+) -> float:
+    """Train for a fixed number of local optimizer steps.
+
+    Example:
+        ``loss = train_n_steps(model, train_loader, optimizer, device, steps=5)``
+        performs exactly five minibatch updates, cycling the loader if needed.
+    """
+
+    if steps <= 0:
+        raise ValueError("steps must be positive")
+
+    model.train()
+    criterion = nn.MSELoss()
+    total_loss = 0.0
+    total = 0
+    completed = 0
+    iterator = iter(loader)
+
+    while completed < steps:
+        try:
+            x, y = next(iterator)
+        except StopIteration:
+            iterator = iter(loader)
+            x, y = next(iterator)
+        x = x.to(device)
+        y = y.to(device)
+        optimizer.zero_grad(set_to_none=True)
+        loss = criterion(model(x), y)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item() * x.shape[0]
+        total += x.shape[0]
+        completed += 1
+    return total_loss / max(total, 1)
+
+
 @torch.no_grad()
 def evaluate(model: nn.Module, loader: Iterable, device: torch.device) -> dict[str, float]:
     """Evaluate a forecasting model and return MSE, MAE, and MAPE.
