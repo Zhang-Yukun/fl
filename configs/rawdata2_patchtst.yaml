@@ -15,6 +15,7 @@ data:
   seq_len: 21
   pred_len: 7
   batch_size: 128
+  shuffle_train: true
   num_workers: 0
 
 model:

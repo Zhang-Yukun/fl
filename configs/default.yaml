@@ -13,6 +13,7 @@ data:
   seq_len: 21
   pred_len: 7
   batch_size: 32
+  shuffle_train: true
   train_ratio: 0.7
   val_ratio: 0.15
   num_workers: 0

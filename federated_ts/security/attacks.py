@@ -144,19 +144,23 @@ def _time_series_total_variation(x: torch.Tensor) -> torch.Tensor:
 def _prepare_attack_model(config: dict[str, Any], state: StateDict, device: torch.device) -> nn.Module:
     """Build the attacked model with the configured deterministic mode."""
 
-    attack_cfg = config.get("attack", {})
-    seed = attack_cfg.get("seed")
-    if seed is not None:
-        torch.manual_seed(int(seed))
-        if device.type == "cuda":
-            torch.cuda.manual_seed_all(int(seed))
     model = build_model(config).to(device)
     load_serialized(model, state, device)
+    attack_cfg = config.get("attack", {})
     if str(attack_cfg.get("model_mode", "train")) == "eval":
         model.eval()
     else:
         model.train()
     return model
+
+
+def _attack_rng_context(device: torch.device):
+    """Fork torch RNG state so async attack threads do not leak seeds into training."""
+
+    if device.type != "cuda":
+        return torch.random.fork_rng(devices=[])
+    device_index = device.index if device.index is not None else torch.cuda.current_device()
+    return torch.random.fork_rng(devices=[device_index])
 
 
 def _attack_threshold(config: dict[str, Any]) -> float:
@@ -319,30 +323,45 @@ def _attack_loop(
     best_x = real_x.to(device)
 
     for restart in range(restarts):
-        if seed is not None:
-            local_seed = int(seed) + restart
-            torch.manual_seed(local_seed)
-            if device.type == "cuda":
-                torch.cuda.manual_seed_all(local_seed)
-        model = _prepare_attack_model(config, state, device)
-        dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
-        if optimize_y:
-            dummy_y = torch.randn_like(real_y, device=device, requires_grad=True)
-            variables = [dummy_x, dummy_y]
-        else:
-            dummy_y = real_y.to(device)
-            variables = [dummy_x]
-        optimizer = _create_optimizer(optimizer_name, variables, lr, history_size)
-        restart_best_objective = float("inf")
-        restart_best_x = dummy_x.detach().clone()
+        with _attack_rng_context(device):
+            if seed is not None:
+                local_seed = int(seed) + restart
+                torch.manual_seed(local_seed)
+                if device.type == "cuda":
+                    torch.cuda.manual_seed_all(local_seed)
+            model = _prepare_attack_model(config, state, device)
+            dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
+            if optimize_y:
+                dummy_y = torch.randn_like(real_y, device=device, requires_grad=True)
+                variables = [dummy_x, dummy_y]
+            else:
+                dummy_y = real_y.to(device)
+                variables = [dummy_x]
+            optimizer = _create_optimizer(optimizer_name, variables, lr, history_size)
+            restart_best_objective = float("inf")
+            restart_best_x = dummy_x.detach().clone()
 
-        for _ in range(steps):
-            if optimizer_name == "lbfgs":
-                holder: dict[str, float] = {}
+            for _ in range(steps):
+                if optimizer_name == "lbfgs":
+                    holder: dict[str, float] = {}
 
-                def closure() -> torch.Tensor:
-                    """Evaluate the current dummy variables for one LBFGS step."""
+                    def closure() -> torch.Tensor:
+                        """Evaluate the current dummy variables for one LBFGS step."""
 
+                        optimizer.zero_grad(set_to_none=True)
+                        if resolved_target_type == "gradient":
+                            dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target)
+                        else:
+                            dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
+                        if tv_weight > 0:
+                            dist = dist + tv_weight * _time_series_total_variation(dummy_x)
+                        holder["loss"] = float(dist.detach().cpu().item())
+                        dist.backward()
+                        return dist
+
+                    optimizer.step(closure)
+                    dist_value = holder.get("loss", float("inf"))
+                else:
                     optimizer.zero_grad(set_to_none=True)
                     if resolved_target_type == "gradient":
                         dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target)
@@ -350,31 +369,17 @@ def _attack_loop(
                         dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
                     if tv_weight > 0:
                         dist = dist + tv_weight * _time_series_total_variation(dummy_x)
-                    holder["loss"] = float(dist.detach().cpu().item())
+                    dist_value = float(dist.detach().cpu().item())
                     dist.backward()
-                    return dist
-
-                optimizer.step(closure)
-                dist_value = holder.get("loss", float("inf"))
-            else:
-                optimizer.zero_grad(set_to_none=True)
-                if resolved_target_type == "gradient":
-                    dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target)
-                else:
-                    dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
-                if tv_weight > 0:
-                    dist = dist + tv_weight * _time_series_total_variation(dummy_x)
-                dist_value = float(dist.detach().cpu().item())
-                dist.backward()
-                optimizer.step()
-            with torch.no_grad():
-                if input_clip is not None:
-                    dummy_x.clamp_(min=-float(input_clip), max=float(input_clip))
-                if optimize_y and target_clip is not None:
-                    dummy_y.clamp_(min=-float(target_clip), max=float(target_clip))
-            if dist_value < restart_best_objective:
-                restart_best_objective = dist_value
-                restart_best_x = dummy_x.detach().clone()
+                    optimizer.step()
+                with torch.no_grad():
+                    if input_clip is not None:
+                        dummy_x.clamp_(min=-float(input_clip), max=float(input_clip))
+                    if optimize_y and target_clip is not None:
+                        dummy_y.clamp_(min=-float(target_clip), max=float(target_clip))
+                if dist_value < restart_best_objective:
+                    restart_best_objective = dist_value
+                    restart_best_x = dummy_x.detach().clone()
         if restart_best_objective < best_objective_mse:
             best_objective_mse = restart_best_objective
             best_x = restart_best_x

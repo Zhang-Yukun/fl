@@ -38,3 +38,75 @@ def test_build_federated_loaders_from_split_dir(tmp_path):
     assert set(train_loaders) == {"Nd2O3", "CeO2", "La2O3"}
     assert len(val_loader) > 0
     assert len(test_loader) > 0
+
+
+def test_build_federated_loaders_respects_runtime_seed_for_train_shuffle(tmp_path):
+    from federated_ts.datasets.rare_earth import build_federated_loaders
+
+    for client in ["Nd2O3", "CeO2", "La2O3"]:
+        client_dir = tmp_path / "clients" / client
+        client_dir.mkdir(parents=True)
+        for split, start, length in [("train", 0, 50), ("val", 50, 20), ("test", 70, 20)]:
+            dates = [f"2020-01-{(idx % 28) + 1:02d}" for idx in range(start, start + length)]
+            values = np.arange(start, start + length, dtype="float32")
+            rows = "date,value\n" + "\n".join(f"{date},{value}" for date, value in zip(dates, values)) + "\n"
+            (client_dir / f"{split}.csv").write_text(rows, encoding="utf-8")
+
+    def first_batch(seed: int):
+        config = {
+            "runtime": {"seed": seed},
+            "data": {
+                "split_dir": str(tmp_path),
+                "clients": ["Nd2O3", "CeO2", "La2O3"],
+                "seq_len": 4,
+                "pred_len": 2,
+                "batch_size": 8,
+                "shuffle_train": True,
+            },
+        }
+        train_loaders, _, _ = build_federated_loaders(config)
+        x, y = next(iter(train_loaders["Nd2O3"]))
+        return x.numpy().copy(), y.numpy().copy()
+
+    first_x_a, first_y_a = first_batch(2026)
+    first_x_b, first_y_b = first_batch(2026)
+    first_x_c, first_y_c = first_batch(2027)
+
+    np.testing.assert_allclose(first_x_a, first_x_b)
+    np.testing.assert_allclose(first_y_a, first_y_b)
+    assert not (np.allclose(first_x_a, first_x_c) and np.allclose(first_y_a, first_y_c))
+
+
+def test_build_federated_loaders_can_disable_train_shuffle(tmp_path):
+    from federated_ts.datasets.rare_earth import build_federated_loaders
+
+    for client in ["Nd2O3", "CeO2", "La2O3"]:
+        client_dir = tmp_path / "clients" / client
+        client_dir.mkdir(parents=True)
+        for split, start, length in [("train", 0, 50), ("val", 50, 20), ("test", 70, 20)]:
+            dates = [f"2020-01-{(idx % 28) + 1:02d}" for idx in range(start, start + length)]
+            values = np.arange(start, start + length, dtype="float32")
+            rows = "date,value\n" + "\n".join(f"{date},{value}" for date, value in zip(dates, values)) + "\n"
+            (client_dir / f"{split}.csv").write_text(rows, encoding="utf-8")
+
+    def first_batch(seed: int):
+        config = {
+            "runtime": {"seed": seed},
+            "data": {
+                "split_dir": str(tmp_path),
+                "clients": ["Nd2O3", "CeO2", "La2O3"],
+                "seq_len": 4,
+                "pred_len": 2,
+                "batch_size": 8,
+                "shuffle_train": False,
+            },
+        }
+        train_loaders, _, _ = build_federated_loaders(config)
+        x, y = next(iter(train_loaders["Nd2O3"]))
+        return x.numpy().copy(), y.numpy().copy()
+
+    first_x_a, first_y_a = first_batch(2026)
+    first_x_b, first_y_b = first_batch(2027)
+
+    np.testing.assert_allclose(first_x_a, first_x_b)
+    np.testing.assert_allclose(first_y_a, first_y_b)

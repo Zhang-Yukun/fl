@@ -5,6 +5,7 @@ experiment:
 
 data:
   batch_size: 16
+  shuffle_train: true
 
 model:
   hidden_size: 16
