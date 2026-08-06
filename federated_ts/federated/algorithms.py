@@ -128,7 +128,7 @@ def _select_attack_clients(clients: list[FederatedClient], config: dict[str, Any
     """Select which clients should be attacked on the current round."""
 
     attack_cfg = config.get("attack", {})
-    selection = str(attack_cfg.get("client_selection", "round_robin")).lower()
+    selection = str(attack_cfg.get("client_selection", "all")).lower()
     count = max(1, int(attack_cfg.get("clients_per_round", 1)))
     if selection == "all":
         return clients

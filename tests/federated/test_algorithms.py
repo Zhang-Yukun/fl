@@ -371,6 +371,19 @@ def test_client_prefers_local_steps_over_local_epochs(monkeypatch):
     assert result.loss == 1.25
 
 
+def test_select_attack_clients_defaults_to_all_clients():
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", [])
+    clients = [
+        SimpleNamespace(client_id="Nd2O3"),
+        SimpleNamespace(client_id="CeO2"),
+        SimpleNamespace(client_id="La2O3"),
+    ]
+
+    selected = algorithms_module._select_attack_clients(clients, config, round_index=7)
+
+    assert [client.client_id for client in selected] == ["Nd2O3", "CeO2", "La2O3"]
+
+
 def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
     sync_dir = tmp_path / "sync"
     async_dir = tmp_path / "async"

@@ -44,6 +44,8 @@ attack:
   success_mse_threshold: 0.01
   success_rate_threshold: 0.03
   data_range: 1.0
+  client_selection: all
+  clients_per_round: 3
   async_enabled: false
   async_workers: 1
   async_max_pending_rounds: 5

@@ -24,8 +24,8 @@ attack:
   optimizer: adam
   restarts: 1
   lbfgs_history_size: 20
-  client_selection: round_robin
-  clients_per_round: 1
+  client_selection: all
+  clients_per_round: 3
   sample_count: 1
   input_clip: 5.0
   target_clip: 5.0
