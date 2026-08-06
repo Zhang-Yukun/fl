@@ -24,6 +24,7 @@ from federated_ts.federated.algorithms import (
     run_federated,
 )
 from federated_ts.utils.config import load_config
+from federated_ts.utils.consistency import compare_fedavg_runs
 
 
 def test_one_round_federated_run(tmp_path):
@@ -408,17 +409,11 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
 
     sync_summary = run_federated(sync_config)
     async_summary = run_federated(async_config)
-    sync_attacks = json.loads((sync_dir / "attack_results.json").read_text(encoding="utf-8"))
-    async_attacks = json.loads((async_dir / "attack_results.json").read_text(encoding="utf-8"))
 
     assert sync_summary["test"]["mse"] == pytest.approx(async_summary["test"]["mse"])
     assert sync_summary["attack_overall_avg_mse"] == pytest.approx(async_summary["attack_overall_avg_mse"])
     assert sync_summary["attack_success_rate"] == pytest.approx(async_summary["attack_success_rate"])
-    assert [entry["name"] for entry in sync_attacks] == [entry["name"] for entry in async_attacks]
-    for sync_entry, async_entry in zip(sync_attacks, async_attacks):
-        assert sync_entry["target_type"] == async_entry["target_type"]
-        assert sync_entry["mse"] == pytest.approx(async_entry["mse"])
-        assert sync_entry["objective_mse"] == pytest.approx(async_entry["objective_mse"])
+    assert compare_fedavg_runs(sync_dir, async_dir) == []
 
 
 class _TrackerStub:

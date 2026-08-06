@@ -1,0 +1,55 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_patchtst_small_deterministic
+  output_dir: outputs/fedavg_consistency/single_sync
+
+runtime:
+  device: cpu
+  seed: 2026
+  deterministic: true
+  num_threads: 1
+  num_interop_threads: 1
+
+data:
+  batch_size: 32
+  shuffle_train: false
+  num_workers: 0
+
+model:
+  patch_len: 4
+  stride: 2
+  d_model: 16
+  n_heads: 1
+  e_layers: 1
+  d_ff: 32
+  dropout: 0.0
+
+training:
+  patience: 10
+
+federated:
+  algorithm: fedavg
+  rounds: 3
+  local_epochs: 1
+
+attack:
+  enabled: true
+  target_type: update_payload
+  frequency_rounds: 1
+  max_samples: 1
+  sample_count: 1
+  clients_per_round: 1
+  client_selection: first
+  steps: 1
+  optimizer: adam
+  local_optimizer: adam
+  model_mode: eval
+  async_enabled: false
+  async_workers: 1
+  async_max_pending_rounds: 2
+  async_device: cpu
+  seed: 2026
+
+tracking:
+  enabled: false
