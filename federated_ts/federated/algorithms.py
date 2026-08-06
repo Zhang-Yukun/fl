@@ -6,7 +6,7 @@ import json
 import os
 import random
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -522,16 +522,47 @@ class AsyncAttackManager:
         self.pending_futures: dict[int, Future] = {}
         self.completed_rounds: dict[int, AttackRoundResult] = {}
         self.executor: ThreadPoolExecutor | None = None
+        self.async_workers = max(1, int(attack_cfg.get("async_workers", 1)))
+        configured_pending = attack_cfg.get("async_max_pending_rounds", 5)
+        self.max_pending_rounds = max(self.async_workers, int(configured_pending))
         if attack_cfg.get("enabled", True) and self.async_enabled:
-            workers = max(1, int(attack_cfg.get("async_workers", 1)))
-            self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="attack")
-            logger.info("Async attack manager enabled with workers={} device={}", workers, self.attack_device)
+            self.executor = ThreadPoolExecutor(max_workers=self.async_workers, thread_name_prefix="attack")
+            logger.info(
+                "Async attack manager enabled with workers={} max_pending_rounds={} device={}",
+                self.async_workers,
+                self.max_pending_rounds,
+                self.attack_device,
+            )
+
+    def _inflight_rounds(self) -> int:
+        """Return the number of attack rounds that still occupy queue capacity."""
+
+        return len(self.pending_round_order)
+
+    def _wait_for_capacity(self) -> None:
+        """Block only when the bounded async queue is full."""
+
+        if self.executor is None:
+            return
+        while self._inflight_rounds() >= self.max_pending_rounds:
+            logger.info(
+                "Async attack queue full inflight_rounds={}/{}; waiting for one round to finish",
+                self._inflight_rounds(),
+                self.max_pending_rounds,
+            )
+            if self.pending_futures:
+                done, _ = wait(tuple(self.pending_futures.values()), return_when=FIRST_COMPLETED)
+                if not done:
+                    break
+            self.drain_completed(wait=False)
 
     def submit(self, task: AttackRoundTask | None) -> None:
         """Run or enqueue one round of attack work."""
 
         if task is None:
             return
+        if self.executor is not None:
+            self._wait_for_capacity()
         self.pending_round_order.append(task.round_index)
         if self.executor is None:
             self.completed_rounds[task.round_index] = _execute_attack_round_task(self.config, task, self.attack_device)
@@ -543,20 +574,27 @@ class AsyncAttackManager:
                 self.attack_device,
             )
             logger.info(
-                "Round {} submitted async attack job with {} evaluations on {}",
+                "Round {} submitted async attack job with {} evaluations on {} queue_depth={}/{}",
                 task.round_index,
                 len(task.samples) * 2,
                 self.attack_device,
+                self._inflight_rounds(),
+                self.max_pending_rounds,
             )
         self.drain_completed(wait=False)
 
     def drain_completed(self, wait: bool = False) -> None:
         """Collect finished futures and log any now-complete rounds in round order."""
 
-        for round_index, future in list(self.pending_futures.items()):
-            if wait or future.done():
+        if wait:
+            for round_index, future in list(self.pending_futures.items()):
                 self.completed_rounds[round_index] = future.result()
                 del self.pending_futures[round_index]
+        else:
+            for round_index, future in list(self.pending_futures.items()):
+                if future.done():
+                    self.completed_rounds[round_index] = future.result()
+                    del self.pending_futures[round_index]
         while self.pending_round_order and self.pending_round_order[0] in self.completed_rounds:
             round_index = self.pending_round_order.pop(0)
             round_result = self.completed_rounds.pop(round_index)

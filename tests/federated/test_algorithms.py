@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
 
+import federated_ts.federated.algorithms as algorithms_module
 import federated_ts.federated.client as client_module
 from federated_ts.datasets.rare_earth import build_federated_loaders
 from federated_ts.engine.training import train_n_steps
@@ -12,6 +14,9 @@ from federated_ts.modeling.forecasting import build_model
 from federated_ts.utils.serialization import serialize_model
 
 from federated_ts.federated.algorithms import (
+    AsyncAttackManager,
+    AttackRoundResult,
+    AttackRoundTask,
     _protect_attack_gradients,
     _round_history_communication_summary,
     _wandb_cumulative_communication_payload,
@@ -413,3 +418,107 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
         assert sync_entry["target_type"] == async_entry["target_type"]
         assert sync_entry["mse"] == pytest.approx(async_entry["mse"])
         assert sync_entry["objective_mse"] == pytest.approx(async_entry["objective_mse"])
+
+
+class _TrackerStub:
+    def __init__(self):
+        self.logs = []
+
+    def log(self, data, step=None):
+        self.logs.append((step, data))
+
+
+def _attack_result_stub(name: str, mse: float = 0.5):
+    return SimpleNamespace(
+        name=name,
+        mse=mse,
+        psnr=10.0,
+        ssim=0.1,
+        iterations=1,
+        time_seconds=0.01,
+        gradient_mse=0.02,
+        success=False,
+    )
+
+
+def test_async_attack_manager_preserves_sync_mode(monkeypatch):
+    tracker = _TrackerStub()
+    config = {"attack": {"enabled": True, "async_enabled": False}}
+    task = AttackRoundTask(round_index=0, clients_this_round=1, samples_per_client=1, samples=[])
+
+    def fake_execute(config, task, attack_device):
+        return AttackRoundResult(
+            round_index=task.round_index,
+            time_seconds=0.1,
+            clients_this_round=task.clients_this_round,
+            samples_per_client=task.samples_per_client,
+            attacks=[_attack_result_stub("DLG")],
+        )
+
+    monkeypatch.setattr(algorithms_module, "_execute_attack_round_task", fake_execute)
+
+    manager = AsyncAttackManager(config, tracker)
+    manager.submit(task)
+
+    assert manager.executor is None
+    assert len(manager.attack_results) == 1
+    assert tracker.logs[0][0] == 0
+
+
+def test_async_attack_manager_applies_pending_round_backpressure(monkeypatch):
+    tracker = _TrackerStub()
+    config = {
+        "attack": {
+            "enabled": True,
+            "async_enabled": True,
+            "async_workers": 1,
+            "async_max_pending_rounds": 1,
+        }
+    }
+
+    class FakeFuture:
+        def __init__(self, result):
+            self._result = result
+            self._done = False
+
+        def done(self):
+            return self._done
+
+        def result(self):
+            self._done = True
+            return self._result
+
+    futures = [
+        FakeFuture(AttackRoundResult(0, 0.1, 1, 1, [_attack_result_stub("DLG", mse=0.4)])),
+        FakeFuture(AttackRoundResult(1, 0.1, 1, 1, [_attack_result_stub("DLG", mse=0.6)])),
+    ]
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            self.submit_calls = 0
+
+        def submit(self, fn, config, task, attack_device):
+            future = futures[self.submit_calls]
+            self.submit_calls += 1
+            return future
+
+        def shutdown(self, wait=True):
+            return None
+
+    def fake_wait(pending, return_when=None):
+        futures[0]._done = True
+        return {futures[0]}, set()
+
+    monkeypatch.setattr(algorithms_module, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(algorithms_module, "wait", fake_wait)
+
+    manager = AsyncAttackManager(config, tracker)
+    manager.submit(AttackRoundTask(round_index=0, clients_this_round=1, samples_per_client=1, samples=[]))
+    assert len(manager.pending_round_order) == 1
+    manager.submit(AttackRoundTask(round_index=1, clients_this_round=1, samples_per_client=1, samples=[]))
+
+    assert tracker.logs[0][0] == 0
+    assert manager.pending_round_order == [1]
+    manager.finalize()
+    assert [step for step, _ in tracker.logs] == [0, 1]
+    assert len(manager.attack_results) == 2
