@@ -34,10 +34,14 @@ class AttackResult:
     success_threshold: float
     gradient_mse: float
     target_type: str = "gradient"
+    exact_target_mse: float | None = None
+    nearest_client_train_mse: float | None = None
+    nearest_client_train_indices: list[int] | None = None
+    metric_name: str = "reconstruction_mse"
 
     @property
     def reconstruction_mse(self) -> float:
-        """Backward-compatible alias for the reconstructed-input MSE."""
+        """Backward-compatible alias for the primary reconstructed-input MSE."""
 
         return self.mse
 
@@ -61,6 +65,19 @@ def _normalize_target_type(target_type: str | None, config: dict[str, Any]) -> s
     if normalized not in {"gradient", "update_payload"}:
         raise ValueError(f"Unsupported attack target type: {value}")
     return normalized
+
+
+def _normalize_reference_metric(config: dict[str, Any], target_type: str) -> str:
+    """Resolve the metric used to judge attack success."""
+
+    value = str(config.get("attack", {}).get("reference_metric", "auto")).lower()
+    if value == "auto":
+        if target_type == "update_payload":
+            return "nearest_client_train_mse"
+        return "reconstruction_mse"
+    if value not in {"reconstruction_mse", "nearest_client_train_mse"}:
+        raise ValueError(f"Unsupported attack reference metric: {value}")
+    return value
 
 
 def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_grads: list[torch.Tensor]) -> torch.Tensor:
@@ -189,6 +206,20 @@ def _compute_ssim(reconstructed: torch.Tensor, target: torch.Tensor, data_range:
     return float(value.item())
 
 
+def _nearest_reference_mse(reconstructed: torch.Tensor, reference_inputs: torch.Tensor) -> tuple[float | None, list[int] | None]:
+    """Return the average nearest-neighbor MSE against a reference window set."""
+
+    references = reference_inputs.detach().cpu().float()
+    if references.numel() == 0:
+        return None, None
+    recon = reconstructed.detach().cpu().float()
+    recon_flat = recon.reshape(recon.shape[0], -1)
+    refs_flat = references.reshape(references.shape[0], -1)
+    mse_matrix = torch.mean((recon_flat[:, None, :] - refs_flat[None, :, :]) ** 2, dim=-1)
+    nearest_values, nearest_indices = torch.min(mse_matrix, dim=1)
+    return float(nearest_values.mean().item()), [int(index) for index in nearest_indices.tolist()]
+
+
 def _evaluate_reconstruction(
     name: str,
     reconstructed_x: torch.Tensor,
@@ -200,18 +231,31 @@ def _evaluate_reconstruction(
     data_range: float,
     ssim_threshold: float | None,
     target_type: str,
+    reference_inputs: torch.Tensor | None = None,
+    reference_metric: str = "reconstruction_mse",
 ) -> AttackResult:
     """Build an attack result from a reconstructed input."""
 
-    rec_mse = torch.mean((reconstructed_x.detach().cpu() - real_x.detach().cpu()) ** 2).item()
-    psnr = _compute_psnr(rec_mse, data_range)
+    exact_target_mse = torch.mean((reconstructed_x.detach().cpu() - real_x.detach().cpu()) ** 2).item()
+    psnr = _compute_psnr(exact_target_mse, data_range)
     ssim = _compute_ssim(reconstructed_x, real_x, data_range)
-    success = rec_mse <= threshold
-    if ssim_threshold is not None:
+    nearest_client_train_mse = None
+    nearest_client_train_indices = None
+    if reference_inputs is not None:
+        nearest_client_train_mse, nearest_client_train_indices = _nearest_reference_mse(reconstructed_x, reference_inputs)
+    metric_name = reference_metric
+    primary_mse = float(exact_target_mse)
+    if metric_name == "nearest_client_train_mse":
+        if nearest_client_train_mse is None:
+            metric_name = "reconstruction_mse"
+        else:
+            primary_mse = float(nearest_client_train_mse)
+    success = primary_mse <= threshold
+    if metric_name == "reconstruction_mse" and ssim_threshold is not None:
         success = success or ssim >= ssim_threshold
     return AttackResult(
         name=name,
-        mse=float(rec_mse),
+        mse=primary_mse,
         psnr=psnr,
         ssim=ssim,
         iterations=iterations,
@@ -220,6 +264,10 @@ def _evaluate_reconstruction(
         success_threshold=threshold,
         gradient_mse=float(objective_mse),
         target_type=target_type,
+        exact_target_mse=float(exact_target_mse),
+        nearest_client_train_mse=None if nearest_client_train_mse is None else float(nearest_client_train_mse),
+        nearest_client_train_indices=nearest_client_train_indices,
+        metric_name=metric_name,
     )
 
 
@@ -243,10 +291,12 @@ def _attack_loop(
     name: str,
     optimize_y: bool,
     target_type: str | None = None,
+    reference_inputs: torch.Tensor | None = None,
 ) -> AttackResult:
     """Run one configurable reconstruction attack loop."""
 
     resolved_target_type = _normalize_target_type(target_type, config)
+    resolved_reference_metric = _normalize_reference_metric(config, resolved_target_type)
     attack_cfg = config.get("attack", {})
     steps = int(attack_cfg.get("steps", 300))
     lr = float(attack_cfg.get("lr", 0.1))
@@ -340,6 +390,8 @@ def _attack_loop(
         data_range,
         ssim_threshold,
         resolved_target_type,
+        reference_inputs=reference_inputs,
+        reference_metric=resolved_reference_metric,
     )
 
 
@@ -351,10 +403,22 @@ def dlg_attack(
     real_y: torch.Tensor,
     device: torch.device,
     target_type: str | None = None,
+    reference_inputs: torch.Tensor | None = None,
 ) -> AttackResult:
     """Reconstruct a batch by optimizing dummy inputs against the chosen target."""
 
-    return _attack_loop(config, state, target, real_x, real_y, device, name="DLG", optimize_y=True, target_type=target_type)
+    return _attack_loop(
+        config,
+        state,
+        target,
+        real_x,
+        real_y,
+        device,
+        name="DLG",
+        optimize_y=True,
+        target_type=target_type,
+        reference_inputs=reference_inputs,
+    )
 
 
 def idlg_attack(
@@ -365,10 +429,22 @@ def idlg_attack(
     real_y: torch.Tensor,
     device: torch.device,
     target_type: str | None = None,
+    reference_inputs: torch.Tensor | None = None,
 ) -> AttackResult:
     """Run iDLG-style reconstruction for forecasting targets."""
 
-    return _attack_loop(config, state, target, real_x, real_y, device, name="iDLG", optimize_y=False, target_type=target_type)
+    return _attack_loop(
+        config,
+        state,
+        target,
+        real_x,
+        real_y,
+        device,
+        name="iDLG",
+        optimize_y=False,
+        target_type=target_type,
+        reference_inputs=reference_inputs,
+    )
 
 
 def attack_success_rate(results: list[AttackResult], name: str | None = None) -> float:
@@ -392,15 +468,16 @@ def _mean_finite(values: list[float]) -> float | None:
 
 
 def summarize_attack_results(results: list[AttackResult], success_rate_threshold: float = 0.03) -> dict[str, Any]:
-    """Summarize DLG/iDLG metrics with reconstruction MSE as the primary view."""
+    """Summarize DLG/iDLG metrics with the configured primary view."""
 
+    primary_metric = results[0].metric_name if results else "reconstruction_mse"
     methods: dict[str, dict[str, float | int | bool | None | str]] = {}
     for name in sorted({result.name for result in results}):
         subset = [result for result in results if result.name == name]
         total = len(subset)
         success_count = sum(result.success for result in subset)
         methods[name] = {
-            "primary_metric": "reconstruction_mse",
+            "primary_metric": subset[0].metric_name if subset else primary_metric,
             "target_type": subset[0].target_type if subset else None,
             "success_count": success_count,
             "total_count": total,
@@ -408,6 +485,8 @@ def summarize_attack_results(results: list[AttackResult], success_rate_threshold
             "success_rate_percent": round((success_count / total if total else 0.0) * 100.0, 2),
             "avg_mse": _mean_finite([result.mse for result in subset]),
             "best_mse": _mean_finite(sorted([result.mse for result in subset])[:1]),
+            "avg_exact_target_mse": _mean_finite([result.exact_target_mse for result in subset if result.exact_target_mse is not None]),
+            "avg_nearest_client_train_mse": _mean_finite([result.nearest_client_train_mse for result in subset if result.nearest_client_train_mse is not None]),
             "avg_psnr": _mean_finite([result.psnr for result in subset]),
             "avg_ssim": _mean_finite([result.ssim for result in subset]),
             "best_ssim": _mean_finite(sorted([result.ssim for result in subset], reverse=True)[:1]),
@@ -422,13 +501,17 @@ def summarize_attack_results(results: list[AttackResult], success_rate_threshold
     overall_avg_psnr = _mean_finite([result.psnr for result in results])
     overall_avg_ssim = _mean_finite([result.ssim for result in results])
     overall_avg_gradient_mse = _mean_finite([result.gradient_mse for result in results])
+    overall_avg_exact_target_mse = _mean_finite([result.exact_target_mse for result in results if result.exact_target_mse is not None])
+    overall_avg_nearest_client_train_mse = _mean_finite([result.nearest_client_train_mse for result in results if result.nearest_client_train_mse is not None])
     return {
-        "primary_metric": "reconstruction_mse",
+        "primary_metric": primary_metric,
         "primary_metric_direction": "higher_is_more_private",
         "target_type": results[0].target_type if results else None,
         "success_rate_threshold": success_rate_threshold,
         "overall_avg_mse": overall_avg_mse,
         "overall_best_mse": overall_best_mse,
+        "overall_avg_exact_target_mse": overall_avg_exact_target_mse,
+        "overall_avg_nearest_client_train_mse": overall_avg_nearest_client_train_mse,
         "overall_avg_psnr": overall_avg_psnr,
         "overall_avg_ssim": overall_avg_ssim,
         "overall_avg_gradient_mse": overall_avg_gradient_mse,

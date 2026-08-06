@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import time
 from dataclasses import asdict
@@ -53,25 +54,42 @@ def configure_torch_runtime(config: dict[str, Any]) -> None:
             logger.warning("Could not set torch interop threads after runtime start: {}", exc)
 
 
-def configure_random_seed(config: dict[str, Any]) -> None:
-    """Apply a deterministic seed across Python, NumPy, and torch when configured."""
+def setup_seed(seed: int, deterministic: bool = True) -> None:
+    """Set Python, NumPy, and torch random sources to a reproducible state.
 
-    runtime_cfg = config.get("runtime", {})
-    seed = runtime_cfg.get("seed")
-    if seed is None:
-        return
+    Example:
+        ``setup_seed(2026, deterministic=True)`` makes repeated local runs
+        reproduce the same model init and dataloader shuffles.
+    """
+
     seed_value = int(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed_value)
+    if deterministic:
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     random.seed(seed_value)
     if np is not None:
         np.random.seed(seed_value)
     torch.manual_seed(seed_value)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed_value)
-    deterministic = bool(runtime_cfg.get("deterministic", True))
     if hasattr(torch.backends, "cudnn"):
         torch.backends.cudnn.deterministic = deterministic
         torch.backends.cudnn.benchmark = not deterministic
+    try:
+        torch.use_deterministic_algorithms(deterministic, warn_only=True)
+    except Exception as exc:  # pragma: no cover - depends on torch build/runtime
+        logger.warning("Could not set deterministic torch algorithms: {}", exc)
     logger.info("Set runtime seed={} deterministic={}", seed_value, deterministic)
+
+
+def configure_random_seed(config: dict[str, Any]) -> None:
+    """Apply the configured runtime seed when one is provided."""
+
+    runtime_cfg = config.get("runtime", {})
+    seed = runtime_cfg.get("seed")
+    if seed is None:
+        return
+    setup_seed(int(seed), deterministic=bool(runtime_cfg.get("deterministic", True)))
 
 
 def resolve_device(config: dict[str, Any]) -> torch.device:
@@ -131,6 +149,60 @@ def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
             if key != "client_id":
                 payload[f"{prefix}/{key}"] = value
     return payload
+
+
+def _round_history_communication_summary(history: list[RoundRecord]) -> dict[str, float | int]:
+    """Summarize parameter and transport communication over all recorded rounds."""
+
+    if not history:
+        return {
+            "last_parameter_upload_bytes": 0,
+            "last_parameter_download_bytes": 0,
+            "last_parameter_total_bytes": 0,
+            "last_transport_upload_bytes": 0,
+            "last_transport_download_bytes": 0,
+            "last_transport_total_bytes": 0,
+            "last_transport_upload_overhead_bytes": 0,
+            "last_transport_download_overhead_bytes": 0,
+            "last_transport_upload_compression_ratio": 0.0,
+            "last_transport_total_communication_ratio": 0.0,
+            "total_parameter_upload_bytes": 0,
+            "total_parameter_download_bytes": 0,
+            "total_parameter_bytes": 0,
+            "total_transport_upload_bytes": 0,
+            "total_transport_download_bytes": 0,
+            "total_transport_bytes": 0,
+            "total_transport_upload_overhead_bytes": 0,
+            "total_transport_download_overhead_bytes": 0,
+        }
+    last = history[-1]
+    return {
+        "last_parameter_upload_bytes": last.total_parameter_upload_bytes,
+        "last_parameter_download_bytes": last.total_parameter_download_bytes,
+        "last_parameter_total_bytes": last.total_parameter_bytes,
+        "last_transport_upload_bytes": last.total_transport_upload_bytes,
+        "last_transport_download_bytes": last.total_transport_download_bytes,
+        "last_transport_total_bytes": last.total_transport_bytes,
+        "last_transport_upload_overhead_bytes": last.total_transport_upload_overhead_bytes,
+        "last_transport_download_overhead_bytes": last.total_transport_download_overhead_bytes,
+        "last_transport_upload_compression_ratio": last.transport_upload_compression_ratio,
+        "last_transport_total_communication_ratio": last.transport_total_communication_ratio,
+        "total_parameter_upload_bytes": sum(record.total_parameter_upload_bytes for record in history),
+        "total_parameter_download_bytes": sum(record.total_parameter_download_bytes for record in history),
+        "total_parameter_bytes": sum(record.total_parameter_bytes for record in history),
+        "total_transport_upload_bytes": sum(record.total_transport_upload_bytes for record in history),
+        "total_transport_download_bytes": sum(record.total_transport_download_bytes for record in history),
+        "total_transport_bytes": sum(record.total_transport_bytes for record in history),
+        "total_transport_upload_overhead_bytes": sum(record.total_transport_upload_overhead_bytes for record in history),
+        "total_transport_download_overhead_bytes": sum(record.total_transport_download_overhead_bytes for record in history),
+    }
+
+
+def _wandb_cumulative_communication_payload(history: list[RoundRecord]) -> dict[str, float | int]:
+    """Return cumulative communication metrics in a wandb-friendly flat namespace."""
+
+    summary = _round_history_communication_summary(history)
+    return {f"cumulative/{key}": value for key, value in summary.items()}
 
 
 def _protect_attack_gradients(
@@ -374,7 +446,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             round_time_seconds=time.perf_counter() - round_start,
             elapsed_time_seconds=time.perf_counter() - start_time,
         )
-        tracker.log(_wandb_round_payload(record), step=round_index)
+        tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(server.history)}, step=round_index)
         if _should_run_attack(config, round_index, max_rounds):
             attack_cfg = config.get("attack", {})
             attack_start = time.perf_counter()
@@ -386,6 +458,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             for client_index, client in enumerate(selected_clients):
                 result = results_by_client[client.client_id]
                 for sample_index in range(sample_count):
+                    reference_inputs = None
                     if attack_target_type == "gradient":
                         grads, real_x, real_y = client.gradient_sample(
                             round_base_state,
@@ -402,9 +475,10 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
                     else:
                         real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
                         target = _extract_attack_payload(config, result)
+                        reference_inputs = client.train_reference_inputs()
                     round_attacks.extend([
-                        dlg_attack(config, round_base_state, target, real_x, real_y, device, target_type=attack_target_type),
-                        idlg_attack(config, round_base_state, target, real_x, real_y, device, target_type=attack_target_type),
+                        dlg_attack(config, round_base_state, target, real_x, real_y, device, target_type=attack_target_type, reference_inputs=reference_inputs),
+                        idlg_attack(config, round_base_state, target, real_x, real_y, device, target_type=attack_target_type, reference_inputs=reference_inputs),
                     ])
             attack_results.extend(round_attacks)
             attack_payload: dict[str, float] = {
@@ -453,6 +527,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         "last_upload_compression_ratio": server.history[-1].upload_compression_ratio if server.history else 0.0,
         "last_total_communication_ratio": server.history[-1].total_communication_ratio if server.history else 0.0,
         "last_communication_ratio": server.history[-1].communication_ratio if server.history else 0.0,
+        **_round_history_communication_summary(server.history),
         "attack_target_type": attack_summary.get("target_type", attack_target_type),
         "attack_primary_metric": attack_summary["primary_metric"],
         "attack_primary_metric_direction": attack_summary["primary_metric_direction"],

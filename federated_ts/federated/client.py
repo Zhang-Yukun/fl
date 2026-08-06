@@ -250,3 +250,14 @@ class FederatedClient:
         """
 
         return first_batch_sample(self.train_loader, self.device, max_samples=max_samples, batch_index=batch_index)
+
+    def train_reference_inputs(self) -> torch.Tensor:
+        """Return all normalized input windows from this client training dataset.
+
+        Example:
+            ``windows = client.train_reference_inputs()`` is used to score
+            payload reconstructions against the full local training set.
+        """
+
+        dataset = self.train_loader.dataset
+        return torch.stack([dataset[index][0] for index in range(len(dataset))], dim=0)

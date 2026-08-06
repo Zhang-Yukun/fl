@@ -97,17 +97,24 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     optimizer.step()
     target_update = subtract_state(serialize_model(model), state)
 
-    dlg = dlg_attack(config, state, target_update, x, y, device, target_type="update_payload")
-    idlg = idlg_attack(config, state, target_update, x, y, device, target_type="update_payload")
+    reference_inputs = torch.cat([x, x + 5.0], dim=0)
+    dlg = dlg_attack(config, state, target_update, x, y, device, target_type="update_payload", reference_inputs=reference_inputs)
+    idlg = idlg_attack(config, state, target_update, x, y, device, target_type="update_payload", reference_inputs=reference_inputs)
 
     assert dlg.target_type == "update_payload"
     assert idlg.target_type == "update_payload"
     assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
     assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
+    assert dlg.metric_name == "nearest_client_train_mse"
+    assert idlg.metric_name == "nearest_client_train_mse"
+    assert dlg.nearest_client_train_mse is not None
+    assert idlg.exact_target_mse is not None
 
     summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
     assert summary["target_type"] == "update_payload"
+    assert summary["primary_metric"] == "nearest_client_train_mse"
     assert summary["methods"]["DLG"]["target_type"] == "update_payload"
+    assert summary["overall_avg_nearest_client_train_mse"] is not None
     assert summary["overall_avg_objective_mse"] is not None
 
 

@@ -151,16 +151,17 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"mse", "reconstruction_mse", "psnr", "ssim", "iterations", "time_seconds", "objective_mse"} <= set(attack_results[0])
+    assert {"mse", "reconstruction_mse", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "exact_target_mse", "nearest_client_train_mse", "metric_name"} <= set(attack_results[0])
     assert result["attack_evaluations"] == 2
     assert result["attack_target_type"] == "update_payload"
-    assert result["attack_primary_metric"] == "reconstruction_mse"
+    assert result["attack_primary_metric"] == "nearest_client_train_mse"
     assert result["attack_primary_metric_direction"] == "higher_is_more_private"
     assert result["attack_overall_avg_mse"] is not None
     assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
-    assert result["attack_summary"]["primary_metric"] == "reconstruction_mse"
+    assert result["attack_summary"]["primary_metric"] == "nearest_client_train_mse"
     assert result["attack_summary"]["target_type"] == "update_payload"
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
+    assert result["attack_summary"]["overall_avg_nearest_client_train_mse"] is not None
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 1
 
 
