@@ -28,10 +28,19 @@ class Tracker:
             logger.warning("wandb disabled: {}", exc)
 
     def log(self, data: dict[str, Any], step: int | None = None) -> None:
-        """Log metrics to wandb when tracking is enabled."""
+        """Log metrics to wandb when tracking is enabled.
 
+        Example:
+            ``tracker.log({"round/loss": 0.1}, step=3)`` also records
+            ``tracking/step=3`` so asynchronous producers still carry an
+            explicit round index in the payload itself.
+        """
+
+        payload = dict(data)
+        if step is not None:
+            payload.setdefault("tracking/step", int(step))
         if self.run is not None:
-            self.run.log(data, step=step)
+            self.run.log(payload, step=step)
 
     def finish(self) -> None:
         """Close the wandb run when one was created."""

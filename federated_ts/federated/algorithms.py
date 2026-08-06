@@ -484,6 +484,7 @@ def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: l
 
     round_attacks = round_result.attacks
     payload: dict[str, float] = {
+        "attack/round_index": float(round_result.round_index),
         "attack/time_seconds": round_result.time_seconds,
         "attack/evaluations_this_round": float(len(round_attacks)),
         "attack/clients_this_round": float(round_result.clients_this_round),

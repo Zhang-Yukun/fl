@@ -18,6 +18,7 @@ from federated_ts.federated.algorithms import (
     AttackRoundResult,
     AttackRoundTask,
     _protect_attack_gradients,
+    _round_attack_payload,
     _round_history_communication_summary,
     _wandb_cumulative_communication_payload,
     run_federated,
@@ -522,3 +523,17 @@ def test_async_attack_manager_applies_pending_round_backpressure(monkeypatch):
     manager.finalize()
     assert [step for step, _ in tracker.logs] == [0, 1]
     assert len(manager.attack_results) == 2
+
+
+def test_round_attack_payload_includes_explicit_round_index():
+    round_result = AttackRoundResult(
+        round_index=3,
+        time_seconds=0.2,
+        clients_this_round=1,
+        samples_per_client=1,
+        attacks=[_attack_result_stub("DLG", mse=0.4)],
+    )
+
+    payload = _round_attack_payload(round_result, round_result.attacks)
+
+    assert payload["attack/round_index"] == 3.0
