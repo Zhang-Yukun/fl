@@ -37,6 +37,7 @@ from federated_ts.federated.client import ClientResult, FederatedClient
 from federated_ts.federated.server import EarlyStopper, FederatedServer
 from federated_ts.security.attacks import summarize_attack_results
 from federated_ts.utils.logging import setup_logging
+from federated_ts.utils.artifacts import save_experiment_config
 from federated_ts.utils.serialization import state_num_bytes, state_num_parameters
 from federated_ts.utils.tracking import Tracker
 
@@ -91,6 +92,9 @@ class GrpcFederatedCoordinator:
         self.config = config
         self.output_dir = Path(config['experiment']['output_dir'])
         setup_logging(self.output_dir, config.get('runtime', {}).get('log_level', 'INFO'))
+        config_formats = config.get('artifacts', {}).get('config_formats')
+        saved_configs = save_experiment_config(config, self.output_dir, config_formats)
+        logger.info('Saved startup config artifacts: {}', [str(path) for path in saved_configs])
         configure_torch_runtime(config)
         configure_random_seed(config)
         self.tracker = Tracker(config)

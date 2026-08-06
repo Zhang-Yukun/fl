@@ -88,6 +88,24 @@ def test_apply_transport_metrics_tracks_overhead_bytes():
     assert updated.transport_upload_overhead_bytes >= 0
 
 
+def test_grpc_coordinator_saves_config_on_startup(tmp_path):
+    """The gRPC coordinator should persist config artifacts before rounds begin."""
+
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+
+    coordinator = GrpcFederatedCoordinator(config)
+
+    assert coordinator.output_dir == tmp_path
+    assert (tmp_path / "config.yaml").exists()
+
+
 def test_grpc_coordinator_aggregates_one_round_and_saves_summary(tmp_path):
     """The gRPC coordinator accepts one round of client updates and persists summary artifacts."""
 

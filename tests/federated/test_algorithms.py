@@ -21,6 +21,7 @@ from federated_ts.federated.algorithms import (
     _round_attack_payload,
     _round_history_communication_summary,
     _wandb_cumulative_communication_payload,
+    run_centralized,
     run_federated,
 )
 from federated_ts.utils.config import load_config
@@ -45,6 +46,36 @@ def test_one_round_federated_run(tmp_path):
     assert (tmp_path / "model.pt").exists()
     assert (tmp_path / "config.yaml").exists()
     assert not (tmp_path / "config.json").exists()
+
+
+def test_federated_run_saves_config_before_training_starts(tmp_path, monkeypatch):
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml")
+    config["experiment"]["output_dir"] = str(tmp_path)
+
+    def fail_build(_config):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(algorithms_module, "build_federated_loaders", fail_build)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_federated(config)
+
+    assert (tmp_path / "config.yaml").exists()
+
+
+def test_centralized_run_saves_config_before_training_starts(tmp_path, monkeypatch):
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml")
+    config["experiment"]["output_dir"] = str(tmp_path)
+
+    def fail_build(_config):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(algorithms_module, "build_federated_loaders", fail_build)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_centralized(config)
+
+    assert (tmp_path / "config.yaml").exists()
 
 
 def test_wandb_cumulative_communication_payload_uses_history_totals(tmp_path):

@@ -620,6 +620,9 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
 
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
+    config_formats = config.get("artifacts", {}).get("config_formats")
+    saved_configs = save_experiment_config(config, output_dir, config_formats)
+    logger.info("Saved startup config artifacts: {}", [str(path) for path in saved_configs])
     configure_torch_runtime(config)
     configure_random_seed(config)
     tracker = Tracker(config)
@@ -679,9 +682,6 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     torch.save(model.state_dict(), output_dir / "centralized_model.pt")
     test_metrics = evaluate(model, test_loader, device)
     total_elapsed = time.perf_counter() - start_time
-    config_formats = config.get("artifacts", {}).get("config_formats")
-    saved_configs = save_experiment_config(config, output_dir, config_formats)
-    logger.info("Saved centralized config artifacts: {}", [str(path) for path in saved_configs])
     with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
         json.dump({"history": history, "test": test_metrics, "epochs": len(history), "total_time_seconds": total_elapsed}, handle, ensure_ascii=False, indent=2)
     tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
@@ -697,6 +697,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
 
     output_dir = Path(config["experiment"]["output_dir"])
     setup_logging(output_dir, config.get("runtime", {}).get("log_level", "INFO"))
+    config_formats = config.get("artifacts", {}).get("config_formats")
+    saved_configs = save_experiment_config(config, output_dir, config_formats)
+    logger.info("Saved startup config artifacts: {}", [str(path) for path in saved_configs])
     configure_torch_runtime(config)
     configure_random_seed(config)
     tracker = Tracker(config)
