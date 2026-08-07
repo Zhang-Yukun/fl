@@ -42,6 +42,17 @@ from federated_ts.utils.serialization import state_num_bytes, state_num_paramete
 from federated_ts.utils.tracking import Tracker
 
 
+def _format_num_bytes(num_bytes: int) -> str:
+    """Format raw bytes into a compact human-readable string."""
+
+    value = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024.0 or unit == "TB":
+            return f"{value:.2f}{unit}"
+        value /= 1024.0
+    return f"{value:.2f}TB"
+
+
 def _transport_delta(current: dict[str, int], previous: dict[str, int]) -> dict[str, int]:
     """Return the serialized transport delta between two RPC counter snapshots."""
 
@@ -368,9 +379,39 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
         if round_index == last_submitted:
             time.sleep(poll_seconds)
             continue
+        logger.info(
+            'Client {} fetched round {} compressed={} from {}',
+            client_id,
+            round_index,
+            global_payload['compressed'],
+            address,
+        )
+        train_start = time.perf_counter()
         result = client.train(global_payload['state'], compressed=global_payload['compressed'], round_index=round_index)
+        train_time_seconds = time.perf_counter() - train_start
         current_transport_snapshot = rpc.snapshot_counters()
         _apply_transport_metrics(result, _transport_delta(current_transport_snapshot, last_transport_snapshot), round_index=round_index)
+        logger.info(
+            'Client {} round {} local_loss={:.6f} train_time={:.2f}s payload={} compressor={} parameter_upload={} ({})/{} params parameter_download={} ({})/{} params transport_upload={} ({}) transport_download={} ({}) clip_norm={} noise_multiplier={}',
+            client_id,
+            round_index,
+            result.loss,
+            train_time_seconds,
+            result.payload_kind,
+            result.compressor,
+            result.parameter_upload_bytes,
+            _format_num_bytes(result.parameter_upload_bytes),
+            result.parameter_upload_parameters,
+            result.parameter_download_bytes,
+            _format_num_bytes(result.parameter_download_bytes),
+            result.parameter_download_parameters,
+            result.transport_upload_bytes,
+            _format_num_bytes(result.transport_upload_bytes),
+            result.transport_download_bytes,
+            _format_num_bytes(result.transport_download_bytes),
+            result.privacy_clip_norm,
+            result.privacy_noise_multiplier,
+        )
         while True:
             try:
                 response = rpc.submit_update({'round': round_index, 'result': result})
@@ -378,6 +419,14 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
             except Exception as exc:
                 logger.warning('Client {} could not submit round {} to {}: {}', client_id, round_index, address, exc)
                 time.sleep(poll_seconds)
+        logger.info(
+            'Client {} round {} submit accepted={} stop={} server_round={}',
+            client_id,
+            round_index,
+            response.get('accepted'),
+            response.get('stop'),
+            response.get('round'),
+        )
         last_transport_snapshot = rpc.snapshot_counters()
         last_submitted = round_index if response.get('accepted') else last_submitted
         if response.get('stop'):
