@@ -66,50 +66,32 @@ class LSTMForecaster(nn.Module):
         return self.head(hidden[-1]).reshape(x.shape[0], self.pred_len, self.channels)
 
 
-class ReferencePatchTSTForecaster(nn.Module):
-    """Wrapper around the vendored full PatchTST reference implementation.
+def _build_patchtst_model(config: dict[str, Any]) -> nn.Module:
+    """Build the vendored reference PatchTST model directly without an extra wrapper."""
 
-    The implementation is copied into
-    ``federated_ts.modeling.reference_patchtst`` from ``Time-Series-Prediction``
-    so training does not import across project directories.
+    from types import SimpleNamespace
 
-    Example:
-        ``ReferencePatchTSTForecaster(config)(torch.zeros(4, 21, 1))`` returns
-        a tensor shaped ``[4, 7, 1]``.
-    """
+    from federated_ts.modeling.reference_patchtst.patchtst import Model as PatchTSTModel
 
-    def __init__(self, config: dict[str, Any]):
-        """Create the vendored reference PatchTST model from framework config."""
-
-        super().__init__()
-        from types import SimpleNamespace
-
-        from federated_ts.modeling.reference_patchtst.patchtst import Model as PatchTSTModel
-
-        model_cfg = config.get("model", {})
-        data_cfg = config.get("data", {})
-        args = SimpleNamespace(
-            task_name="long_term_forecast",
-            seq_len=int(data_cfg.get("seq_len", 21)),
-            pred_len=int(data_cfg.get("pred_len", 7)),
-            d_model=int(model_cfg.get("d_model", 384)),
-            dropout=float(model_cfg.get("dropout", 0.1)),
-            factor=int(model_cfg.get("factor", 3)),
-            n_heads=int(model_cfg.get("n_heads", 4)),
-            d_ff=int(model_cfg.get("d_ff", 2048)),
-            e_layers=int(model_cfg.get("e_layers", 2)),
-            activation=str(model_cfg.get("activation", "gelu")),
-        )
-        self.model = PatchTSTModel(
-            args,
-            patch_len=int(model_cfg.get("patch_len", 16)),
-            stride=int(model_cfg.get("stride", 8)),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward input windows through the vendored PatchTST model."""
-
-        return self.model(x)
+    model_cfg = config.get("model", {})
+    data_cfg = config.get("data", {})
+    args = SimpleNamespace(
+        task_name="long_term_forecast",
+        seq_len=int(data_cfg.get("seq_len", 21)),
+        pred_len=int(data_cfg.get("pred_len", 7)),
+        d_model=int(model_cfg.get("d_model", 384)),
+        dropout=float(model_cfg.get("dropout", 0.1)),
+        factor=int(model_cfg.get("factor", 3)),
+        n_heads=int(model_cfg.get("n_heads", 4)),
+        d_ff=int(model_cfg.get("d_ff", 2048)),
+        e_layers=int(model_cfg.get("e_layers", 2)),
+        activation=str(model_cfg.get("activation", "gelu")),
+    )
+    return PatchTSTModel(
+        args,
+        patch_len=int(model_cfg.get("patch_len", 16)),
+        stride=int(model_cfg.get("stride", 8)),
+    )
 
 
 class BottleneckAdapter(nn.Module):
@@ -142,30 +124,10 @@ class FedPETuningPatchTSTForecaster(nn.Module):
         """Create the frozen PatchTST backbone and trainable adapter modules."""
 
         super().__init__()
-        from types import SimpleNamespace
-
-        from federated_ts.modeling.reference_patchtst.patchtst import Model as PatchTSTModel
-
         model_cfg = config.get("model", {})
         data_cfg = config.get("data", {})
         peft_cfg = model_cfg.get("peft", {})
-        args = SimpleNamespace(
-            task_name="long_term_forecast",
-            seq_len=int(data_cfg.get("seq_len", 21)),
-            pred_len=int(data_cfg.get("pred_len", 7)),
-            d_model=int(model_cfg.get("d_model", 384)),
-            dropout=float(model_cfg.get("dropout", 0.1)),
-            factor=int(model_cfg.get("factor", 3)),
-            n_heads=int(model_cfg.get("n_heads", 4)),
-            d_ff=int(model_cfg.get("d_ff", 2048)),
-            e_layers=int(model_cfg.get("e_layers", 2)),
-            activation=str(model_cfg.get("activation", "gelu")),
-        )
-        self.backbone = PatchTSTModel(
-            args,
-            patch_len=int(model_cfg.get("patch_len", 16)),
-            stride=int(model_cfg.get("stride", 8)),
-        )
+        self.backbone = _build_patchtst_model(config)
         self.pred_len = int(data_cfg.get("pred_len", 7))
         self.adapter = BottleneckAdapter(
             hidden_dim=int(model_cfg.get("d_model", 384)),
@@ -217,5 +179,5 @@ def build_model(config: dict[str, Any]) -> nn.Module:
     if name == "patchtst":
         if is_fedpetuning(config):
             return FedPETuningPatchTSTForecaster(config)
-        return ReferencePatchTSTForecaster(config)
+        return _build_patchtst_model(config)
     raise ValueError(f"Unknown model name: {name}")

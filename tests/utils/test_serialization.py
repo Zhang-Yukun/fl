@@ -7,6 +7,7 @@ from federated_ts.utils.serialization import (
     compress_topk,
     decompress_topk,
     dequantize_state_update,
+    load_serialized,
     quantize_state_update,
     privatize_sparse_update,
     privatize_state_update,
@@ -94,3 +95,19 @@ def test_absmax_int8_stochastic_quantization_is_seeded_and_approximately_restore
 
     assert torch.equal(quantized_a["w"], quantized_b["w"])
     assert torch.allclose(restored["w"], update["w"], atol=0.1)
+
+
+def test_load_serialized_accepts_legacy_patchtst_wrapper_prefixes():
+    config = {
+        "data": {"seq_len": 21, "pred_len": 7},
+        "model": {"name": "patchtst", "channels": 1, "patch_len": 7, "stride": 4, "d_model": 16, "n_heads": 4, "e_layers": 1, "d_ff": 32},
+    }
+    model = build_model(config)
+    state = serialize_model(model)
+    legacy_state = {f"model.{name}": tensor.clone() for name, tensor in state.items()}
+
+    reloaded = build_model(config)
+    load_serialized(reloaded, legacy_state)
+
+    for name, tensor in reloaded.state_dict().items():
+        assert torch.allclose(tensor, state[name])

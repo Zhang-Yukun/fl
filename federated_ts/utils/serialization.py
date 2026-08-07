@@ -37,9 +37,17 @@ def serialize_model(model: torch.nn.Module) -> StateDict:
 
 
 def load_serialized(model: torch.nn.Module, state: StateDict, device: torch.device | str = "cpu") -> None:
-    """Load a serialized state dict onto a model."""
+    """Load a serialized state dict onto a model.
 
-    model.load_state_dict(OrderedDict((name, tensor.to(device)) for name, tensor in state.items()))
+    The loader accepts both current checkpoints and legacy PatchTST checkpoints
+    whose parameter names were prefixed with ``model.`` by an old wrapper.
+    """
+
+    device_state = OrderedDict((name, tensor.to(device)) for name, tensor in state.items())
+    expected_keys = tuple(model.state_dict().keys())
+    if expected_keys and all(key.startswith("model.") for key in device_state.keys()) and not expected_keys[0].startswith("model."):
+        device_state = OrderedDict((name.removeprefix("model."), tensor) for name, tensor in device_state.items())
+    model.load_state_dict(device_state)
 
 
 def subtract_state(new: StateDict, old: StateDict) -> StateDict:
