@@ -124,6 +124,9 @@ class GrpcFederatedCoordinator:
         self.stopped = False
         self.stop_acked_clients: set[str] = set()
         self.stop_time_seconds: float | None = None
+        self.finalize_requested = False
+        self.finalization_started = False
+        self.finalization_completed = False
         self.lock = threading.Lock()
         self.attack_manager = AsyncAttackManager(config, self.tracker)
         self.attack_results = self.attack_manager.attack_results
@@ -162,6 +165,18 @@ class GrpcFederatedCoordinator:
 
         with self.lock:
             return self.stopped and set(self.expected_clients).issubset(self.stop_acked_clients)
+
+    def finalize_if_requested(self) -> bool:
+        """Run final artifact persistence once, outside the RPC hot path."""
+
+        with self.lock:
+            if not self.finalize_requested or self.finalization_started:
+                return self.finalization_completed
+            self.finalization_started = True
+        self._finalize()
+        with self.lock:
+            self.finalization_completed = True
+        return True
 
     def get_global(self) -> dict[str, Any]:
         """Return the current global payload for remote clients."""
@@ -265,7 +280,7 @@ class GrpcFederatedCoordinator:
                 self.stopped = self.round_index >= self.max_rounds or self.stopper.update(metrics['mse'])
                 if self.stopped:
                     self.stop_time_seconds = time.perf_counter()
-                    self._finalize()
+                    self.finalize_requested = True
             return {'accepted': True, 'stop': self.stopped, 'round': self.round_index}
 
 
@@ -291,7 +306,10 @@ def serve(config: dict[str, Any]) -> None:
     )
     rpc_server.start()
     try:
-        while not coordinator.stopped:
+        while True:
+            coordinator.finalize_if_requested()
+            if coordinator.stopped and coordinator.finalization_completed:
+                break
             time.sleep(poll_seconds)
         logger.info('gRPC server entering shutdown grace window of {:.2f}s', shutdown_grace_seconds)
         time.sleep(shutdown_grace_seconds)

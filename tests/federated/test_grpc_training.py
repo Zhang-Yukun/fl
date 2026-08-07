@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import socket
 import time
+from threading import Event
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,10 @@ def _submit_one_round(coordinator: GrpcFederatedCoordinator, config: dict[str, o
         result = client.train(global_payload["state"], compressed=global_payload["compressed"], round_index=global_payload["round"])
         response = coordinator.submit_update({"round": global_payload["round"], "result": result})
     assert response is not None
+    while coordinator.finalize_requested and not coordinator.finalization_completed:
+        coordinator.finalize_if_requested()
+        if not coordinator.finalization_completed:
+            time.sleep(0.01)
     return response
 
 
@@ -208,7 +213,7 @@ def test_grpc_coordinator_saves_attack_results(tmp_path):
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert summary["attack_evaluations"] == 2
+    assert summary["attack_evaluations"] == len(attack_results) == 6
     assert summary["attack_target_type"] == "update_payload"
     assert summary["attack_primary_metric"] == "nearest_client_train_mse"
 
@@ -334,3 +339,57 @@ def test_real_grpc_sync_and_async_match_when_randomness_disabled(tmp_path):
     _run_networked_grpc(async_config)
 
     assert compare_fedavg_runs(sync_dir, async_dir, ignore_transport=True) == []
+
+
+def test_grpc_finalization_does_not_block_last_submit_response(tmp_path, monkeypatch):
+    """The final client submit should return stop promptly even if finalization is slow."""
+
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    coordinator = GrpcFederatedCoordinator(config)
+    train_loaders, _, _ = build_federated_loaders(config)
+    device = resolve_device(config)
+    global_payload = coordinator.get_global()
+    finalized = Event()
+    original_finalize = coordinator._finalize
+
+    def slow_finalize() -> None:
+        time.sleep(0.2)
+        original_finalize()
+        finalized.set()
+
+    monkeypatch.setattr(coordinator, '_finalize', slow_finalize)
+
+    response = None
+    submit_duration = None
+    for client_id, loader in train_loaders.items():
+        client = FederatedClient(client_id, loader, config, device)
+        result = client.train(global_payload["state"], compressed=global_payload["compressed"], round_index=global_payload["round"])
+        start = time.perf_counter()
+        response = coordinator.submit_update({"round": global_payload["round"], "result": result})
+        duration = time.perf_counter() - start
+        if response["stop"]:
+            submit_duration = duration
+            break
+
+    assert response is not None
+    assert response["stop"] is True
+    assert submit_duration is not None
+    assert submit_duration < 0.15
+    assert coordinator.finalize_requested is True
+    assert coordinator.finalization_completed is False
+
+    coordinator.finalize_if_requested()
+
+    assert finalized.is_set()
+    assert coordinator.finalization_completed is True
+    assert (tmp_path / "summary.json").exists()
