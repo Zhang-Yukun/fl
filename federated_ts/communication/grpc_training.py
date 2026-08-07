@@ -122,6 +122,8 @@ class GrpcFederatedCoordinator:
         self.round_start_time = time.perf_counter()
         self.pending: dict[str, Any] = {}
         self.stopped = False
+        self.stop_acked_clients: set[str] = set()
+        self.stop_time_seconds: float | None = None
         self.lock = threading.Lock()
         self.attack_manager = AsyncAttackManager(config, self.tracker)
         self.attack_results = self.attack_manager.attack_results
@@ -134,6 +136,32 @@ class GrpcFederatedCoordinator:
             'run/compressed_uploads': self.compressed,
             'run/transport': 'grpc',
         })
+
+    def ack_stop(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Record that one client received the stop signal."""
+
+        client_id = str(payload.get('client_id', ''))
+        with self.lock:
+            if client_id in self.expected_clients:
+                self.stop_acked_clients.add(client_id)
+                logger.info(
+                    'Received stop ack from {} ({}/{})',
+                    client_id,
+                    len(self.stop_acked_clients),
+                    len(self.expected_clients),
+                )
+            return {
+                'stop': self.stopped,
+                'round': self.round_index,
+                'acked_clients': len(self.stop_acked_clients),
+                'expected_clients': len(self.expected_clients),
+            }
+
+    def ready_for_shutdown(self) -> bool:
+        """Return whether the server can safely terminate the gRPC service."""
+
+        with self.lock:
+            return self.stopped and set(self.expected_clients).issubset(self.stop_acked_clients)
 
     def get_global(self) -> dict[str, Any]:
         """Return the current global payload for remote clients."""
@@ -236,6 +264,7 @@ class GrpcFederatedCoordinator:
                 self.round_start_time = time.perf_counter()
                 self.stopped = self.round_index >= self.max_rounds or self.stopper.update(metrics['mse'])
                 if self.stopped:
+                    self.stop_time_seconds = time.perf_counter()
                     self._finalize()
             return {'accepted': True, 'stop': self.stopped, 'round': self.round_index}
 
@@ -247,16 +276,36 @@ def serve(config: dict[str, Any]) -> None:
     address = grpc_cfg.get('address', '0.0.0.0:50051')
     poll_seconds = float(grpc_cfg.get('poll_seconds', 1.0))
     shutdown_grace_seconds = float(grpc_cfg.get('shutdown_grace_seconds', max(3.0, poll_seconds * 3.0)))
+    shutdown_ack_timeout_seconds = float(
+        grpc_cfg.get('shutdown_ack_timeout_seconds', max(shutdown_grace_seconds, poll_seconds * 20.0))
+    )
     max_message_mb = float(grpc_cfg.get('max_message_mb', 256.0))
     max_message_length = int(max_message_mb * 1024 * 1024)
     coordinator = GrpcFederatedCoordinator(config)
-    rpc_server = FederatedRpcServer(address, coordinator.get_global, coordinator.submit_update, max_message_length=max_message_length)
+    rpc_server = FederatedRpcServer(
+        address,
+        coordinator.get_global,
+        coordinator.submit_update,
+        coordinator.ack_stop,
+        max_message_length=max_message_length,
+    )
     rpc_server.start()
     try:
         while not coordinator.stopped:
             time.sleep(poll_seconds)
         logger.info('gRPC server entering shutdown grace window of {:.2f}s', shutdown_grace_seconds)
         time.sleep(shutdown_grace_seconds)
+        shutdown_deadline = time.perf_counter() + shutdown_ack_timeout_seconds
+        while not coordinator.ready_for_shutdown() and time.perf_counter() < shutdown_deadline:
+            time.sleep(poll_seconds)
+        if coordinator.ready_for_shutdown():
+            logger.info('All clients acknowledged stop; shutting down gRPC server')
+        else:
+            logger.warning(
+                'Timed out waiting for stop acknowledgements ({}/{})',
+                len(coordinator.stop_acked_clients),
+                len(coordinator.expected_clients),
+            )
     finally:
         rpc_server.stop(0)
 
@@ -278,6 +327,12 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
         raise ValueError(f'Unknown client_id {client_id}; expected one of {sorted(train_loaders)}')
     client = FederatedClient(client_id, train_loaders[client_id], config, device)
     rpc = FederatedRpcClient(address, max_message_length=max_message_length)
+    def _ack_stop() -> None:
+        try:
+            rpc.ack_stop({'client_id': client_id})
+        except Exception as exc:
+            logger.warning('Client {} could not acknowledge stop to {}: {}', client_id, address, exc)
+
     last_submitted = -1
     last_transport_snapshot = rpc.snapshot_counters()
     while True:
@@ -289,6 +344,7 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
             continue
         if global_payload['stop']:
             logger.info('Client {} received stop signal', client_id)
+            _ack_stop()
             return
         round_index = global_payload['round']
         if round_index == last_submitted:
@@ -308,4 +364,5 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
         last_submitted = round_index if response.get('accepted') else last_submitted
         if response.get('stop'):
             logger.info('Client {} completed final round {}', client_id, round_index)
+            _ack_stop()
             return

@@ -106,6 +106,35 @@ def test_grpc_coordinator_saves_config_on_startup(tmp_path):
     assert (tmp_path / "config.yaml").exists()
 
 
+def test_grpc_coordinator_waits_for_stop_acks(tmp_path):
+    """The gRPC coordinator should wait for explicit client stop acknowledgements."""
+
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    coordinator = GrpcFederatedCoordinator(config)
+    response = _submit_one_round(coordinator, config)
+
+    assert response["stop"] is True
+    assert coordinator.ready_for_shutdown() is False
+
+    ack = coordinator.ack_stop({"client_id": "Nd2O3"})
+    assert ack["acked_clients"] == 1
+    assert coordinator.ready_for_shutdown() is False
+
+    coordinator.ack_stop({"client_id": "CeO2"})
+    coordinator.ack_stop({"client_id": "La2O3"})
+    assert coordinator.ready_for_shutdown() is True
+
+
 def test_grpc_coordinator_aggregates_one_round_and_saves_summary(tmp_path):
     """The gRPC coordinator accepts one round of client updates and persists summary artifacts."""
 
