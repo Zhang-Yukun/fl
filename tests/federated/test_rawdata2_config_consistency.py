@@ -21,3 +21,19 @@ def test_rawdata2_training_lengths_are_consistent():
     for config in (base, fedaware, fedpetuning, secure_quantized, dp_topk, topk, soteriafl):
         assert config["federated"]["rounds"] == 500
         assert config["federated"]["local_epochs"] == 1
+
+
+def test_shared_configs_do_not_define_compression_only_parameters():
+    """Shared base configs should not carry compression-specific federated knobs."""
+
+    base = load_config(CONFIG_DIR / "rawdata2_patchtst.yaml")
+    default = load_config(CONFIG_DIR / "default.yaml")
+    dp_topk = load_config(CONFIG_DIR / "rawdata2_dp_topk.yaml")
+    topk = load_config(CONFIG_DIR / "rawdata2_fedlab_topk.yaml")
+    soteriafl = load_config(CONFIG_DIR / "rawdata2_soteriafl.yaml")
+
+    assert "topk_fraction" not in base["federated"]
+    assert "topk_fraction" not in default["federated"]
+    assert dp_topk["federated"]["topk_fraction"] == 0.50
+    assert topk["federated"]["topk_fraction"] == 0.10
+    assert soteriafl["federated"]["topk_fraction"] == 0.10

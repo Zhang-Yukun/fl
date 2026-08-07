@@ -34,7 +34,6 @@ federated:
   algorithm: compressed_fedavg
   rounds: 20
   local_epochs: 1
-  topk_fraction: 0.05
 
 attack:
   target_type: update_payload
@@ -52,7 +51,7 @@ attack:
   async_device: cpu
 
 tracking:
-  enabled: false
+  enabled: true
   offline: true
   project: federated-rare-earth
 
