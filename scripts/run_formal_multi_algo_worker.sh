@@ -262,6 +262,13 @@ main() {
     else
       run_single "qsgd_${mode}" "qg-${mode}" configs/rawdata2_qsgd.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
     fi
+
+    if [[ "${mode}" == grpc_* ]]; then
+      run_grpc "adaptive_${mode}" "ac-${mode}" configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false --override adaptive_clipped_rdp.seed=2026
+      port=$((port + 1))
+    else
+      run_single "adaptive_${mode}" "ac-${mode}" configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false --override adaptive_clipped_rdp.seed=2026
+    fi
   done
   log "worker finished"
 }
