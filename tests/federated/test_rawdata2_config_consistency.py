@@ -16,9 +16,10 @@ def test_rawdata2_training_lengths_are_consistent():
     topk = load_config(CONFIG_DIR / "rawdata2_fedlab_topk.yaml")
     soteriafl = load_config(CONFIG_DIR / "rawdata2_soteriafl.yaml")
     randomk = load_config(CONFIG_DIR / "rawdata2_randomk.yaml")
+    sign = load_config(CONFIG_DIR / "rawdata2_sign.yaml")
 
     assert base["training"]["epochs"] == 500
-    for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl, randomk):
+    for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl, randomk, sign):
         assert config["federated"]["rounds"] == 500
         assert config["federated"]["local_epochs"] == 1
 

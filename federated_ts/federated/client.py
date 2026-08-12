@@ -182,6 +182,21 @@ class FederatedClient:
                 privacy_clip_norm=privacy_clip_norm,
                 privacy_noise_multiplier=privacy_noise_multiplier,
             )
+        if algorithm == "sign_fedavg":
+            update = subtract_state(local_state, global_state)
+            quantized = quantize_state_update(update, dtype="sign")
+            return ClientResult(
+                **common,
+                state=quantized,
+                **evaluation_kwargs,
+                upload_bytes=state_num_bytes(quantized),
+                upload_parameters=state_num_parameters(quantized),
+                parameter_upload_bytes=state_num_bytes(quantized),
+                parameter_upload_parameters=state_num_parameters(quantized),
+                transport_upload_bytes=state_num_bytes(quantized),
+                payload_kind="sign_update",
+                compressor="sign_mean_abs",
+            )
         if compressed:
             update = subtract_state(local_state, global_state)
             fraction = float(self.config["federated"].get("topk_fraction", 0.05))

@@ -1,0 +1,10 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_sign
+  output_dir: outputs/rawdata2_sign
+
+federated:
+  algorithm: sign_fedavg
+  rounds: 500
+  local_epochs: 1

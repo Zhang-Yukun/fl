@@ -16,6 +16,7 @@ def test_rawdata2_run_scripts_are_separate_and_executable():
         "run_rawdata2_fedaware.sh": ["configs/rawdata2_fedaware.yaml"],
         "run_rawdata2_fedlab_topk.sh": ["configs/rawdata2_fedlab_topk.yaml"],
         "run_rawdata2_randomk.sh": ["configs/rawdata2_randomk.yaml"],
+        "run_rawdata2_sign.sh": ["configs/rawdata2_sign.yaml"],
     }
     for name, markers in expected.items():
         path = SCRIPT_DIR / name

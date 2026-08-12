@@ -317,6 +317,13 @@ class FederatedServer:
             self.global_state = add_update(compressed_base, averaged_update)
             self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
             return weights
+        if algorithm == "sign_fedavg":
+            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
+            dense_updates = [dequantize_state_update(result.state) for result in results]
+            averaged_update = average_states(dense_updates, sample_weights)
+            self.global_state = add_update(self.global_state, averaged_update)
+            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
+            return weights
         if algorithm == "adaptive_clipped_rdp_fedavg":
             return self._aggregate_adaptive_clipped_rdp(results, round_index, round_base_state)
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]

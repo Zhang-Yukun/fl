@@ -245,6 +245,15 @@ def quantize_state_update(
     }.get(normalized_dtype)
     if quantized_dtype is not None:
         return OrderedDict((name, tensor.detach().cpu().clone().to(quantized_dtype)) for name, tensor in update.items())
+    if normalized_dtype in {"sign", "signum", "onebit", "1bit"}:
+        quantized: StateDict = OrderedDict()
+        for name, tensor in update.items():
+            base = tensor.detach().cpu().clone().to(torch.float32)
+            scale = max(float(base.abs().mean().item()), 1e-12)
+            signs = torch.sign(base).to(torch.int8)
+            quantized[name] = signs
+            quantized[f"{name}{QUANT_SCALE_SUFFIX}"] = torch.tensor(scale, dtype=torch.float32)
+        return quantized
     if normalized_dtype not in {"int8", "qint8", "absmax_int8", "scaled_int8"}:
         raise ValueError(f"Unsupported quantization dtype: {dtype}")
 

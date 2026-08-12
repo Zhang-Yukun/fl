@@ -335,6 +335,26 @@ def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
 
 
 
+def test_sign_fedavg_uses_sign_quantized_dense_updates(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=sign_fedavg",
+            "federated.rounds=1",
+            "attack.enabled=false",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    clients = metrics[0]["clients"]
+
+    assert result["last_upload_compression_ratio"] > 2.0
+    assert all(client["payload_kind"] == "sign_update" for client in clients)
+    assert all(client["compressor"] == "sign_mean_abs" for client in clients)
+    assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
+
+
 def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",

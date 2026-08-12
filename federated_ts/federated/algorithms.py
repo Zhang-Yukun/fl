@@ -114,7 +114,7 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     """Return whether the configured FL algorithm compresses client uploads."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if algorithm in {"fedavg", "fedaware", "secure_quantized_fedavg", "adaptive_clipped_rdp_fedavg"}:
+    if algorithm in {"fedavg", "fedaware", "secure_quantized_fedavg", "adaptive_clipped_rdp_fedavg", "sign_fedavg"}:
         return False
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl", "dp_topk_fedavg", "randomk_fedavg"}:
         return True
@@ -421,6 +421,9 @@ def _protect_attack_gradients(
             else:
                 rounded = torch.round(normalized)
             flat = torch.clamp(rounded, -127.0, 127.0).to(torch.int8).to(torch.float32) * scale
+    if algorithm == "sign_fedavg":
+        scale = max(float(flat.abs().mean().item()), 1e-12)
+        flat = torch.sign(flat).to(torch.float32) * scale
 
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "dp_topk_fedavg", "soteriafl", "randomk_fedavg"}:
         fraction = float(config.get("federated", {}).get("topk_fraction", 0.05))
