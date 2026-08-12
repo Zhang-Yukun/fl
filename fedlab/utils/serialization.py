@@ -168,16 +168,9 @@ def load_serialized(
     include_keys: str | list[str] | None = None,
     match_mode: Literal["substring", "prefix"] = "substring",
 ) -> None:
-    """Load a serialized state dict onto a model.
-
-    The loader accepts both current checkpoints and legacy PatchTST checkpoints
-    whose parameter names were prefixed with ``model.`` by an old wrapper.
-    """
+    """Load a serialized state dict onto a model."""
 
     device_state = OrderedDict((name, tensor.to(device)) for name, tensor in state.items())
-    expected_keys = tuple(model.state_dict().keys())
-    if expected_keys and all(key.startswith("model.") for key in device_state.keys()) and not expected_keys[0].startswith("model."):
-        device_state = OrderedDict((name.removeprefix("model."), tensor) for name, tensor in device_state.items())
     selected_keys, _ = _select_state_keys(
         device_state.keys(),
         include_keys=include_keys,

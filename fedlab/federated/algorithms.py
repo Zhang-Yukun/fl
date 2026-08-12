@@ -574,15 +574,10 @@ def _clone_attack_target(target: list[torch.Tensor] | StateDict) -> list[torch.T
 
 
 def _resolve_attack_device(config: dict[str, Any]) -> torch.device:
-    """Resolve the device used for reconstruction attacks.
-
-    ``attack.device`` is the canonical field. The legacy ``attack.async_device``
-    alias remains supported for backward compatibility.
-    """
+    """Resolve the device used for reconstruction attacks."""
 
     attack_cfg = config.get("attack", {})
-    requested_value = attack_cfg.get("device", attack_cfg.get("async_device", "same"))
-    requested = str(requested_value).lower()
+    requested = str(attack_cfg.get("device", "same")).lower()
     if requested == "same":
         requested = str(config.get("runtime", {}).get("device", "cpu"))
     if requested.startswith("cuda") and not torch.cuda.is_available():

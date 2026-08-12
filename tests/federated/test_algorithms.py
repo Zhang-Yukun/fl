@@ -1008,12 +1008,6 @@ def test_attack_device_defaults_to_runtime_device():
     assert str(algorithms_module._resolve_attack_device(config)) == "cpu"
 
 
-def test_attack_device_keeps_legacy_async_device_alias():
-    config = {"runtime": {"device": "cpu"}, "attack": {"async_device": "cpu"}}
-
-    assert str(algorithms_module._resolve_attack_device(config)) == "cpu"
-
-
 def test_one_round_federated_run_with_sgd_optimizer(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
