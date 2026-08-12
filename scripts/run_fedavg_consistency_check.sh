@@ -10,13 +10,13 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 run_single() {
   local name="$1"
   local async_flag="$2"
-  CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m federated_ts.entrypoints.train \
+  CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.entrypoints.train \
     --config "${CONFIG}" \
     --mode federated \
     --override "experiment.output_dir=${BASE_OUTPUT}/${name}" \
     --override "runtime.device=cuda:0" \
     --override "attack.async_enabled=${async_flag}" \
-    --override "attack.async_device=cuda:0"
+    --override "attack.device=cuda:0"
 }
 
 run_grpc() {
@@ -26,12 +26,12 @@ run_grpc() {
   local address="127.0.0.1:${port}"
   local outdir="${BASE_OUTPUT}/${name}"
   mkdir -p "${outdir}"
-  CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m federated_ts.entrypoints.server \
+  CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.entrypoints.server \
     --config "${CONFIG}" \
     --override "experiment.output_dir=${outdir}" \
     --override "runtime.device=cuda:0" \
     --override "attack.async_enabled=${async_flag}" \
-    --override "attack.async_device=cuda:0" \
+    --override "attack.device=cuda:0" \
     --override "grpc.address=${address}" \
     --override "grpc.server_address=${address}" \
     --override "grpc.poll_seconds=0.2" \
@@ -40,13 +40,13 @@ run_grpc() {
   sleep 3
   local client_pids=()
   for client_id in Nd2O3 CeO2 La2O3; do
-    CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m federated_ts.entrypoints.client \
+    CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.entrypoints.client \
       --client-id "${client_id}" \
       --config "${CONFIG}" \
       --override "experiment.output_dir=${outdir}" \
       --override "runtime.device=cuda:0" \
       --override "attack.async_enabled=${async_flag}" \
-      --override "attack.async_device=cuda:0" \
+      --override "attack.device=cuda:0" \
       --override "grpc.address=${address}" \
       --override "grpc.server_address=${address}" \
       --override "grpc.poll_seconds=0.2" \
@@ -62,8 +62,8 @@ run_grpc() {
 mkdir -p "${BASE_OUTPUT}"
 run_single single_sync false
 run_single single_async true
-PYTHONPATH=. "${PYTHON_BIN}" -m federated_ts.tools.compare_fedavg_consistency "${BASE_OUTPUT}/single_sync" "${BASE_OUTPUT}/single_async"
+PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.tools.compare_fedavg_consistency "${BASE_OUTPUT}/single_sync" "${BASE_OUTPUT}/single_async"
 
 run_grpc grpc_sync false "${PORT_BASE}"
 run_grpc grpc_async true "$((PORT_BASE + 1))"
-PYTHONPATH=. "${PYTHON_BIN}" -m federated_ts.tools.compare_fedavg_consistency --ignore-transport "${BASE_OUTPUT}/grpc_sync" "${BASE_OUTPUT}/grpc_async"
+PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.tools.compare_fedavg_consistency --ignore-transport "${BASE_OUTPUT}/grpc_sync" "${BASE_OUTPUT}/grpc_async"

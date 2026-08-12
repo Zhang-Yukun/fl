@@ -1,7 +1,7 @@
 import torch
 
-from federated_ts.modeling.forecasting import build_model
-from federated_ts.utils.serialization import (
+from fedlab.modeling.forecasting import build_model
+from fedlab.utils.serialization import (
     clip_state_update,
     compress_randomk,
     compress_topk,
@@ -12,6 +12,8 @@ from federated_ts.utils.serialization import (
     privatize_sparse_update,
     privatize_state_update,
     serialize_model,
+    serialize_trainable_model,
+    serialize_untrainable_model,
     state_num_bytes,
     subtract_state,
 )
@@ -111,3 +113,39 @@ def test_load_serialized_accepts_legacy_patchtst_wrapper_prefixes():
 
     for name, tensor in reloaded.state_dict().items():
         assert torch.allclose(tensor, state[name])
+
+
+def test_serialize_model_supports_include_and_filter_keys():
+    model = torch.nn.Sequential(
+        torch.nn.Linear(3, 4),
+        torch.nn.ReLU(),
+        torch.nn.Linear(4, 2),
+    )
+    state = serialize_model(model, include_keys='0.', filter_keys='bias', match_mode='substring')
+
+    assert list(state.keys()) == ['0.weight']
+
+
+def test_serialize_trainable_and_untrainable_model_split_state():
+    model = torch.nn.Linear(3, 2)
+    model.bias.requires_grad_(False)
+    model.register_buffer('running_scale', torch.ones(1))
+
+    trainable = serialize_trainable_model(model)
+    untrainable = serialize_untrainable_model(model)
+
+    assert list(trainable.keys()) == ['weight']
+    assert set(untrainable.keys()) == {'bias', 'running_scale'}
+
+
+def test_load_serialized_supports_partial_filtered_load():
+    model = torch.nn.Linear(3, 2)
+    source = serialize_model(model)
+    partial = serialize_model(model, include_keys='weight', match_mode='substring')
+
+    reloaded = torch.nn.Linear(3, 2)
+    original_bias = reloaded.bias.detach().clone()
+    load_serialized(reloaded, partial, include_keys='weight', match_mode='substring')
+
+    assert torch.allclose(reloaded.weight, source['weight'])
+    assert torch.allclose(reloaded.bias, original_bias)

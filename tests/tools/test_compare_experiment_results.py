@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 
 
-SCRIPT_PATH = Path(__file__).parents[2] / "federated_ts" / "tools" / "compare_experiment_results.py"
+SCRIPT_PATH = Path(__file__).parents[2] / "fedlab" / "tools" / "compare_experiment_results.py"
 
 
 spec = importlib.util.spec_from_file_location("compare_experiment_results", SCRIPT_PATH)

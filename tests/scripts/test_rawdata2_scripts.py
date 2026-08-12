@@ -66,8 +66,8 @@ def test_formal_suite_script_exists_and_lists_all_requested_runs():
         "configs/rawdata2_patchtst.yaml",
         "configs/rawdata2_secure_quantized_fedavg.yaml",
         "federated.quantization_dtype=int8",
-        "-m federated_ts.entrypoints.train",
-        "-m federated_ts.entrypoints.server",
-        "-m federated_ts.entrypoints.client",
+        "-m fedlab.entrypoints.train",
+        "-m fedlab.entrypoints.server",
+        "-m fedlab.entrypoints.client",
     ):
         assert marker in content

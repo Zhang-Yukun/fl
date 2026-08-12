@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from federated_ts.utils.config import load_config
+from fedlab.utils.config import load_config
 
 
 CONFIG_DIR = Path(__file__).parents[2] / "configs"

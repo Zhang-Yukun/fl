@@ -1,0 +1,374 @@
+"""Federated client implementation."""
+
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass
+from typing import Any
+
+import torch
+
+from fedlab.modeling.ega import EncodedStatePayload, encode_state_update, load_ega_codec
+from fedlab.modeling import build_model
+from fedlab.utils.serialization import (
+    SparseUpdate,
+    StateDict,
+    compress_randomk,
+    compress_topk,
+    dequantize_state_update,
+    quantize_qsgd_state_update,
+    quantize_state_update,
+    load_serialized,
+    privatize_state_update,
+    serialize_model,
+    state_num_bytes,
+    state_num_parameters,
+    subtract_state,
+)
+from fedlab.engine.training import build_training_optimizer, first_batch_gradient, first_batch_sample, train_n_steps, train_one_epoch
+
+
+@dataclass
+class ClientResult:
+    """Payload and communication metadata returned by one client update."""
+
+    client_id: str
+    num_samples: int
+    loss: float
+    state: StateDict | None = None
+    sparse_update: SparseUpdate | None = None
+    ega_payload: EncodedStatePayload | None = None
+    dense_bytes: int = 0
+    dense_parameters: int = 0
+    download_bytes: int = 0
+    download_parameters: int = 0
+    parameter_download_bytes: int = 0
+    parameter_download_parameters: int = 0
+    dense_download_reference_bytes: int = 0
+    dense_download_reference_parameters: int = 0
+    upload_bytes: int = 0
+    upload_parameters: int = 0
+    parameter_upload_bytes: int = 0
+    parameter_upload_parameters: int = 0
+    transport_download_bytes: int = 0
+    transport_upload_bytes: int = 0
+    transport_download_overhead_bytes: int = 0
+    transport_upload_overhead_bytes: int = 0
+    payload_kind: str = "dense_update"
+    compressor: str = "none"
+    privacy_clip_norm: float = 0.0
+    privacy_noise_multiplier: float = 0.0
+    evaluation_update: StateDict | None = None
+    evaluation_payload_kind: str = "none"
+
+    @property
+    def sent_bytes(self) -> int:
+        """Backward-compatible alias for upload bytes."""
+
+        return self.upload_bytes
+
+
+class FederatedClient:
+    """Local trainer that receives global parameters and returns an update."""
+
+    def __init__(
+        self,
+        client_id: str,
+        train_loader,
+        config: dict[str, Any],
+        device: torch.device,
+        total_train_samples: int | None = None,
+        total_clients: int | None = None,
+        allow_ega_pretrain: bool = False,
+    ):
+        """Create a client bound to one local training loader."""
+
+        self.client_id = client_id
+        self.train_loader = train_loader
+        self.config = config
+        self.device = device
+        self.total_train_samples = total_train_samples if total_train_samples is not None else self._loader_num_samples(train_loader)
+        self.total_clients = total_clients if total_clients is not None else 1
+        self.ega_codec = None
+        if str(config.get("federated", {}).get("algorithm", "fedavg")).lower() == "ega_fedavg":
+            self.ega_codec = load_ega_codec(
+                config,
+                device=device,
+                num_clients=self.total_clients,
+                allow_pretrain=allow_ega_pretrain,
+            )
+
+    @staticmethod
+    def _loader_num_samples(loader) -> int:
+        """Return the number of samples carried by one loader-like object."""
+
+        dataset = getattr(loader, "dataset", None)
+        return len(dataset) if dataset is not None else len(loader)
+
+    def _upload_quantization_generator(self, round_index: int) -> torch.Generator | None:
+        """Create a deterministic per-client generator for randomized upload quantization."""
+
+        seed = self.config.get("federated", {}).get("quantization_seed")
+        if seed is None:
+            return None
+        offset = sum(ord(char) for char in self.client_id)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(seed) + round_index * 1000 + offset)
+        return generator
+
+    def _randomk_generator(self, round_index: int) -> torch.Generator | None:
+        """Create a deterministic per-client generator for random-k sparsification."""
+
+        seed = self.config.get("federated", {}).get("randomk_seed")
+        if seed is None:
+            seed = self.config.get("runtime", {}).get("seed")
+        if seed is None:
+            return None
+        offset = sum(ord(char) for char in self.client_id)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(seed) + round_index * 2000 + offset)
+        return generator
+
+    def _evaluation_result_kwargs(self, local_state: StateDict, global_state: StateDict) -> dict[str, Any]:
+        """Return optional evaluation payloads used only by oracle evaluation mode."""
+
+        evaluation_mode = str(self.config.get("evaluation", {}).get("mode", "protocol")).lower()
+        if evaluation_mode != "oracle_full_update":
+            return {}
+        return {
+            "evaluation_update": subtract_state(local_state, global_state),
+            "evaluation_payload_kind": "dense_full_update",
+        }
+
+    def train(
+        self,
+        global_state: StateDict,
+        compressed: bool = False,
+        round_index: int = 0,
+        round_context: dict[str, Any] | None = None,
+    ) -> ClientResult:
+        """Train locally from global weights and return the transmitted payload.
+
+        Example:
+            Standard FedAvg-style clients upload dense model updates
+            ``local_state - received_global_state`` instead of full model states.
+        """
+
+        algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
+        received_global_state = global_state
+        download_state = global_state
+        if algorithm == "secure_quantized_fedavg":
+            quantization_dtype = str(self.config.get("federated", {}).get("quantization_dtype", "float16"))
+            download_state = quantize_state_update(global_state, dtype=quantization_dtype)
+            received_global_state = dequantize_state_update(download_state)
+
+        model = build_model(self.config).to(self.device)
+        load_serialized(model, received_global_state, self.device)
+        trainable_parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
+        optimizer = build_training_optimizer(trainable_parameters, self.config)
+        losses = []
+        local_steps = self.config["federated"].get("local_steps")
+        if local_steps is not None:
+            losses.append(train_n_steps(model, self.train_loader, optimizer, self.device, int(local_steps)))
+        else:
+            for _ in range(int(self.config["federated"].get("local_epochs", 1))):
+                losses.append(train_one_epoch(model, self.train_loader, optimizer, self.device))
+        local_state = serialize_model(model)
+        evaluation_kwargs = self._evaluation_result_kwargs(local_state, global_state)
+        dense_bytes = state_num_bytes(local_state)
+        dense_parameters = state_num_parameters(local_state)
+        common = dict(
+            client_id=self.client_id,
+            num_samples=self._loader_num_samples(self.train_loader),
+            loss=float(sum(losses) / len(losses)),
+            dense_bytes=dense_bytes,
+            dense_parameters=dense_parameters,
+            download_bytes=state_num_bytes(download_state),
+            download_parameters=state_num_parameters(download_state),
+            parameter_download_bytes=state_num_bytes(download_state),
+            parameter_download_parameters=state_num_parameters(download_state),
+            transport_download_bytes=state_num_bytes(download_state),
+            dense_download_reference_bytes=state_num_bytes(global_state),
+            dense_download_reference_parameters=state_num_parameters(global_state),
+        )
+        if algorithm == "secure_quantized_fedavg":
+            update = subtract_state(local_state, received_global_state)
+            privacy_cfg = self.config.get("privacy", {})
+            privacy_clip_norm = float(privacy_cfg.get("clip_norm", 0.0))
+            privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.0))
+            update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
+            quantized = quantize_state_update(
+                update,
+                dtype=str(self.config.get("federated", {}).get("quantization_dtype", "float16")),
+                stochastic_rounding=bool(self.config.get("federated", {}).get("quantization_stochastic_rounding", False)),
+                generator=self._upload_quantization_generator(round_index),
+            )
+            return ClientResult(
+                **common,
+                state=quantized,
+                **evaluation_kwargs,
+                upload_bytes=state_num_bytes(quantized),
+                upload_parameters=state_num_parameters(quantized),
+                parameter_upload_bytes=state_num_bytes(quantized),
+                parameter_upload_parameters=state_num_parameters(quantized),
+                transport_upload_bytes=state_num_bytes(quantized),
+                payload_kind="quantized_update",
+                compressor=str(self.config.get("federated", {}).get("quantization_dtype", "float16")) + "_quantized_dense",
+                privacy_clip_norm=privacy_clip_norm,
+                privacy_noise_multiplier=privacy_noise_multiplier,
+            )
+        if algorithm == "sign_fedavg":
+            update = subtract_state(local_state, global_state)
+            quantized = quantize_state_update(update, dtype="sign")
+            return ClientResult(
+                **common,
+                state=quantized,
+                **evaluation_kwargs,
+                upload_bytes=state_num_bytes(quantized),
+                upload_parameters=state_num_parameters(quantized),
+                parameter_upload_bytes=state_num_bytes(quantized),
+                parameter_upload_parameters=state_num_parameters(quantized),
+                transport_upload_bytes=state_num_bytes(quantized),
+                payload_kind="sign_update",
+                compressor="sign_mean_abs",
+            )
+        if algorithm == "qsgd_fedavg":
+            update = subtract_state(local_state, global_state)
+            levels = int(self.config.get("federated", {}).get("qsgd_levels", 127))
+            quantized = quantize_qsgd_state_update(
+                update,
+                levels=levels,
+                generator=self._upload_quantization_generator(round_index),
+            )
+            return ClientResult(
+                **common,
+                state=quantized,
+                **evaluation_kwargs,
+                upload_bytes=state_num_bytes(quantized),
+                upload_parameters=state_num_parameters(quantized),
+                parameter_upload_bytes=state_num_bytes(quantized),
+                parameter_upload_parameters=state_num_parameters(quantized),
+                transport_upload_bytes=state_num_bytes(quantized),
+                payload_kind="qsgd_update",
+                compressor=f"qsgd_{levels}_levels",
+            )
+        if algorithm == "ega_fedavg":
+            if self.ega_codec is None:
+                raise RuntimeError("EGA codec was not initialized on the client")
+            ega_cfg = self.config.get("ega", {})
+            contribution_scale = float(self._loader_num_samples(self.train_loader)) / float(max(self.total_train_samples, 1))
+            contribution_scale *= float(self.total_clients)
+            normalization = float(
+                (round_context or {}).get(
+                    "ega_normalization",
+                    ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)),
+                )
+            )
+            payload = encode_state_update(
+                subtract_state(local_state, global_state),
+                self.ega_codec,
+                quantization_level=int(ega_cfg.get("quantization_level", 64)),
+                normalization=max(normalization, float(ega_cfg.get("min_normalization", 1e-6))),
+                block_size=int(ega_cfg.get("block_size", 256)),
+                contribution_scale=contribution_scale,
+                generator=self._upload_quantization_generator(round_index),
+            )
+            return ClientResult(
+                **common,
+                ega_payload=payload,
+                **evaluation_kwargs,
+                upload_bytes=payload.nbytes,
+                upload_parameters=payload.num_parameters,
+                parameter_upload_bytes=payload.nbytes,
+                parameter_upload_parameters=payload.num_parameters,
+                transport_upload_bytes=payload.nbytes,
+                payload_kind="ega_encoded_update",
+                compressor=f"ega_b{payload.block_size}_h{payload.encoded_dim}_s{payload.quantization_level}",
+            )
+        if compressed:
+            update = subtract_state(local_state, global_state)
+            fraction = float(self.config["federated"].get("topk_fraction", 0.05))
+            payload_kind = "sparse_update"
+            compressor = "topk"
+            privacy_clip_norm = 0.0
+            privacy_noise_multiplier = 0.0
+            if algorithm in {"soteriafl", "dp_topk_fedavg"}:
+                privacy_cfg = self.config.get("privacy", {})
+                privacy_clip_norm = float(privacy_cfg.get("clip_norm", 1.0))
+                privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.1))
+                update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
+                if algorithm == "soteriafl":
+                    sparse = compress_randomk(update, fraction, generator=self._randomk_generator(round_index))
+                    payload_kind = "soteriafl_randomk_dp_update"
+                    compressor = "randomk_unbiased"
+                else:
+                    sparse = compress_topk(update, fraction)
+                    payload_kind = "dp_topk_dp_update"
+                    compressor = "topk_dp"
+            elif algorithm == "randomk_fedavg":
+                sparse = compress_randomk(update, fraction, generator=self._randomk_generator(round_index))
+                payload_kind = "randomk_update"
+                compressor = "randomk_unbiased"
+            else:
+                sparse = compress_topk(update, fraction)
+            return ClientResult(
+                **common,
+                sparse_update=sparse,
+                **evaluation_kwargs,
+                upload_bytes=sparse.nbytes,
+                upload_parameters=sparse.values.numel(),
+                parameter_upload_bytes=sparse.nbytes,
+                parameter_upload_parameters=sparse.values.numel(),
+                transport_upload_bytes=sparse.nbytes,
+                payload_kind=payload_kind,
+                compressor=compressor,
+                privacy_clip_norm=privacy_clip_norm,
+                privacy_noise_multiplier=privacy_noise_multiplier,
+            )
+        dense_update = subtract_state(local_state, global_state)
+        return ClientResult(
+            **common,
+            state=dense_update,
+            **evaluation_kwargs,
+            upload_bytes=dense_bytes,
+            upload_parameters=dense_parameters,
+            parameter_upload_bytes=dense_bytes,
+            parameter_upload_parameters=dense_parameters,
+            transport_upload_bytes=dense_bytes,
+            payload_kind="dense_update",
+        )
+
+    def gradient_sample(self, global_state: StateDict, max_samples: int | None = None, batch_index: int = 0):
+        """Return gradients for a selected batch for DLG/iDLG evaluation."""
+
+        model = build_model(self.config).to(self.device)
+        load_serialized(model, copy.deepcopy(global_state), self.device)
+        return first_batch_gradient(
+            model,
+            self.train_loader,
+            self.device,
+            max_samples=max_samples,
+            model_mode=str(self.config.get("attack", {}).get("model_mode", "train")),
+            batch_index=batch_index,
+        )
+
+    def sample_batch(self, max_samples: int | None = None, batch_index: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return one selected local batch for payload-based reconstruction attacks.
+
+        Example:
+            ``x, y = client.sample_batch(max_samples=1, batch_index=2)`` selects
+            the third local mini-batch used for attack-side evaluation.
+        """
+
+        return first_batch_sample(self.train_loader, self.device, max_samples=max_samples, batch_index=batch_index)
+
+    def train_reference_inputs(self) -> torch.Tensor:
+        """Return all normalized input windows from this client training dataset.
+
+        Example:
+            ``windows = client.train_reference_inputs()`` is used to score
+            payload reconstructions against the full local training set.
+        """
+
+        dataset = self.train_loader.dataset
+        return torch.stack([dataset[index][0] for index in range(len(dataset))], dim=0)

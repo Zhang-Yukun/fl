@@ -48,7 +48,7 @@ attack:
   async_enabled: false
   async_workers: 1
   async_max_pending_rounds: 2
-  async_device: cpu
+  device: same
   seed: 2026
 
 tracking:

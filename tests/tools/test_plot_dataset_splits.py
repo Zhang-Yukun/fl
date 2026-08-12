@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 
-SCRIPT_PATH = Path(__file__).parents[2] / 'federated_ts' / 'tools' / 'plot_dataset_splits.py'
+SCRIPT_PATH = Path(__file__).parents[2] / 'fedlab' / 'tools' / 'plot_dataset_splits.py'
 spec = importlib.util.spec_from_file_location('plot_dataset_splits', SCRIPT_PATH)
 module = importlib.util.module_from_spec(spec)
 assert spec.loader is not None

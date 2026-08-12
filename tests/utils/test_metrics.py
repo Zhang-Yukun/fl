@@ -1,6 +1,6 @@
 import torch
 
-from federated_ts.utils.metrics import mae, mape, mse
+from fedlab.utils.metrics import mae, mape, mse
 
 
 def test_forecasting_metrics():

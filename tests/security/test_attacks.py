@@ -1,9 +1,9 @@
 import torch
 
-from federated_ts.modeling.forecasting import build_model
-from federated_ts.engine.training import first_batch_gradient
-from federated_ts.security.attacks import dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
-from federated_ts.utils.serialization import serialize_model, subtract_state
+from fedlab.modeling.forecasting import build_model
+from fedlab.engine.training import first_batch_gradient
+from fedlab.security.attacks import dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
+from fedlab.utils.serialization import serialize_model, subtract_state
 
 
 def _tiny_patchtst_config(target_type: str = "update_payload"):

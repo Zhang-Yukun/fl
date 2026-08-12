@@ -8,17 +8,17 @@ from pathlib import Path
 import pytest
 import torch
 
-import federated_ts.federated.server as server_module
-import federated_ts.communication.grpc_training as grpc_training_module
-import federated_ts.security.attacks as attacks_module
-from federated_ts.communication.grpc_training import GrpcFederatedCoordinator, _apply_transport_metrics, run_client, serve
-from federated_ts.datasets.rare_earth import build_federated_loaders
-import federated_ts.federated.algorithms as algorithms_module
-from federated_ts.federated.algorithms import resolve_device, run_federated
-from federated_ts.federated.client import ClientResult, FederatedClient
-from federated_ts.utils.config import load_config
-from federated_ts.utils.serialization import compress_topk, serialize_model
-from federated_ts.utils.consistency import compare_fedavg_runs
+import fedlab.federated.server as server_module
+import fedlab.communication.grpc_training as grpc_training_module
+import fedlab.security.attacks as attacks_module
+from fedlab.communication.grpc_training import GrpcFederatedCoordinator, _apply_transport_metrics, run_client, serve
+from fedlab.datasets.rare_earth import build_federated_loaders
+import fedlab.federated.algorithms as algorithms_module
+from fedlab.federated.algorithms import resolve_device, run_federated
+from fedlab.federated.client import ClientResult, FederatedClient
+from fedlab.utils.config import load_config
+from fedlab.utils.serialization import compress_topk, serialize_model
+from fedlab.utils.consistency import compare_fedavg_runs
 
 
 def _submit_one_round(coordinator: GrpcFederatedCoordinator, config: dict[str, object]) -> dict[str, object]:
@@ -228,7 +228,7 @@ def test_grpc_coordinator_saves_attack_results(tmp_path):
             "attack.local_optimizer=adam",
             "attack.async_enabled=true",
             "attack.async_workers=1",
-            "attack.async_device=cpu",
+            "attack.device=cpu",
             "tracking.enabled=false",
             "runtime.device=cpu",
             "runtime.seed=2026",
@@ -267,7 +267,7 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
             "attack.max_samples=1",
             "attack.async_enabled=true",
             "attack.async_workers=1",
-            "attack.async_device=cpu",
+            "attack.device=cpu",
             "tracking.enabled=false",
             "runtime.device=cpu",
         ],
@@ -392,7 +392,7 @@ def test_grpc_matches_single_process_fedavg_when_randomness_disabled(tmp_path):
         "attack.local_optimizer=adam",
         "attack.async_enabled=true",
         "attack.async_workers=1",
-        "attack.async_device=cpu",
+        "attack.device=cpu",
         "tracking.enabled=false",
         "runtime.device=cpu",
         "runtime.seed=2026",
@@ -486,7 +486,7 @@ def test_real_grpc_sync_and_async_match_when_randomness_disabled(tmp_path):
             *overrides,
             "attack.async_enabled=true",
             "attack.async_workers=1",
-            "attack.async_device=cpu",
+            "attack.device=cpu",
         ],
     )
 
@@ -581,7 +581,7 @@ def test_grpc_coordinator_restores_best_validation_checkpoint(tmp_path, monkeypa
         _build_zero_model,
     )
     monkeypatch.setattr(
-        __import__('federated_ts.communication.grpc_training', fromlist=['build_federated_loaders']),
+        __import__('fedlab.communication.grpc_training', fromlist=['build_federated_loaders']),
         'build_federated_loaders',
         lambda _config: (
             {"Nd2O3": [0], "CeO2": [0], "La2O3": [0]},

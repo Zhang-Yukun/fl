@@ -5,16 +5,16 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import federated_ts.federated.algorithms as algorithms_module
-import federated_ts.federated.client as client_module
-import federated_ts.federated.server as server_module
-from federated_ts.datasets.rare_earth import build_federated_loaders
-from federated_ts.engine.training import train_n_steps
-from federated_ts.federated.client import FederatedClient
-from federated_ts.modeling.forecasting import build_model
-from federated_ts.utils.serialization import compress_topk, serialize_model
+import fedlab.federated.algorithms as algorithms_module
+import fedlab.federated.client as client_module
+import fedlab.federated.server as server_module
+from fedlab.datasets.rare_earth import build_federated_loaders
+from fedlab.engine.training import train_n_steps
+from fedlab.federated.client import FederatedClient
+from fedlab.modeling.forecasting import build_model
+from fedlab.utils.serialization import compress_topk, serialize_model
 
-from federated_ts.federated.algorithms import (
+from fedlab.federated.algorithms import (
     AsyncAttackManager,
     AttackRoundResult,
     AttackRoundTask,
@@ -25,8 +25,8 @@ from federated_ts.federated.algorithms import (
     run_centralized,
     run_federated,
 )
-from federated_ts.utils.config import load_config
-from federated_ts.utils.consistency import compare_fedavg_runs
+from fedlab.utils.config import load_config
+from fedlab.utils.consistency import compare_fedavg_runs
 
 
 def test_one_round_federated_run(tmp_path):
@@ -88,7 +88,7 @@ def test_wandb_cumulative_communication_payload_uses_history_totals(tmp_path):
 
     assert summary["total_parameter_bytes"] == 0
 
-    from federated_ts.federated.server import RoundRecord
+    from fedlab.federated.server import RoundRecord
 
     record = RoundRecord(**metrics[0])
     payload = _wandb_cumulative_communication_payload([record])
@@ -681,7 +681,7 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
             *overrides,
             "attack.async_enabled=true",
             "attack.async_workers=1",
-            "attack.async_device=cpu",
+            "attack.device=cpu",
         ],
     )
 
@@ -1000,3 +1000,51 @@ def test_client_emits_evaluation_update_in_oracle_mode():
 
     assert result.evaluation_update is not None
     assert result.evaluation_payload_kind == "dense_full_update"
+
+
+def test_attack_device_defaults_to_runtime_device():
+    config = {"runtime": {"device": "cpu"}, "attack": {}}
+
+    assert str(algorithms_module._resolve_attack_device(config)) == "cpu"
+
+
+def test_attack_device_keeps_legacy_async_device_alias():
+    config = {"runtime": {"device": "cpu"}, "attack": {"async_device": "cpu"}}
+
+    assert str(algorithms_module._resolve_attack_device(config)) == "cpu"
+
+
+def test_one_round_federated_run_with_sgd_optimizer(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "training.optimizer=sgd",
+            "training.lr=0.001",
+            "training.momentum=0.0",
+            "attack.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    result = run_federated(config)
+
+    assert result["rounds"] == 1
+
+
+def test_centralized_run_with_sgd_optimizer(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "training.optimizer=sgd",
+            "training.lr=0.001",
+            "training.momentum=0.0",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    result = run_centralized(config)
+
+    assert "mse" in result
+    assert "mae" in result
+    assert "mape" in result

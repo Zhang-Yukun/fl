@@ -1,9 +1,9 @@
 import torch
 
-from federated_ts.datasets import build_federated_loaders
-from federated_ts.modeling import build_model
-from federated_ts.tasks import build_optimizer, compute_metrics, create_loss, get_model_task, get_task, metric_names, optimizer_name, primary_metric, primary_metric_mode
-from federated_ts.utils.config import load_config
+from fedlab.datasets import build_federated_loaders
+from fedlab.modeling import build_model
+from fedlab.tasks import build_optimizer, compute_metrics, create_loss, get_model_task, get_task, metric_names, optimizer_name, primary_metric, primary_metric_mode
+from fedlab.utils.config import load_config
 
 
 def test_default_config_resolves_forecasting_task():

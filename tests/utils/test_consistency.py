@@ -1,6 +1,6 @@
 import json
 
-from federated_ts.utils.consistency import compare_fedavg_runs, load_run_artifacts
+from fedlab.utils.consistency import compare_fedavg_runs, load_run_artifacts
 
 
 def _write_run(path, summary, metrics, attacks):

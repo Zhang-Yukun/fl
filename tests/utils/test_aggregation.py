@@ -3,7 +3,7 @@ from collections import OrderedDict
 import pytest
 import torch
 
-from federated_ts.utils.aggregation import fedaware_weights
+from fedlab.utils.aggregation import fedaware_weights
 
 
 def test_fedaware_weights_return_simplex_and_adapt():

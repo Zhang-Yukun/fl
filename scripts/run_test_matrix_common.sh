@@ -18,6 +18,6 @@ run_train() {
   shift 3
 
   echo "[$(date '+%F %T')] START ${outdir}" | tee -a "${LOG_DIR}/${BATCH_NAME}.log"
-  CUDA_VISIBLE_DEVICES="${GPU_ID}" conda run -n torch_env python -m federated_ts.entrypoints.train     --config "${config}"     --mode "${mode}"     --override "experiment.output_dir=${outdir}"     --override "runtime.device=cuda:0"     --override "runtime.seed=2026"     --override "runtime.deterministic=true"     --override "training.patience=20"     --override "attack.seed=2026"     "$@" 2>&1 | tee "${LOG_DIR}/$(basename "${outdir}").log"
+  CUDA_VISIBLE_DEVICES="${GPU_ID}" conda run -n torch_env python -m fedlab.entrypoints.train     --config "${config}"     --mode "${mode}"     --override "experiment.output_dir=${outdir}"     --override "runtime.device=cuda:0"     --override "runtime.seed=2026"     --override "runtime.deterministic=true"     --override "training.patience=20"     --override "attack.seed=2026"     "$@" 2>&1 | tee "${LOG_DIR}/$(basename "${outdir}").log"
   echo "[$(date '+%F %T')] END ${outdir}" | tee -a "${LOG_DIR}/${BATCH_NAME}.log"
 }

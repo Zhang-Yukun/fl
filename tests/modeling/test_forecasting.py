@@ -1,6 +1,6 @@
 import torch
 
-from federated_ts.modeling.forecasting import build_model
+from fedlab.modeling.forecasting import build_model
 
 
 def test_mlp_forecaster_output_shape():

@@ -5,7 +5,7 @@ import pandas as pd
 
 
 def _load_prepare_xt_data():
-    module_path = Path(__file__).parents[2] / "scripts" / "prepare_xt_data.py"
+    module_path = Path(__file__).parents[2] / "fedlab" / "tools" / "prepare_xt_data.py"
     spec = importlib.util.spec_from_file_location("prepare_xt_data_script", module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

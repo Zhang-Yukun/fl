@@ -2,7 +2,7 @@ from collections import OrderedDict
 
 import torch
 
-from federated_ts.modeling.ega import (
+from fedlab.modeling.ega import (
     EgaAutoEncoder,
     decode_mean_encoded_payload,
     dequantize_block_vector,

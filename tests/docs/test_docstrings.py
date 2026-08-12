@@ -5,6 +5,8 @@ from pathlib import Path
 def _check_python_tree(root: Path):
     missing = []
     for path in root.rglob("*.py"):
+        if ".ipynb_checkpoints" in path.parts:
+            continue
         if "reference_patchtst" in path.parts:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -19,6 +21,6 @@ def _check_python_tree(root: Path):
 
 def test_public_api_has_docstrings():
     src_dir = Path(__file__).parents[2]
-    missing = _check_python_tree(src_dir / "federated_ts")
+    missing = _check_python_tree(src_dir / "fedlab")
     missing.extend(f"scripts/{item}" for item in _check_python_tree(src_dir / "scripts"))
     assert not missing

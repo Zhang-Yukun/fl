@@ -1,6 +1,6 @@
 import numpy as np
 
-from federated_ts.datasets.rare_earth import Standardizer, WindowDataset, split_array
+from fedlab.datasets.rare_earth import Standardizer, WindowDataset, split_array
 
 
 def test_standardizer_roundtrip_and_split_array():
@@ -23,7 +23,7 @@ def test_window_dataset_returns_input_and_target_windows():
 
 
 def test_build_federated_loaders_from_split_dir(tmp_path):
-    from federated_ts.datasets.rare_earth import build_federated_loaders
+    from fedlab.datasets.rare_earth import build_federated_loaders
 
     for client in ["Nd2O3", "CeO2", "La2O3"]:
         client_dir = tmp_path / "clients" / client
@@ -41,7 +41,7 @@ def test_build_federated_loaders_from_split_dir(tmp_path):
 
 
 def test_build_federated_loaders_respects_runtime_seed_for_train_shuffle(tmp_path):
-    from federated_ts.datasets.rare_earth import build_federated_loaders
+    from fedlab.datasets.rare_earth import build_federated_loaders
 
     for client in ["Nd2O3", "CeO2", "La2O3"]:
         client_dir = tmp_path / "clients" / client
@@ -78,7 +78,7 @@ def test_build_federated_loaders_respects_runtime_seed_for_train_shuffle(tmp_pat
 
 
 def test_build_federated_loaders_can_disable_train_shuffle(tmp_path):
-    from federated_ts.datasets.rare_earth import build_federated_loaders
+    from fedlab.datasets.rare_earth import build_federated_loaders
 
     for client in ["Nd2O3", "CeO2", "La2O3"]:
         client_dir = tmp_path / "clients" / client

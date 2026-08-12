@@ -7,7 +7,7 @@ CeO2, and La2O3 price forecasting.
 
 ```bash
 cd src
-conda run -n torch_env python -m federated_ts.entrypoints.train --config configs/test.yaml
+conda run -n torch_env python -m fedlab.entrypoints.train --config configs/test.yaml
 conda run -n torch_env python -m pytest tests
 ```
 
@@ -15,19 +15,23 @@ The default smoke config uses compressed FedAvg with top-k sparse updates. The
 main rawdata2 comparison scripts are now separated into centralized training,
 standard FedAvg, and a simple compression-plus-security DP-TopK baseline.
 
+For a fuller Chinese usage guide covering configuration, algorithms, gRPC,
+artifacts, and extension points, see
+[`docs/框架使用手册.md`](docs/框架使用手册.md).
+
 ## Main Modules
 
-- `federated_ts.utils.config`: nested YAML loading and CLI overrides.
-- `federated_ts.utils.artifacts`: experiment parameter artifacts in YAML/JSON/TOML.
-- `federated_ts.utils.serialization`: ordered parameter serialization and sparse updates.
-- `federated_ts.datasets.rare_earth`: rare-earth CSV loading and sliding-window datasets.
-- `federated_ts.modeling.forecasting`: forecasting model registry and implementations.
-- `federated_ts.engine.training`: local train/evaluate loops.
-- `federated_ts.federated.algorithms`: centralized training, FedAvg, FedAWARE, and compressed FedAvg.
-- `federated_ts.federated.client` and `federated_ts.federated.server`: FL endpoint logic.
-- `federated_ts.utils.aggregation`: adaptive aggregation helpers for Xu et al.'s FedAWARE weighting.
-- `federated_ts.security.attacks`: DLG and iDLG-style gradient reconstruction attacks.
-- `federated_ts.communication.grpc_service`: gRPC transport helpers for multi-process training.
+- `fedlab.utils.config`: nested YAML loading and CLI overrides.
+- `fedlab.utils.artifacts`: experiment parameter artifacts in YAML/JSON/TOML.
+- `fedlab.utils.serialization`: ordered parameter serialization, selective layer filtering, trainable/untrainable state export, quantization, and sparse updates.
+- `fedlab.datasets.rare_earth`: rare-earth CSV loading and sliding-window datasets.
+- `fedlab.modeling.forecasting`: forecasting model registry and implementations.
+- `fedlab.engine.training`: local train/evaluate loops.
+- `fedlab.federated.algorithms`: centralized training, FedAvg, FedAWARE, and compressed FedAvg.
+- `fedlab.federated.client` and `fedlab.federated.server`: FL endpoint logic.
+- `fedlab.utils.aggregation`: adaptive aggregation helpers for Xu et al.'s FedAWARE weighting.
+- `fedlab.security.attacks`: DLG and iDLG-style gradient reconstruction attacks.
+- `fedlab.communication.grpc_service`: gRPC transport helpers for multi-process training.
 
 
 ## Multi-Process gRPC
@@ -35,10 +39,10 @@ standard FedAvg, and a simple compression-plus-security DP-TopK baseline.
 Start one server and three clients in separate shells or nodes:
 
 ```bash
-python -m federated_ts.entrypoints.server --config configs/default.yaml
-python -m federated_ts.entrypoints.client --client-id Nd2O3 --config configs/default.yaml
-python -m federated_ts.entrypoints.client --client-id CeO2 --config configs/default.yaml
-python -m federated_ts.entrypoints.client --client-id La2O3 --config configs/default.yaml
+python -m fedlab.entrypoints.server --config configs/default.yaml
+python -m fedlab.entrypoints.client --client-id Nd2O3 --config configs/default.yaml
+python -m fedlab.entrypoints.client --client-id CeO2 --config configs/default.yaml
+python -m fedlab.entrypoints.client --client-id La2O3 --config configs/default.yaml
 ```
 
 ## Experiment Artifacts
@@ -70,13 +74,13 @@ Prepare the preferred `XT_data` CSV files into chronological client splits.
 the framework's default `test.csv`:
 
 ```bash
-python -m federated_ts.tools.prepare_xt_data \
+python -m fedlab.tools.prepare_xt_data \
   --input-dir ../Time-Series-Prediction/dataset/XT_data \
   --output-dir ../data/rare_earth_rawdata2
 ```
 
 The older CBC Excel rawdata2 preparation entry point remains available as
-`python -m federated_ts.tools.prepare_rawdata2` when `XT_data` is not available.
+`python -m fedlab.tools.prepare_rawdata2` when `XT_data` is not available.
 
 Run each rawdata2 experiment separately with 500 maximum epochs/rounds
 and early stopping patience 50:
@@ -86,7 +90,11 @@ bash scripts/run_rawdata2_centralized.sh
 bash scripts/run_rawdata2_fedavg.sh
 bash scripts/run_rawdata2_soteriafl.sh
 bash scripts/run_rawdata2_dp_topk.sh
-bash scripts/run_rawdata2_fedpetuning.sh
+bash scripts/run_rawdata2_secure_quantized_fedavg.sh
+bash scripts/run_rawdata2_adaptive_clipped_rdp_fedavg_deterministic.sh
+bash scripts/run_rawdata2_randomk.sh
+bash scripts/run_rawdata2_sign.sh
+bash scripts/run_rawdata2_qsgd.sh
 ```
 
 Extra overrides can be appended to any script, for example
@@ -97,8 +105,8 @@ corresponding `outputs/rawdata2_*` directory. `configs/rawdata2_dp_topk.yaml` is
 ## Reproduce
 
 ```bash
-bash scripts/scripts/run_repro_pat50_centralized.sh
+bash scripts/run_repro_pat50_centralized.sh
 bash scripts/run_repro_pat50_fedavg.sh
 bash scripts/run_repro_pat50_qint8_bidir.sh
-python -m federated_ts.tools.compare_experiment_results outputs/repro_pat50/fedavg_seed2026_pat50_payloadv1 outputs/repro_pat50/secure_qint8_bidir_seed2026_pat50_payloadv1
+python -m fedlab.tools.compare_experiment_results outputs/repro_pat50/fedavg_seed2026_pat50_payloadv1 outputs/repro_pat50/secure_qint8_bidir_seed2026_pat50_payloadv1
 ```

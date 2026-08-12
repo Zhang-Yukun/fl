@@ -4,7 +4,7 @@ import tomllib
 import torch
 import yaml
 
-from federated_ts.utils.artifacts import normalize_config_formats, save_experiment_config, save_federated_snapshot, should_save_periodic_artifacts
+from fedlab.utils.artifacts import normalize_config_formats, save_experiment_config, save_federated_snapshot, should_save_periodic_artifacts
 
 
 def test_normalize_config_formats_defaults_and_deduplicates():

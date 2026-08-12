@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from federated_ts.utils.config import load_config
+from fedlab.utils.config import load_config
 
 
 def test_nested_yaml_and_override():
