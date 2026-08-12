@@ -2,7 +2,7 @@ import torch
 
 from federated_ts.datasets import build_federated_loaders
 from federated_ts.modeling import build_model
-from federated_ts.tasks import get_model_task, get_task, primary_metric, primary_metric_mode
+from federated_ts.tasks import build_optimizer, compute_metrics, create_loss, get_model_task, get_task, metric_names, optimizer_name, primary_metric, primary_metric_mode
 from federated_ts.utils.config import load_config
 
 
@@ -37,3 +37,22 @@ def test_task_aware_dataset_builder_matches_existing_clients():
     assert set(train_loaders) == {'Nd2O3', 'CeO2', 'La2O3'}
     assert len(val_loader) > 0
     assert len(test_loader) > 0
+
+
+def test_component_registry_allows_config_driven_loss_metric_and_optimizer():
+    config = {
+        'task': {'type': 'forecasting'},
+        'training': {'loss': 'mae', 'optimizer': 'sgd', 'lr': 0.01, 'momentum': 0.0},
+        'evaluation': {'metrics': ['mae']},
+    }
+
+    loss_fn = create_loss(config)
+    optimizer = build_optimizer([torch.nn.Parameter(torch.ones(1))], config)
+    metrics = compute_metrics(config, torch.tensor([1.0]), torch.tensor([2.0]))
+
+    assert loss_fn.__class__.__name__ == 'L1Loss'
+    assert optimizer.__class__.__name__ == 'SGD'
+    assert metric_names(config) == ('mae', 'mse', 'mape')
+    assert metrics['mae'] == 1.0
+    assert 'mse' in metrics
+    assert optimizer_name(config) == 'sgd'

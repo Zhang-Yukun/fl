@@ -13,7 +13,7 @@ import torch
 from torch import nn
 
 from federated_ts.modeling import build_model
-from federated_ts.tasks import get_task
+from federated_ts.tasks import create_loss
 from federated_ts.utils.serialization import StateDict, load_serialized
 
 
@@ -95,7 +95,7 @@ def _normalize_reference_metric(config: dict[str, Any], target_type: str) -> str
 def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_grads: list[torch.Tensor], config: dict[str, Any]) -> torch.Tensor:
     """Compute squared distance between dummy and intercepted gradients."""
 
-    criterion = get_task(config).create_loss(config)
+    criterion = create_loss(config)
     pred = model(x)
     loss = criterion(pred, y)
     trainable_parameters = tuple(parameter for parameter in model.parameters() if parameter.requires_grad)
@@ -106,7 +106,7 @@ def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, targe
 def _predicted_trainable_update(model: nn.Module, x: torch.Tensor, y: torch.Tensor, config: dict[str, Any]) -> OrderedDict[str, torch.Tensor]:
     """Approximate the transmitted one-step local update for one dummy batch."""
 
-    criterion = get_task(config).create_loss(config)
+    criterion = create_loss(config)
     pred = model(x)
     loss = criterion(pred, y)
     named_parameters = [(name, parameter) for name, parameter in model.named_parameters() if parameter.requires_grad]

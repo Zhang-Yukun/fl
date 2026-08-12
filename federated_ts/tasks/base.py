@@ -25,7 +25,10 @@ class TaskSpec:
     name: str
     build_model: Callable[[dict[str, Any]], nn.Module]
     build_federated_loaders: Callable[[dict[str, Any]], tuple[dict[str, Any], Any, Any]]
-    create_loss: Callable[[dict[str, Any]], LossFn]
-    compute_metrics: MetricFn
+    create_loss: Callable[[dict[str, Any]], LossFn] | None = None
+    compute_metrics: MetricFn | None = None
+    default_loss: str = "mse"
+    default_metrics: tuple[str, ...] = ("mse",)
+    default_optimizer: str = "adam"
     primary_metric: str = "mse"
     primary_metric_mode: str = "min"

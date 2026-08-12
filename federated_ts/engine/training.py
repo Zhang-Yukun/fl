@@ -7,8 +7,7 @@ from typing import Iterable
 import torch
 from torch import nn
 
-from federated_ts.tasks.registry import get_model_config, get_model_task
-from federated_ts.utils.metrics import mae, mape, mse
+from federated_ts.tasks.registry import build_optimizer, compute_metrics as compute_registry_metrics, create_loss as create_registry_loss, get_model_config
 
 
 def _prediction(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
@@ -18,23 +17,28 @@ def _prediction(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
 
 
 def _loss_fn(model: nn.Module):
-    """Resolve the task-specific loss function for a model."""
+    """Resolve the configured task-aware loss function for a model."""
 
     try:
-        task = get_model_task(model)
-        return task.create_loss(get_model_config(model))
+        return create_registry_loss(get_model_config(model))
     except Exception:
         return nn.MSELoss()
 
 
 def _metric_fn(model: nn.Module):
-    """Resolve the task-specific metric function for a model."""
+    """Resolve the configured task-aware metric function for a model."""
 
     try:
-        task = get_model_task(model)
-        return task.compute_metrics
+        config = get_model_config(model)
+        return lambda pred, target: compute_registry_metrics(config, pred, target)
     except Exception:
-        return lambda pred, target: {"mse": mse(pred, target), "mae": mae(pred, target), "mape": mape(pred, target)}
+        return lambda pred, target: {"mse": torch.mean((pred - target) ** 2).item()}
+
+
+def build_training_optimizer(parameters, config: dict) -> torch.optim.Optimizer:
+    """Build the configured training optimizer through the registry."""
+
+    return build_optimizer(parameters, config)
 
 
 def train_one_epoch(model: nn.Module, loader: Iterable, optimizer: torch.optim.Optimizer, device: torch.device) -> float:
