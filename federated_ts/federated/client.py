@@ -87,6 +87,17 @@ class FederatedClient:
         generator.manual_seed(int(seed) + round_index * 1000 + offset)
         return generator
 
+    def _evaluation_result_kwargs(self, local_state: StateDict, global_state: StateDict) -> dict[str, Any]:
+        """Return optional evaluation payloads used only by oracle evaluation mode."""
+
+        evaluation_mode = str(self.config.get("evaluation", {}).get("mode", "protocol")).lower()
+        if evaluation_mode != "oracle_full_update":
+            return {}
+        return {
+            "evaluation_update": subtract_state(local_state, global_state),
+            "evaluation_payload_kind": "dense_full_update",
+        }
+
     def train(self, global_state: StateDict, compressed: bool = False, round_index: int = 0) -> ClientResult:
         """Train locally from global weights and return the transmitted payload.
 
@@ -115,7 +126,7 @@ class FederatedClient:
             for _ in range(int(self.config["federated"].get("local_epochs", 1))):
                 losses.append(train_one_epoch(model, self.train_loader, optimizer, self.device))
         local_state = serialize_model(model)
-        dense_reference_update = subtract_state(local_state, global_state)
+        evaluation_kwargs = self._evaluation_result_kwargs(local_state, global_state)
         dense_bytes = state_num_bytes(local_state)
         dense_parameters = state_num_parameters(local_state)
         common = dict(
@@ -147,8 +158,7 @@ class FederatedClient:
             return ClientResult(
                 **common,
                 state=quantized,
-                evaluation_update=dense_reference_update,
-                evaluation_payload_kind="dense_full_update",
+                **evaluation_kwargs,
                 upload_bytes=state_num_bytes(quantized),
                 upload_parameters=state_num_parameters(quantized),
                 parameter_upload_bytes=state_num_bytes(quantized),
@@ -184,8 +194,7 @@ class FederatedClient:
             return ClientResult(
                 **common,
                 sparse_update=sparse,
-                evaluation_update=dense_reference_update,
-                evaluation_payload_kind="dense_full_update",
+                **evaluation_kwargs,
                 upload_bytes=sparse.nbytes,
                 upload_parameters=sparse.values.numel(),
                 parameter_upload_bytes=sparse.nbytes,
@@ -200,8 +209,7 @@ class FederatedClient:
         return ClientResult(
             **common,
             state=dense_update,
-            evaluation_update=dense_reference_update,
-            evaluation_payload_kind="dense_full_update",
+            **evaluation_kwargs,
             upload_bytes=dense_bytes,
             upload_parameters=dense_parameters,
             parameter_upload_bytes=dense_bytes,

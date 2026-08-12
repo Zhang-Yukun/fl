@@ -852,3 +852,44 @@ def test_federated_run_restores_best_validation_checkpoint(tmp_path, monkeypatch
     assert persisted_summary["best_val_mse"] == 0.1
     assert persisted_summary["test_checkpoint"] == "best_validation"
     assert float(saved_state["weight"].item()) == pytest.approx(1.0)
+
+
+def test_client_skips_evaluation_update_in_protocol_mode():
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=fedavg",
+            "attack.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    train_loaders, _, _ = build_federated_loaders(config)
+    client_id, loader = next(iter(train_loaders.items()))
+    client = FederatedClient(client_id, loader, config, torch.device("cpu"))
+    global_state = serialize_model(build_model(config))
+
+    result = client.train(global_state, compressed=False, round_index=0)
+
+    assert result.evaluation_update is None
+    assert result.evaluation_payload_kind == "none"
+
+
+def test_client_emits_evaluation_update_in_oracle_mode():
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=fedavg",
+            "evaluation.mode=oracle_full_update",
+            "attack.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    train_loaders, _, _ = build_federated_loaders(config)
+    client_id, loader = next(iter(train_loaders.items()))
+    client = FederatedClient(client_id, loader, config, torch.device("cpu"))
+    global_state = serialize_model(build_model(config))
+
+    result = client.train(global_state, compressed=False, round_index=0)
+
+    assert result.evaluation_update is not None
+    assert result.evaluation_payload_kind == "dense_full_update"
