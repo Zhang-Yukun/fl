@@ -29,9 +29,9 @@ from federated_ts.security.attacks import (
     summarize_attack_results,
 )
 from federated_ts.federated.client import FederatedClient
-from federated_ts.datasets.rare_earth import build_federated_loaders
+from federated_ts.datasets import build_federated_loaders
 from federated_ts.utils.logging import setup_logging
-from federated_ts.modeling.forecasting import build_model
+from federated_ts.modeling import build_model
 from federated_ts.utils.serialization import (
     StateDict,
     decompress_topk,
@@ -458,6 +458,8 @@ def _update_best_checkpoint(
     candidate_metrics: dict[str, float],
     candidate_index: int,
     label: str,
+    metric_name: str = "mse",
+    metric_mode: str = "min",
 ) -> tuple[StateDict, dict[str, float], int, bool]:
     """Track the best validation checkpoint seen so far.
 
@@ -467,14 +469,15 @@ def _update_best_checkpoint(
     """
 
     candidate_metrics = {key: float(value) for key, value in candidate_metrics.items()}
-    improved = best_metrics is None or candidate_metrics["mse"] < float(best_metrics["mse"])
+    improved = best_metrics is None or (candidate_metrics[metric_name] < float(best_metrics[metric_name]) if metric_mode == "min" else candidate_metrics[metric_name] > float(best_metrics[metric_name]))
     if improved:
         logger.info(
-            "New best validation checkpoint for {} at {}={} val_mse={:.6f}",
+            "New best validation checkpoint for {} at {}={} {}={:.6f}",
             label,
             label,
             candidate_index,
-            candidate_metrics["mse"],
+            metric_name,
+            candidate_metrics[metric_name],
         )
         return _clone_state(candidate_state), candidate_metrics, candidate_index, True
     return _clone_state(best_state), dict(best_metrics), int(best_index), False

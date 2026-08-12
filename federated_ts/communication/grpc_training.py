@@ -20,7 +20,7 @@ from typing import Any
 from loguru import logger
 
 from federated_ts.communication.grpc_service import FederatedRpcClient, FederatedRpcServer
-from federated_ts.datasets.rare_earth import build_federated_loaders
+from federated_ts.datasets import build_federated_loaders
 from federated_ts.federated.algorithms import (
     AsyncAttackManager,
     _attack_target_type,

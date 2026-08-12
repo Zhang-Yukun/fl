@@ -12,7 +12,7 @@ import torch
 from loguru import logger
 
 from federated_ts.utils.artifacts import save_experiment_config
-from federated_ts.modeling.forecasting import build_model
+from federated_ts.modeling import build_model
 from federated_ts.utils.aggregation import fedaware_weights
 from federated_ts.utils.serialization import (
     StateDict,
@@ -150,18 +150,26 @@ class EarlyStopper:
     """Validation-loss early stopping helper.
 
     Example:
-        ``stopper.update(val_mse)`` returns ``True`` when patience is exhausted.
+        ``stopper.update(metric)`` returns ``True`` when patience is exhausted.
     """
 
     patience: int
     min_delta: float = 0.0
+    mode: str = "min"
     best: float = float("inf")
     bad_rounds: int = 0
+
+    def __post_init__(self) -> None:
+        """Initialize the tracked best value for the configured direction."""
+
+        if self.mode == "max":
+            self.best = float("-inf")
 
     def update(self, value: float) -> bool:
         """Update the best metric and report whether training should stop."""
 
-        if value < self.best - self.min_delta:
+        improved = value < self.best - self.min_delta if self.mode == "min" else value > self.best + self.min_delta
+        if improved:
             self.best = value
             self.bad_rounds = 0
             return False

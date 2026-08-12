@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from federated_ts.modeling.forecasting import build_model
+from federated_ts.modeling import build_model
 from federated_ts.utils.serialization import (
     SparseUpdate,
     StateDict,

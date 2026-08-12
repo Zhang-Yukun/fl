@@ -6,12 +6,14 @@ import math
 import time
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 import torch
 from torch import nn
 
-from federated_ts.modeling.forecasting import build_model
+from federated_ts.modeling import build_model
+from federated_ts.tasks import get_task
 from federated_ts.utils.serialization import StateDict, load_serialized
 
 
@@ -38,6 +40,14 @@ class AttackResult:
     nearest_client_train_mse: float | None = None
     nearest_client_train_indices: list[int] | None = None
     metric_name: str = "reconstruction_mse"
+    client_id: str | None = None
+    round_index: int | None = None
+    sample_index: int | None = None
+    artifact_path: str | None = None
+    real_x: torch.Tensor | None = None
+    real_y: torch.Tensor | None = None
+    reconstructed_x: torch.Tensor | None = None
+    reconstructed_y: torch.Tensor | None = None
 
     @property
     def reconstruction_mse(self) -> float:
@@ -49,6 +59,8 @@ class AttackResult:
         """Return a JSON-serializable attack record."""
 
         record = asdict(self)
+        for key in ("real_x", "real_y", "reconstructed_x", "reconstructed_y"):
+            record.pop(key, None)
         record["reconstruction_mse"] = self.mse
         record["objective_mse"] = self.gradient_mse
         for key, value in list(record.items()):
@@ -80,10 +92,10 @@ def _normalize_reference_metric(config: dict[str, Any], target_type: str) -> str
     return value
 
 
-def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_grads: list[torch.Tensor]) -> torch.Tensor:
+def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_grads: list[torch.Tensor], config: dict[str, Any]) -> torch.Tensor:
     """Compute squared distance between dummy and intercepted gradients."""
 
-    criterion = nn.MSELoss()
+    criterion = get_task(config).create_loss(config)
     pred = model(x)
     loss = criterion(pred, y)
     trainable_parameters = tuple(parameter for parameter in model.parameters() if parameter.requires_grad)
@@ -94,7 +106,7 @@ def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, targe
 def _predicted_trainable_update(model: nn.Module, x: torch.Tensor, y: torch.Tensor, config: dict[str, Any]) -> OrderedDict[str, torch.Tensor]:
     """Approximate the transmitted one-step local update for one dummy batch."""
 
-    criterion = nn.MSELoss()
+    criterion = get_task(config).create_loss(config)
     pred = model(x)
     loss = criterion(pred, y)
     named_parameters = [(name, parameter) for name, parameter in model.named_parameters() if parameter.requires_grad]
@@ -228,6 +240,8 @@ def _evaluate_reconstruction(
     name: str,
     reconstructed_x: torch.Tensor,
     real_x: torch.Tensor,
+    reconstructed_y: torch.Tensor | None,
+    real_y: torch.Tensor,
     iterations: int,
     elapsed: float,
     threshold: float,
@@ -272,6 +286,10 @@ def _evaluate_reconstruction(
         nearest_client_train_mse=None if nearest_client_train_mse is None else float(nearest_client_train_mse),
         nearest_client_train_indices=nearest_client_train_indices,
         metric_name=metric_name,
+        real_x=real_x.detach().cpu().clone(),
+        real_y=real_y.detach().cpu().clone(),
+        reconstructed_x=reconstructed_x.detach().cpu().clone(),
+        reconstructed_y=None if reconstructed_y is None else reconstructed_y.detach().cpu().clone(),
     )
 
 
@@ -321,6 +339,7 @@ def _attack_loop(
     overall_start = time.perf_counter()
     best_objective_mse = float("inf")
     best_x = real_x.to(device)
+    best_y = real_y.to(device)
 
     for restart in range(restarts):
         with _attack_rng_context(device):
@@ -340,6 +359,7 @@ def _attack_loop(
             optimizer = _create_optimizer(optimizer_name, variables, lr, history_size)
             restart_best_objective = float("inf")
             restart_best_x = dummy_x.detach().clone()
+            restart_best_y = dummy_y.detach().clone()
 
             for _ in range(steps):
                 if optimizer_name == "lbfgs":
@@ -350,7 +370,7 @@ def _attack_loop(
 
                         optimizer.zero_grad(set_to_none=True)
                         if resolved_target_type == "gradient":
-                            dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target)
+                            dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target, config)
                         else:
                             dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
                         if tv_weight > 0:
@@ -364,7 +384,7 @@ def _attack_loop(
                 else:
                     optimizer.zero_grad(set_to_none=True)
                     if resolved_target_type == "gradient":
-                        dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target)
+                        dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target, config)
                     else:
                         dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
                     if tv_weight > 0:
@@ -380,14 +400,18 @@ def _attack_loop(
                 if dist_value < restart_best_objective:
                     restart_best_objective = dist_value
                     restart_best_x = dummy_x.detach().clone()
+                    restart_best_y = dummy_y.detach().clone()
         if restart_best_objective < best_objective_mse:
             best_objective_mse = restart_best_objective
             best_x = restart_best_x
+            best_y = restart_best_y
     elapsed = time.perf_counter() - overall_start
     return _evaluate_reconstruction(
         name,
         best_x,
         real_x,
+        best_y,
+        real_y,
         steps,
         elapsed,
         threshold,
@@ -399,6 +423,58 @@ def _attack_loop(
         reference_metric=resolved_reference_metric,
     )
 
+
+
+def attach_attack_metadata(
+    result: AttackResult,
+    *,
+    client_id: str,
+    round_index: int,
+    sample_index: int,
+) -> AttackResult:
+    """Attach immutable sample metadata to one attack result."""
+
+    result.client_id = client_id
+    result.round_index = round_index
+    result.sample_index = sample_index
+    return result
+
+
+def save_attack_artifacts(output_dir: Path, results: list[AttackResult]) -> list[dict[str, Any]]:
+    """Persist attack reconstruction tensors and return JSON-ready records."""
+
+    artifact_root = output_dir / "attack_artifacts"
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    records: list[dict[str, Any]] = []
+    for index, result in enumerate(results):
+        round_index = 0 if result.round_index is None else int(result.round_index)
+        sample_index = 0 if result.sample_index is None else int(result.sample_index)
+        client_id = result.client_id or "unknown_client"
+        filename = f"{result.name.lower()}_{index:05d}.pt"
+        relative_path = Path(f"round_{round_index:04d}") / client_id / f"sample_{sample_index:04d}" / filename
+        artifact_path = artifact_root / relative_path
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "name": result.name,
+                "client_id": result.client_id,
+                "round_index": result.round_index,
+                "sample_index": result.sample_index,
+                "target_type": result.target_type,
+                "metric_name": result.metric_name,
+                "real_x": None if result.real_x is None else result.real_x.detach().cpu(),
+                "real_y": None if result.real_y is None else result.real_y.detach().cpu(),
+                "reconstructed_x": None if result.reconstructed_x is None else result.reconstructed_x.detach().cpu(),
+                "reconstructed_y": None if result.reconstructed_y is None else result.reconstructed_y.detach().cpu(),
+                "exact_target_mse": result.exact_target_mse,
+                "nearest_client_train_mse": result.nearest_client_train_mse,
+                "nearest_client_train_indices": result.nearest_client_train_indices,
+            },
+            artifact_path,
+        )
+        result.artifact_path = str(Path("attack_artifacts") / relative_path)
+        records.append(result.to_record())
+    return records
 
 def dlg_attack(
     config: dict[str, Any],

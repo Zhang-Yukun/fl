@@ -7,25 +7,52 @@ from typing import Iterable
 import torch
 from torch import nn
 
+from federated_ts.tasks.registry import get_model_config, get_model_task
 from federated_ts.utils.metrics import mae, mape, mse
 
 
+def _prediction(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """Run the model forward pass for one minibatch."""
+
+    return model(x)
+
+
+def _loss_fn(model: nn.Module):
+    """Resolve the task-specific loss function for a model."""
+
+    try:
+        task = get_model_task(model)
+        return task.create_loss(get_model_config(model))
+    except Exception:
+        return nn.MSELoss()
+
+
+def _metric_fn(model: nn.Module):
+    """Resolve the task-specific metric function for a model."""
+
+    try:
+        task = get_model_task(model)
+        return task.compute_metrics
+    except Exception:
+        return lambda pred, target: {"mse": mse(pred, target), "mae": mae(pred, target), "mape": mape(pred, target)}
+
+
 def train_one_epoch(model: nn.Module, loader: Iterable, optimizer: torch.optim.Optimizer, device: torch.device) -> float:
-    """Train one local epoch and return sample-weighted MSE loss.
+    """Train one local epoch and return sample-weighted task loss.
 
     Example:
         ``loss = train_one_epoch(model, train_loader, optimizer, device)``.
     """
 
     model.train()
-    criterion = nn.MSELoss()
+    criterion = _loss_fn(model)
     total_loss = 0.0
     total = 0
     for x, y in loader:
         x = x.to(device)
         y = y.to(device)
         optimizer.zero_grad(set_to_none=True)
-        loss = criterion(model(x), y)
+        loss = criterion(_prediction(model, x), y)
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * x.shape[0]
@@ -51,7 +78,7 @@ def train_n_steps(
         raise ValueError("steps must be positive")
 
     model.train()
-    criterion = nn.MSELoss()
+    criterion = _loss_fn(model)
     total_loss = 0.0
     total = 0
     completed = 0
@@ -66,7 +93,7 @@ def train_n_steps(
         x = x.to(device)
         y = y.to(device)
         optimizer.zero_grad(set_to_none=True)
-        loss = criterion(model(x), y)
+        loss = criterion(_prediction(model, x), y)
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * x.shape[0]
@@ -77,7 +104,7 @@ def train_n_steps(
 
 @torch.no_grad()
 def evaluate(model: nn.Module, loader: Iterable, device: torch.device) -> dict[str, float]:
-    """Evaluate a forecasting model and return MSE, MAE, and MAPE.
+    """Evaluate a model and return task metrics.
 
     Example:
         ``metrics = evaluate(model, val_loader, torch.device("cpu"))``.
@@ -87,11 +114,11 @@ def evaluate(model: nn.Module, loader: Iterable, device: torch.device) -> dict[s
     preds = []
     targets = []
     for x, y in loader:
-        preds.append(model(x.to(device)).cpu())
+        preds.append(_prediction(model, x.to(device)).cpu())
         targets.append(y.cpu())
     pred = torch.cat(preds)
     target = torch.cat(targets)
-    return {"mse": mse(pred, target), "mae": mae(pred, target), "mape": mape(pred, target)}
+    return _metric_fn(model)(pred, target)
 
 
 @torch.no_grad()
@@ -108,7 +135,7 @@ def predict_first_batch(
     if max_samples is not None:
         x = x[:max_samples]
         y = y[:max_samples]
-    prediction = model(x.to(device)).cpu()
+    prediction = _prediction(model, x.to(device)).cpu()
     return prediction, y.cpu()
 
 
@@ -154,7 +181,7 @@ def first_batch_gradient(
         model.eval()
     else:
         model.train()
-    criterion = nn.MSELoss()
+    criterion = _loss_fn(model)
     iterator = iter(loader)
     x = y = None
     for _ in range(max(0, int(batch_index)) + 1):
@@ -165,7 +192,7 @@ def first_batch_gradient(
     x = x.to(device)
     y = y.to(device)
     model.zero_grad(set_to_none=True)
-    loss = criterion(model(x), y)
+    loss = criterion(_prediction(model, x), y)
     trainable_parameters = tuple(parameter for parameter in model.parameters() if parameter.requires_grad)
     grads = torch.autograd.grad(loss, trainable_parameters, create_graph=False)
     return [grad.detach().cpu() for grad in grads], x.detach().cpu(), y.detach().cpu()

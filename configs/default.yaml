@@ -7,6 +7,9 @@ runtime:
   device: cpu
   log_level: INFO
 
+task:
+  type: forecasting
+
 data:
   csv_path: ../Time-Series-Prediction/dataset/XT_data/new_train.csv
   clients: [Nd2O3, CeO2, La2O3]
