@@ -13,7 +13,6 @@ def test_rawdata2_run_scripts_are_separate_and_executable():
         "run_rawdata2_soteriafl.sh": ["configs/rawdata2_soteriafl.yaml"],
         "run_rawdata2_dp_topk.sh": ["configs/rawdata2_dp_topk.yaml"],
         "run_rawdata2_secure_quantized_fedavg.sh": ["configs/rawdata2_secure_quantized_fedavg.yaml"],
-        "run_rawdata2_fedpetuning.sh": ["configs/rawdata2_fedpetuning.yaml"],
         "run_rawdata2_fedaware.sh": ["configs/rawdata2_fedaware.yaml"],
         "run_rawdata2_fedlab_topk.sh": ["configs/rawdata2_fedlab_topk.yaml"],
     }

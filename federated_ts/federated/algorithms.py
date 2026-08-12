@@ -20,7 +20,14 @@ except ImportError:  # pragma: no cover - numpy is expected in the training env
 from loguru import logger
 
 from federated_ts.utils.artifacts import save_experiment_config
-from federated_ts.security.attacks import attack_success_rate, dlg_attack, idlg_attack, summarize_attack_results
+from federated_ts.security.attacks import (
+    attack_success_rate,
+    attach_attack_metadata,
+    dlg_attack,
+    idlg_attack,
+    save_attack_artifacts,
+    summarize_attack_results,
+)
 from federated_ts.federated.client import FederatedClient
 from federated_ts.datasets.rare_earth import build_federated_loaders
 from federated_ts.utils.logging import setup_logging
@@ -107,7 +114,7 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     """Return whether the configured FL algorithm compresses client uploads."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if algorithm in {"fedavg", "fedaware", "fedpetuning", "secure_quantized_fedavg"}:
+    if algorithm in {"fedavg", "fedaware", "secure_quantized_fedavg", "adaptive_clipped_rdp_fedavg"}:
         return False
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl", "dp_topk_fedavg"}:
         return True
@@ -222,7 +229,7 @@ def _protect_attack_gradients(
 
     protected = [grad.detach().cpu().clone() for grad in grads]
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if not protected or algorithm in {"fedavg", "fedaware", "fedpetuning"}:
+    if not protected or algorithm in {"fedavg", "fedaware"}:
         return protected
 
     shapes = [tuple(grad.shape) for grad in protected]
@@ -299,6 +306,36 @@ def _clone_state(state: StateDict) -> StateDict:
     """Return a detached CPU clone of a serialized model state."""
 
     return type(state)((name, tensor.detach().cpu().clone()) for name, tensor in state.items())
+
+
+def _update_best_checkpoint(
+    best_state: StateDict | None,
+    best_metrics: dict[str, float] | None,
+    best_index: int | None,
+    candidate_state: StateDict,
+    candidate_metrics: dict[str, float],
+    candidate_index: int,
+    label: str,
+) -> tuple[StateDict, dict[str, float], int, bool]:
+    """Track the best validation checkpoint seen so far.
+
+    Example:
+        ``best_state, best_metrics, best_round, improved = _update_best_checkpoint(...)``
+        stores a detached clone of the current model when validation MSE improves.
+    """
+
+    candidate_metrics = {key: float(value) for key, value in candidate_metrics.items()}
+    improved = best_metrics is None or candidate_metrics["mse"] < float(best_metrics["mse"])
+    if improved:
+        logger.info(
+            "New best validation checkpoint for {} at {}={} val_mse={:.6f}",
+            label,
+            label,
+            candidate_index,
+            candidate_metrics["mse"],
+        )
+        return _clone_state(candidate_state), candidate_metrics, candidate_index, True
+    return _clone_state(best_state), dict(best_metrics), int(best_index), False
 
 
 def _attack_target_type(config: dict[str, Any]) -> str:
@@ -449,25 +486,35 @@ def _execute_attack_round_task(
     attacks = []
     for sample in task.samples:
         attacks.extend([
-            dlg_attack(
-                config,
-                sample.round_base_state,
-                sample.target,
-                sample.real_x,
-                sample.real_y,
-                attack_device,
-                target_type=sample.target_type,
-                reference_inputs=sample.reference_inputs,
+            attach_attack_metadata(
+                dlg_attack(
+                    config,
+                    sample.round_base_state,
+                    sample.target,
+                    sample.real_x,
+                    sample.real_y,
+                    attack_device,
+                    target_type=sample.target_type,
+                    reference_inputs=sample.reference_inputs,
+                ),
+                client_id=sample.client_id,
+                round_index=sample.round_index,
+                sample_index=sample.sample_index,
             ),
-            idlg_attack(
-                config,
-                sample.round_base_state,
-                sample.target,
-                sample.real_x,
-                sample.real_y,
-                attack_device,
-                target_type=sample.target_type,
-                reference_inputs=sample.reference_inputs,
+            attach_attack_metadata(
+                idlg_attack(
+                    config,
+                    sample.round_base_state,
+                    sample.target,
+                    sample.real_x,
+                    sample.real_y,
+                    attack_device,
+                    target_type=sample.target_type,
+                    reference_inputs=sample.reference_inputs,
+                ),
+                client_id=sample.client_id,
+                round_index=sample.round_index,
+                sample_index=sample.sample_index,
             ),
         ])
     return AttackRoundResult(
@@ -644,10 +691,22 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     optimizer = torch.optim.Adam(model.parameters(), lr=float(config["training"].get("lr", 1e-3)))
     stopper = EarlyStopper(int(config["training"].get("patience", 5)))
     history = []
+    best_state = serialize_model(model)
+    best_metrics = {"mse": float("inf"), "mae": float("inf"), "mape": float("inf")}
+    best_epoch = -1
     for epoch in range(int(config["training"].get("epochs", 10))):
         epoch_start = time.perf_counter()
         loss = sum(train_one_epoch(model, loader, optimizer, device) for loader in train_loaders.values()) / len(train_loaders)
         metrics = evaluate(model, val_loader, device)
+        best_state, best_metrics, best_epoch, _ = _update_best_checkpoint(
+            best_state=best_state,
+            best_metrics=best_metrics,
+            best_index=best_epoch,
+            candidate_state=serialize_model(model),
+            candidate_metrics=metrics,
+            candidate_index=epoch,
+            label="epoch",
+        )
         epoch_time = time.perf_counter() - epoch_start
         elapsed = time.perf_counter() - start_time
         epoch_record = {
@@ -679,15 +738,51 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
         if stopper.update(metrics["mse"]):
             logger.info("Centralized early stopping at epoch {}", epoch)
             break
+    model.load_state_dict(best_state)
+    logger.info("Restored best centralized checkpoint from epoch {} for final test", best_epoch)
     torch.save(model.state_dict(), output_dir / "centralized_model.pt")
     test_metrics = evaluate(model, test_loader, device)
     total_elapsed = time.perf_counter() - start_time
     with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
-        json.dump({"history": history, "test": test_metrics, "epochs": len(history), "total_time_seconds": total_elapsed}, handle, ensure_ascii=False, indent=2)
-    tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
+        json.dump(
+            {
+                "history": history,
+                "test": test_metrics,
+                "epochs": len(history),
+                "total_time_seconds": total_elapsed,
+                "best_epoch": best_epoch,
+                "best_val": best_metrics,
+                "test_checkpoint": "best_validation",
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+        )
+    tracker.log({
+        **{f"test/{key}": value for key, value in test_metrics.items()},
+        "run/total_time_seconds": total_elapsed,
+        "run/best_epoch": best_epoch,
+        "run/best_val_mse": best_metrics["mse"],
+        "run/best_val_mae": best_metrics["mae"],
+        "run/best_val_mape": best_metrics["mape"],
+    })
     tracker.finish()
     with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
-        json.dump({"test": test_metrics, "epochs": len(history), "total_time_seconds": total_elapsed}, handle, ensure_ascii=False, indent=2)
+        json.dump(
+            {
+                "test": test_metrics,
+                "epochs": len(history),
+                "total_time_seconds": total_elapsed,
+                "best_epoch": best_epoch,
+                "best_val_mse": best_metrics["mse"],
+                "best_val_mae": best_metrics["mae"],
+                "best_val_mape": best_metrics["mape"],
+                "test_checkpoint": "best_validation",
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+        )
     logger.info("Centralized training finished in {:.2f}s with test metrics {}", total_elapsed, test_metrics)
     return test_metrics
 
@@ -728,6 +823,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     stopper = EarlyStopper(int(config["training"].get("patience", 5)), float(config["training"].get("min_delta", 0.0)))
     max_rounds = int(config["federated"].get("rounds", 20))
     attack_manager = AsyncAttackManager(config, tracker)
+    best_global_state = _clone_state(server.global_state)
+    best_metrics = {"mse": float("inf"), "mae": float("inf"), "mape": float("inf")}
+    best_round = -1
     for round_index in range(max_rounds):
         round_start = time.perf_counter()
         round_base_state = _clone_state(server.global_state)
@@ -735,8 +833,17 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         if compressed:
             aggregation_weights = server.aggregate_sparse(results)
         else:
-            aggregation_weights = server.aggregate_dense(results)
+            aggregation_weights = server.aggregate_dense(results, round_index=round_index)
         metrics = server.evaluate_global()
+        best_global_state, best_metrics, best_round, _ = _update_best_checkpoint(
+            best_state=best_global_state,
+            best_metrics=best_metrics,
+            best_index=best_round,
+            candidate_state=server.global_state,
+            candidate_metrics=metrics,
+            candidate_index=round_index,
+            label="round",
+        )
         record = server.record_round(
             round_index,
             results,
@@ -759,23 +866,30 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         if stopper.update(metrics["mse"]):
             logger.info("Early stopping at round {}", round_index)
             break
+    server.global_state = _clone_state(best_global_state)
+    logger.info("Restored best federated checkpoint from round {} for final test", best_round)
     test_metrics = server.test_global()
     attack_manager.finalize()
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
     tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
-    tracker.finish()
-    attack_records = [result.to_record() for result in attack_manager.attack_results]
+    attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)
     with (output_dir / "attack_results.json").open("w", encoding="utf-8") as handle:
         json.dump(attack_records, handle, ensure_ascii=False, indent=2)
     attack_summary = summarize_attack_results(
         attack_manager.attack_results,
         float(config.get("attack", {}).get("success_rate_threshold", 0.03)),
     )
+    last_privacy = server.history[-1] if server.history else None
     summary = {
         "test": test_metrics,
         "rounds": len(server.history),
         "total_time_seconds": total_elapsed,
+        "best_round": best_round,
+        "best_val_mse": best_metrics["mse"],
+        "best_val_mae": best_metrics["mae"],
+        "best_val_mape": best_metrics["mape"],
+        "test_checkpoint": "best_validation",
         "last_upload_compression_ratio": server.history[-1].upload_compression_ratio if server.history else 0.0,
         "last_total_communication_ratio": server.history[-1].total_communication_ratio if server.history else 0.0,
         "last_communication_ratio": server.history[-1].communication_ratio if server.history else 0.0,
@@ -787,7 +901,30 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         "attack_success_rate": attack_summary["overall_success_rate"],
         "attack_evaluations": len(attack_records),
         "attack_summary": attack_summary,
+        "privacy_accountant": None if last_privacy is None else last_privacy.privacy_accountant,
+        "privacy_epsilon": None if last_privacy is None else last_privacy.privacy_epsilon,
+        "privacy_delta": None if last_privacy is None else last_privacy.privacy_delta,
+        "privacy_rdp_alpha": None if last_privacy is None else last_privacy.privacy_rdp_alpha,
+        "privacy_rdp_total": None if last_privacy is None else last_privacy.privacy_rdp_total,
+        "privacy_sampling_rate": None if last_privacy is None else last_privacy.privacy_sampling_rate,
+        "adaptive_clip_norm": None if last_privacy is None else last_privacy.adaptive_clip_norm,
+        "adaptive_clip_median_norm": None if last_privacy is None else last_privacy.adaptive_clip_median_norm,
+        "adaptive_reference_clip_norm": None if last_privacy is None else last_privacy.adaptive_reference_clip_norm,
+        "adaptive_noise_std": None if last_privacy is None else last_privacy.adaptive_noise_std,
+        "privacy_trust_model": "central_dp_trusted_aggregator" if (last_privacy is not None and last_privacy.privacy_accountant is not None) else None,
     }
+    tracker.log({
+        "run/best_round": best_round,
+        "run/best_val_mse": best_metrics["mse"],
+        "run/best_val_mae": best_metrics["mae"],
+        "run/best_val_mape": best_metrics["mape"],
+        "privacy/epsilon": summary["privacy_epsilon"],
+        "privacy/delta": summary["privacy_delta"],
+        "privacy/rdp_total": summary["privacy_rdp_total"],
+        "privacy/sampling_rate": summary["privacy_sampling_rate"],
+        "privacy/adaptive_clip_norm": summary["adaptive_clip_norm"],
+    })
+    tracker.finish()
     with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
     logger.info("Finished experiment: {}", summary)

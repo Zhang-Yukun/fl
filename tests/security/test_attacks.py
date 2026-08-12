@@ -2,7 +2,7 @@ import torch
 
 from federated_ts.modeling.forecasting import build_model
 from federated_ts.engine.training import first_batch_gradient
-from federated_ts.security.attacks import dlg_attack, idlg_attack, summarize_attack_results
+from federated_ts.security.attacks import dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
 from federated_ts.utils.serialization import serialize_model, subtract_state
 
 
@@ -137,14 +137,29 @@ def test_attack_gradient_sampling_supports_eval_mode():
     assert all(torch.allclose(left, right) for left, right in zip(grads_a, grads_b))
 
 
-def test_attack_gradient_sampling_supports_fedpetuning_trainable_subset():
+
+def test_attack_artifacts_persist_reconstructions(tmp_path):
     config = _tiny_patchtst_config(target_type="gradient")
-    config["federated"] = {"algorithm": "fedpetuning"}
-    config["model"]["peft"] = {"enabled": True, "method": "fedpetuning", "bottleneck_dim": 4, "train_head": True}
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(1, 8, 1)
     y = torch.randn(1, 2, 1)
-    grads, _, _ = first_batch_gradient(model, [(x, y)], device, max_samples=1, model_mode="eval")
-    assert grads
-    assert len(grads) == sum(1 for parameter in model.parameters() if parameter.requires_grad)
+    loss = torch.nn.functional.mse_loss(model(x), y)
+    grads = torch.autograd.grad(loss, tuple(model.parameters()))
+    state = serialize_model(model)
+
+    result = dlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
+    result.client_id = "Nd2O3"
+    result.round_index = 2
+    result.sample_index = 0
+
+    records = save_attack_artifacts(tmp_path, [result])
+
+    assert len(records) == 1
+    assert records[0]["artifact_path"] is not None
+    artifact_path = tmp_path / records[0]["artifact_path"]
+    payload = torch.load(artifact_path, map_location="cpu", weights_only=False)
+    assert torch.allclose(payload["real_x"], x)
+    assert torch.allclose(payload["real_y"], y)
+    assert payload["reconstructed_x"].shape == x.shape
+    assert payload["reconstructed_y"] is not None

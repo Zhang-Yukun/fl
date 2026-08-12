@@ -7,6 +7,7 @@ import torch
 
 import federated_ts.federated.algorithms as algorithms_module
 import federated_ts.federated.client as client_module
+import federated_ts.federated.server as server_module
 from federated_ts.datasets.rare_earth import build_federated_loaders
 from federated_ts.engine.training import train_n_steps
 from federated_ts.federated.client import FederatedClient
@@ -190,7 +191,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
     assert {"mse", "reconstruction_mse", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "exact_target_mse", "nearest_client_train_mse", "metric_name"} <= set(attack_results[0])
-    assert result["attack_evaluations"] == 2
+    assert result["attack_evaluations"] == 6
     assert result["attack_target_type"] == "update_payload"
     assert result["attack_primary_metric"] == "nearest_client_train_mse"
     assert result["attack_primary_metric_direction"] == "higher_is_more_private"
@@ -200,7 +201,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert result["attack_summary"]["target_type"] == "update_payload"
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
     assert result["attack_summary"]["overall_avg_nearest_client_train_mse"] is not None
-    assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 1
+    assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 3
 
 
 def test_federated_run_supports_legacy_gradient_attacks(tmp_path):
@@ -242,37 +243,6 @@ def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
     assert all(client["compressor"] == "randomk_unbiased" for client in metrics[0]["clients"])
     assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])
 
-
-def test_fedpetuning_uploads_only_trainable_subset(tmp_path):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "federated.algorithm=fedpetuning",
-            "federated.rounds=1",
-            "attack.enabled=false",
-            "model.name=patchtst",
-            "model.channels=1",
-            "model.patch_len=4",
-            "model.stride=2",
-            "model.d_model=8",
-            "model.n_heads=1",
-            "model.e_layers=1",
-            "model.d_ff=16",
-            "model.peft.enabled=true",
-            "model.peft.method=fedpetuning",
-            "model.peft.bottleneck_dim=4",
-            "model.peft.train_head=true",
-        ],
-    )
-    config["experiment"]["output_dir"] = str(tmp_path)
-    result = run_federated(config)
-    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    clients = metrics[0]["clients"]
-    assert all(client["payload_kind"] == "fedpetuning_trainable_state" for client in clients)
-    assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
-    assert all(client["parameter_upload_bytes"] == client["upload_bytes"] for client in clients)
-    assert all(client["transport_upload_bytes"] >= client["parameter_upload_bytes"] for client in clients)
-    assert result["last_upload_compression_ratio"] > 1.0
 
 
 def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
@@ -454,6 +424,11 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
     sync_summary = run_federated(sync_config)
     async_summary = run_federated(async_config)
 
+    sync_artifacts = sorted((sync_dir / "attack_artifacts").rglob("*.pt"))
+    async_artifacts = sorted((async_dir / "attack_artifacts").rglob("*.pt"))
+
+    assert sync_artifacts
+    assert async_artifacts
     assert sync_summary["test"]["mse"] == pytest.approx(async_summary["test"]["mse"])
     assert sync_summary["attack_overall_avg_mse"] == pytest.approx(async_summary["attack_overall_avg_mse"])
     assert sync_summary["attack_success_rate"] == pytest.approx(async_summary["attack_success_rate"])
@@ -576,3 +551,147 @@ def test_round_attack_payload_includes_explicit_round_index():
     payload = _round_attack_payload(round_result, round_result.attacks)
 
     assert payload["attack/round_index"] == 3.0
+
+
+class _DummyLoader:
+    def __init__(self, size: int = 1):
+        self.dataset = [0] * size
+
+
+
+def test_centralized_run_restores_best_validation_checkpoint(tmp_path, monkeypatch):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "training.epochs=2",
+            "training.patience=10",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    val_loader = object()
+    test_loader = object()
+    model = torch.nn.Linear(1, 1, bias=False)
+
+    monkeypatch.setattr(
+        algorithms_module,
+        "build_federated_loaders",
+        lambda _config: ({"client_a": _DummyLoader()}, val_loader, test_loader),
+    )
+    monkeypatch.setattr(algorithms_module, "build_model", lambda _config: model)
+
+    epoch_state = {"count": 0}
+
+    def fake_train_one_epoch(model, loader, optimizer, device):
+        epoch_state["count"] += 1
+        with torch.no_grad():
+            model.weight.fill_(float(epoch_state["count"]))
+        return float(epoch_state["count"])
+
+    def fake_evaluate(model, loader, device):
+        weight = float(model.weight.item())
+        if loader is val_loader:
+            mse = 0.1 if weight == 1.0 else 0.2
+            return {"mse": mse, "mae": weight, "mape": weight}
+        if loader is test_loader:
+            mse = 10.0 if weight == 1.0 else 20.0
+            return {"mse": mse, "mae": mse / 10.0, "mape": mse / 5.0}
+        raise AssertionError("unexpected loader")
+
+    monkeypatch.setattr(algorithms_module, "train_one_epoch", fake_train_one_epoch)
+    monkeypatch.setattr(algorithms_module, "evaluate", fake_evaluate)
+
+    result = run_centralized(config)
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    saved_state = torch.load(tmp_path / "centralized_model.pt", map_location="cpu")
+
+    assert result["mse"] == 10.0
+    assert summary["best_epoch"] == 0
+    assert summary["best_val_mse"] == 0.1
+    assert summary["test_checkpoint"] == "best_validation"
+    assert metrics["best_epoch"] == 0
+    assert metrics["best_val"]["mse"] == 0.1
+    assert float(saved_state["weight"].item()) == pytest.approx(1.0)
+
+
+
+def test_federated_run_restores_best_validation_checkpoint(tmp_path, monkeypatch):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=fedavg",
+            "federated.rounds=2",
+            "training.patience=10",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    val_loader = object()
+    test_loader = object()
+
+    monkeypatch.setattr(
+        algorithms_module,
+        "build_federated_loaders",
+        lambda _config: (
+            {"Nd2O3": _DummyLoader(), "CeO2": _DummyLoader(), "La2O3": _DummyLoader()},
+            val_loader,
+            test_loader,
+        ),
+    )
+    def _build_zero_model(_config):
+        model = torch.nn.Linear(1, 1, bias=False)
+        with torch.no_grad():
+            model.weight.zero_()
+        return model
+
+    monkeypatch.setattr(server_module, "build_model", _build_zero_model)
+
+    def fake_client_train(self, global_state, compressed=False, round_index=0):
+        update = type(global_state)((name, torch.ones_like(tensor)) for name, tensor in global_state.items())
+        return client_module.ClientResult(
+            client_id=self.client_id,
+            num_samples=len(self.train_loader.dataset),
+            loss=float(round_index + 1),
+            state=update,
+            dense_bytes=4,
+            dense_parameters=1,
+            download_bytes=4,
+            download_parameters=1,
+            parameter_download_bytes=4,
+            parameter_download_parameters=1,
+            dense_download_reference_bytes=4,
+            dense_download_reference_parameters=1,
+            upload_bytes=4,
+            upload_parameters=1,
+            parameter_upload_bytes=4,
+            parameter_upload_parameters=1,
+            transport_download_bytes=4,
+            transport_upload_bytes=4,
+        )
+
+    def fake_evaluate(model, loader, device):
+        weight = float(model.weight.item())
+        if loader is val_loader:
+            mse = 0.1 if weight == 1.0 else 0.2
+            return {"mse": mse, "mae": weight, "mape": weight}
+        if loader is test_loader:
+            mse = 10.0 if weight == 1.0 else 20.0
+            return {"mse": mse, "mae": mse / 10.0, "mape": mse / 5.0}
+        raise AssertionError("unexpected loader")
+
+    monkeypatch.setattr(client_module.FederatedClient, "train", fake_client_train)
+    monkeypatch.setattr(server_module, "evaluate", fake_evaluate)
+
+    summary = run_federated(config)
+    saved_state = torch.load(tmp_path / "model.pt", map_location="cpu")
+    persisted_summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+
+    assert summary["test"]["mse"] == 10.0
+    assert persisted_summary["best_round"] == 0
+    assert persisted_summary["best_val_mse"] == 0.1
+    assert persisted_summary["test_checkpoint"] == "best_validation"
+    assert float(saved_state["weight"].item()) == pytest.approx(1.0)

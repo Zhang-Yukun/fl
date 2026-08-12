@@ -9,7 +9,6 @@ from typing import Any
 import torch
 
 from federated_ts.modeling.forecasting import build_model
-from federated_ts.utils.peft import is_fedpetuning, serialize_trainable_state, subset_state
 from federated_ts.utils.serialization import (
     SparseUpdate,
     StateDict,
@@ -116,31 +115,6 @@ class FederatedClient:
         local_state = serialize_model(model)
         dense_bytes = state_num_bytes(local_state)
         dense_parameters = state_num_parameters(local_state)
-        if is_fedpetuning(self.config):
-            trainable_state = serialize_trainable_state(model)
-            global_trainable_state = subset_state(global_state, trainable_state.keys())
-            return ClientResult(
-                client_id=self.client_id,
-                num_samples=len(self.train_loader.dataset),
-                loss=float(sum(losses) / len(losses)),
-                state=trainable_state,
-                dense_bytes=dense_bytes,
-                dense_parameters=dense_parameters,
-                download_bytes=state_num_bytes(global_trainable_state),
-                download_parameters=state_num_parameters(global_trainable_state),
-                parameter_download_bytes=state_num_bytes(global_trainable_state),
-                parameter_download_parameters=state_num_parameters(global_trainable_state),
-                dense_download_reference_bytes=state_num_bytes(global_trainable_state),
-                dense_download_reference_parameters=state_num_parameters(global_trainable_state),
-                upload_bytes=state_num_bytes(trainable_state),
-                upload_parameters=state_num_parameters(trainable_state),
-                parameter_upload_bytes=state_num_bytes(trainable_state),
-                parameter_upload_parameters=state_num_parameters(trainable_state),
-                transport_download_bytes=state_num_bytes(global_trainable_state),
-                transport_upload_bytes=state_num_bytes(trainable_state),
-                payload_kind="fedpetuning_trainable_state",
-                compressor="trainable_subset",
-            )
         common = dict(
             client_id=self.client_id,
             num_samples=len(self.train_loader.dataset),
