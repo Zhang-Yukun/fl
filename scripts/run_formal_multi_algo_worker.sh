@@ -17,6 +17,7 @@ SUITE_TAG="${SUITE_TAG:-formal300_sgd}"
 TRAIN_LR="${TRAIN_LR:-0.001}"
 ATTACK_LR="${ATTACK_LR:-0.02}"
 ATTACK_STEPS="${ATTACK_STEPS:-200}"
+PATIENCE="$((ROUNDS + 1))"
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${WORKER_KIND}] $*"
@@ -86,7 +87,7 @@ attack.local_lr=%s
 attack.device=%s
 --override
 attack.frequency_rounds=%s
-' "${RUNTIME_DEVICE}" "${TRAIN_LR}" "${ROUNDS}" "${ATTACK_STEPS}" "${ATTACK_LR}" "${TRAIN_LR}" "${RUNTIME_DEVICE}" "${ATTACK_FREQUENCY}"
+' "${RUNTIME_DEVICE}" "${TRAIN_LR}" "${PATIENCE}" "${ATTACK_STEPS}" "${ATTACK_LR}" "${TRAIN_LR}" "${RUNTIME_DEVICE}" "${ATTACK_FREQUENCY}"
 }
 
 run_single() {
@@ -119,7 +120,7 @@ run_centralized() {
   while IFS= read -r line; do
     cmd+=("${line}")
   done < <(tracking_args "${short_name}")
-  cmd+=(--override "runtime.seed=2026" --override "runtime.deterministic=true" --override "runtime.num_threads=1" --override "runtime.num_interop_threads=1" --override "runtime.device=${RUNTIME_DEVICE}" --override "training.optimizer=sgd" --override "training.lr=${TRAIN_LR}" --override "training.momentum=0.0" --override "training.weight_decay=0.0" --override "training.epochs=${ROUNDS}" --override "training.patience=${ROUNDS}" --override "training.min_delta=0.0")
+  cmd+=(--override "runtime.seed=2026" --override "runtime.deterministic=true" --override "runtime.num_threads=1" --override "runtime.num_interop_threads=1" --override "runtime.device=${RUNTIME_DEVICE}" --override "training.optimizer=sgd" --override "training.lr=${TRAIN_LR}" --override "training.momentum=0.0" --override "training.weight_decay=0.0" --override "training.epochs=${ROUNDS}" --override "training.patience=${PATIENCE}" --override "training.min_delta=0.0")
   cmd+=("$@")
   CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${cmd[@]}"
   log "finished ${name}"
