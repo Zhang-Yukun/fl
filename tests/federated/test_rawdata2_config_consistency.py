@@ -15,9 +15,10 @@ def test_rawdata2_training_lengths_are_consistent():
     dp_topk = load_config(CONFIG_DIR / "rawdata2_dp_topk.yaml")
     topk = load_config(CONFIG_DIR / "rawdata2_fedlab_topk.yaml")
     soteriafl = load_config(CONFIG_DIR / "rawdata2_soteriafl.yaml")
+    randomk = load_config(CONFIG_DIR / "rawdata2_randomk.yaml")
 
     assert base["training"]["epochs"] == 500
-    for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl):
+    for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl, randomk):
         assert config["federated"]["rounds"] == 500
         assert config["federated"]["local_epochs"] == 1
 
@@ -30,9 +31,11 @@ def test_shared_configs_do_not_define_compression_only_parameters():
     dp_topk = load_config(CONFIG_DIR / "rawdata2_dp_topk.yaml")
     topk = load_config(CONFIG_DIR / "rawdata2_fedlab_topk.yaml")
     soteriafl = load_config(CONFIG_DIR / "rawdata2_soteriafl.yaml")
+    randomk = load_config(CONFIG_DIR / "rawdata2_randomk.yaml")
 
     assert "topk_fraction" not in base["federated"]
     assert "topk_fraction" not in default["federated"]
     assert dp_topk["federated"]["topk_fraction"] == 0.50
     assert topk["federated"]["topk_fraction"] == 0.10
     assert soteriafl["federated"]["topk_fraction"] == 0.10
+    assert randomk["federated"]["topk_fraction"] == 0.10

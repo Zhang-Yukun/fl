@@ -87,6 +87,19 @@ class FederatedClient:
         generator.manual_seed(int(seed) + round_index * 1000 + offset)
         return generator
 
+    def _randomk_generator(self, round_index: int) -> torch.Generator | None:
+        """Create a deterministic per-client generator for random-k sparsification."""
+
+        seed = self.config.get("federated", {}).get("randomk_seed")
+        if seed is None:
+            seed = self.config.get("runtime", {}).get("seed")
+        if seed is None:
+            return None
+        offset = sum(ord(char) for char in self.client_id)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(seed) + round_index * 2000 + offset)
+        return generator
+
     def _evaluation_result_kwargs(self, local_state: StateDict, global_state: StateDict) -> dict[str, Any]:
         """Return optional evaluation payloads used only by oracle evaluation mode."""
 
@@ -182,13 +195,17 @@ class FederatedClient:
                 privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.1))
                 update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
                 if algorithm == "soteriafl":
-                    sparse = compress_randomk(update, fraction)
+                    sparse = compress_randomk(update, fraction, generator=self._randomk_generator(round_index))
                     payload_kind = "soteriafl_randomk_dp_update"
                     compressor = "randomk_unbiased"
                 else:
                     sparse = compress_topk(update, fraction)
                     payload_kind = "dp_topk_dp_update"
                     compressor = "topk_dp"
+            elif algorithm == "randomk_fedavg":
+                sparse = compress_randomk(update, fraction, generator=self._randomk_generator(round_index))
+                payload_kind = "randomk_update"
+                compressor = "randomk_unbiased"
             else:
                 sparse = compress_topk(update, fraction)
             return ClientResult(

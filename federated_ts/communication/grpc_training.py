@@ -127,6 +127,7 @@ class GrpcFederatedCoordinator:
             'sparse_fedavg',
             'dp_topk_fedavg',
             'soteriafl',
+            'randomk_fedavg',
         }
         self.max_rounds = int(config['federated'].get('rounds', 20))
         self.stopper = EarlyStopper(

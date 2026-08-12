@@ -116,7 +116,7 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
     if algorithm in {"fedavg", "fedaware", "secure_quantized_fedavg", "adaptive_clipped_rdp_fedavg"}:
         return False
-    if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl", "dp_topk_fedavg"}:
+    if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl", "dp_topk_fedavg", "randomk_fedavg"}:
         return True
     raise ValueError(f"Unknown federated algorithm: {algorithm}")
 
@@ -422,12 +422,12 @@ def _protect_attack_gradients(
                 rounded = torch.round(normalized)
             flat = torch.clamp(rounded, -127.0, 127.0).to(torch.int8).to(torch.float32) * scale
 
-    if algorithm in {"compressed_fedavg", "sparse_fedavg", "dp_topk_fedavg", "soteriafl"}:
+    if algorithm in {"compressed_fedavg", "sparse_fedavg", "dp_topk_fedavg", "soteriafl", "randomk_fedavg"}:
         fraction = float(config.get("federated", {}).get("topk_fraction", 0.05))
         total = flat.numel()
         k = max(1, int(total * fraction))
         sparse = torch.zeros_like(flat)
-        if algorithm == "soteriafl":
+        if algorithm in {"soteriafl", "randomk_fedavg"}:
             indices = torch.randperm(total, generator=generator)[:k]
             sparse[indices] = flat[indices] * (float(total) / float(k))
         else:

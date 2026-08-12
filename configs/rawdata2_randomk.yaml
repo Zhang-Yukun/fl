@@ -1,0 +1,12 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_randomk
+  output_dir: outputs/rawdata2_randomk
+
+federated:
+  algorithm: randomk_fedavg
+  rounds: 500
+  local_epochs: 1
+  topk_fraction: 0.10
+  randomk_seed: 2026

@@ -292,6 +292,28 @@ def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
     assert not torch.equal(target["weight"], oracle_update["weight"])
 
 
+def test_randomk_fedavg_uses_unbiased_sparse_payloads(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=randomk_fedavg",
+            "federated.rounds=1",
+            "federated.topk_fraction=0.25",
+            "federated.randomk_seed=2026",
+            "attack.enabled=false",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    clients = metrics[0]["clients"]
+
+    assert result["last_upload_compression_ratio"] > 1.0
+    assert all(client["payload_kind"] == "randomk_update" for client in clients)
+    assert all(client["compressor"] == "randomk_unbiased" for client in clients)
+    assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
+
+
 def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
