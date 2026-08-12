@@ -824,6 +824,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     max_rounds = int(config["federated"].get("rounds", 20))
     attack_manager = AsyncAttackManager(config, tracker)
     best_global_state = _clone_state(server.global_state)
+    best_oracle_state = None if not server._uses_oracle_evaluation() else _clone_state(server.oracle_global_state)
     best_metrics = {"mse": float("inf"), "mae": float("inf"), "mape": float("inf")}
     best_round = -1
     for round_index in range(max_rounds):
@@ -831,11 +832,13 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         round_base_state = _clone_state(server.global_state)
         results = [client.train(round_base_state, compressed=compressed, round_index=round_index) for client in clients]
         if compressed:
-            aggregation_weights = server.aggregate_sparse(results)
+            aggregation_weights = server.aggregate_sparse(results, round_base_state=round_base_state)
         else:
-            aggregation_weights = server.aggregate_dense(results, round_index=round_index)
+            aggregation_weights = server.aggregate_dense(results, round_index=round_index, round_base_state=round_base_state)
         metrics = server.evaluate_global()
-        best_global_state, best_metrics, best_round, _ = _update_best_checkpoint(
+        protocol_metrics = server.evaluate_protocol() if server._uses_oracle_evaluation() else metrics
+        oracle_metrics = server.evaluate_oracle() if server._uses_oracle_evaluation() else None
+        best_global_state, best_metrics, best_round, improved = _update_best_checkpoint(
             best_state=best_global_state,
             best_metrics=best_metrics,
             best_index=best_round,
@@ -844,6 +847,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             candidate_index=round_index,
             label="round",
         )
+        if improved and server._uses_oracle_evaluation():
+            best_oracle_state = _clone_state(server.oracle_global_state)
         record = server.record_round(
             round_index,
             results,
@@ -851,6 +856,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             metrics,
             round_time_seconds=time.perf_counter() - round_start,
             elapsed_time_seconds=time.perf_counter() - start_time,
+            protocol_metrics=protocol_metrics,
+            oracle_metrics=oracle_metrics,
         )
         tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(server.history)}, step=round_index)
         attack_task = _build_attack_round_task(
@@ -867,8 +874,12 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             logger.info("Early stopping at round {}", round_index)
             break
     server.global_state = _clone_state(best_global_state)
+    if server._uses_oracle_evaluation() and best_oracle_state is not None:
+        server.oracle_global_state = _clone_state(best_oracle_state)
     logger.info("Restored best federated checkpoint from round {} for final test", best_round)
     test_metrics = server.test_global()
+    protocol_test_metrics = server.test_protocol() if server._uses_oracle_evaluation() else test_metrics
+    oracle_test_metrics = server.test_oracle() if server._uses_oracle_evaluation() else None
     attack_manager.finalize()
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
@@ -883,6 +894,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     last_privacy = server.history[-1] if server.history else None
     summary = {
         "test": test_metrics,
+        "evaluation_mode": server.evaluation_mode,
+        "protocol_test": protocol_test_metrics,
+        "oracle_test": oracle_test_metrics,
         "rounds": len(server.history),
         "total_time_seconds": total_elapsed,
         "best_round": best_round,

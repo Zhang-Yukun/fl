@@ -12,7 +12,7 @@ from federated_ts.datasets.rare_earth import build_federated_loaders
 from federated_ts.engine.training import train_n_steps
 from federated_ts.federated.client import FederatedClient
 from federated_ts.modeling.forecasting import build_model
-from federated_ts.utils.serialization import serialize_model
+from federated_ts.utils.serialization import compress_topk, serialize_model
 
 from federated_ts.federated.algorithms import (
     AsyncAttackManager,
@@ -224,6 +224,53 @@ def test_federated_run_supports_legacy_gradient_attacks(tmp_path):
     assert result["attack_target_type"] == "gradient"
 
 
+def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
+    config = {
+        "federated": {"algorithm": "compressed_fedavg"},
+        "attack": {
+            "enabled": True,
+            "target_type": "update_payload",
+            "frequency_rounds": 1,
+            "max_samples": 1,
+            "sample_count": 1,
+            "client_selection": "all",
+        },
+    }
+    protocol_update = serialize_model(torch.nn.Linear(2, 1, bias=False))
+    protocol_update["weight"] = torch.tensor([[0.0, 2.0]])
+    oracle_update = serialize_model(torch.nn.Linear(2, 1, bias=False))
+    oracle_update["weight"] = torch.tensor([[9.0, 9.0]])
+    result = client_module.ClientResult(
+        client_id="Nd2O3",
+        num_samples=1,
+        loss=0.0,
+        sparse_update=compress_topk(protocol_update, 0.5),
+        evaluation_update=oracle_update,
+        payload_kind="sparse_update",
+    )
+    client = SimpleNamespace(
+        client_id="Nd2O3",
+        sample_batch=lambda max_samples=None, batch_index=0: (torch.zeros(1, 2, 1), torch.zeros(1, 1, 1)),
+        train_reference_inputs=lambda: torch.zeros(1, 2, 1),
+    )
+
+    task = algorithms_module._build_attack_round_task(
+        config,
+        [client],
+        [result],
+        round_index=0,
+        max_rounds=1,
+        round_base_state=serialize_model(torch.nn.Linear(2, 1, bias=False)),
+        attack_target_type="update_payload",
+    )
+
+    assert task is not None
+    target = task.samples[0].target
+    assert isinstance(target, dict)
+    assert torch.equal(target["weight"], torch.tensor([[0.0, 2.0]]))
+    assert not torch.equal(target["weight"], oracle_update["weight"])
+
+
 def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
@@ -298,6 +345,95 @@ def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
     assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
     assert all(client["parameter_upload_bytes"] == client["upload_bytes"] for client in clients)
     assert all(client["parameter_download_bytes"] == client["download_bytes"] for client in clients)
+
+
+def test_oracle_evaluation_separates_protocol_metrics_from_dense_reference_updates(tmp_path, monkeypatch):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.algorithm=compressed_fedavg",
+            "federated.rounds=1",
+            "federated.topk_fraction=0.5",
+            "evaluation.mode=oracle_full_update",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    val_loader = object()
+    test_loader = object()
+
+    def _build_linear(_config):
+        model = torch.nn.Linear(2, 1, bias=False)
+        with torch.no_grad():
+            model.weight.zero_()
+        return model
+
+    class _StaticLoader:
+        def __init__(self):
+            self.dataset = [(torch.zeros(1, 2, 1), torch.zeros(1, 1, 1))]
+
+        def __iter__(self):
+            return iter(self.dataset)
+
+    monkeypatch.setattr(algorithms_module, "build_model", _build_linear)
+    monkeypatch.setattr(server_module, "build_model", _build_linear)
+    monkeypatch.setattr(
+        algorithms_module,
+        "build_federated_loaders",
+        lambda _config: ({"Nd2O3": _StaticLoader(), "CeO2": _StaticLoader(), "La2O3": _StaticLoader()}, val_loader, test_loader),
+    )
+
+    dense_update = serialize_model(_build_linear(config))
+    dense_update["weight"] = torch.tensor([[1.0, 2.0]])
+
+    def fake_train(self, global_state, compressed=False, round_index=0):
+        return client_module.ClientResult(
+            client_id=self.client_id,
+            num_samples=1,
+            loss=0.0,
+            sparse_update=compress_topk(dense_update, 0.5),
+            evaluation_update=dense_update,
+            dense_bytes=8,
+            dense_parameters=2,
+            download_bytes=8,
+            download_parameters=2,
+            parameter_download_bytes=8,
+            parameter_download_parameters=2,
+            dense_download_reference_bytes=8,
+            dense_download_reference_parameters=2,
+            upload_bytes=4,
+            upload_parameters=1,
+            parameter_upload_bytes=4,
+            parameter_upload_parameters=1,
+            transport_download_bytes=8,
+            transport_upload_bytes=4,
+            payload_kind="sparse_update",
+            compressor="topk",
+        )
+
+    def fake_evaluate(model, loader, device):
+        weight = model.weight.detach().cpu().clone()
+        first = float(weight[0, 0].item())
+        second = float(weight[0, 1].item())
+        mse = (1.0 - first) ** 2 + (2.0 - second) ** 2
+        return {"mse": mse, "mae": abs(1.0 - first) + abs(2.0 - second), "mape": mse}
+
+    monkeypatch.setattr(client_module.FederatedClient, "train", fake_train)
+    monkeypatch.setattr(algorithms_module, "evaluate", fake_evaluate)
+    monkeypatch.setattr(server_module, "evaluate", fake_evaluate)
+
+    summary = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+
+    assert summary["evaluation_mode"] == "oracle_full_update"
+    assert summary["test"]["mse"] == pytest.approx(0.0)
+    assert summary["protocol_test"]["mse"] > 0.0
+    assert summary["oracle_test"]["mse"] == pytest.approx(0.0)
+    assert metrics[0]["protocol_val_mse"] > 0.0
+    assert metrics[0]["oracle_val_mse"] == pytest.approx(0.0)
+    assert (tmp_path / "oracle_model.pt").exists()
 
 
 def test_dp_topk_uses_sparse_dp_topk_payloads(tmp_path):

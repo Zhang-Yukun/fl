@@ -36,6 +36,12 @@ from federated_ts.utils.privacy_accounting import (
 )
 
 
+def _clone_state_dict(state: StateDict) -> StateDict:
+    """Return a detached CPU clone of a serialized state dict."""
+
+    return type(state)((name, tensor.detach().cpu().clone()) for name, tensor in state.items())
+
+
 def _format_num_bytes(num_bytes: int) -> str:
     """Format raw bytes into a compact human-readable string."""
 
@@ -129,6 +135,13 @@ class RoundRecord:
     adaptive_clip_median_norm: float | None = None
     adaptive_reference_clip_norm: float | None = None
     adaptive_noise_std: float | None = None
+    evaluation_mode: str = "protocol"
+    protocol_val_mse: float | None = None
+    protocol_val_mae: float | None = None
+    protocol_val_mape: float | None = None
+    oracle_val_mse: float | None = None
+    oracle_val_mae: float | None = None
+    oracle_val_mape: float | None = None
     clients: list[ClientCommunicationRecord] = field(default_factory=list)
 
 
@@ -169,12 +182,16 @@ class FederatedServer:
     history: list[RoundRecord] = field(default_factory=list)
     adaptive_accountant: AdaptiveClippedRdpAccountant | None = field(init=False, default=None)
     last_privacy_step: AdaptiveRdpStep | None = field(init=False, default=None)
+    oracle_global_state: StateDict | None = field(init=False, default=None)
+    evaluation_mode: str = field(init=False, default="protocol")
 
     def __post_init__(self) -> None:
         """Build the initial global model after dataclass initialization."""
 
         self.model = build_model(self.config).to(self.device)
         self.global_state = serialize_model(self.model)
+        self.oracle_global_state = _clone_state_dict(self.global_state)
+        self.evaluation_mode = str(self.config.get("evaluation", {}).get("mode", "protocol")).lower()
         adaptive_cfg = self.config.get("adaptive_clipped_rdp", {})
         if str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower() == "adaptive_clipped_rdp_fedavg":
             self.adaptive_accountant = AdaptiveClippedRdpAccountant(
@@ -188,6 +205,24 @@ class FederatedServer:
             state_num_bytes(self.global_state),
         )
 
+    def _uses_oracle_evaluation(self) -> bool:
+        """Return whether validation/test should use oracle full updates."""
+
+        return self.evaluation_mode == "oracle_full_update"
+
+    def _update_oracle_evaluation_state(self, round_base_state: StateDict, results, sample_weights: list[int]) -> None:
+        """Build a server-side oracle evaluation state from full dense client updates."""
+
+        if not self._uses_oracle_evaluation():
+            self.oracle_global_state = _clone_state_dict(self.global_state)
+            return
+        evaluation_updates = [result.evaluation_update for result in results]
+        if any(update is None for update in evaluation_updates):
+            self.oracle_global_state = _clone_state_dict(self.global_state)
+            return
+        averaged_update = average_states(evaluation_updates, sample_weights)
+        self.oracle_global_state = add_update(round_base_state, averaged_update)
+
     def _adaptive_noise_generator(self, round_index: int) -> torch.Generator | None:
         """Create a deterministic server-side generator for adaptive DP noise."""
 
@@ -200,7 +235,7 @@ class FederatedServer:
         generator.manual_seed(int(seed) + int(round_index) * 1009)
         return generator
 
-    def _aggregate_adaptive_clipped_rdp(self, results, round_index: int) -> list[float]:
+    def _aggregate_adaptive_clipped_rdp(self, results, round_index: int, round_base_state: StateDict) -> list[float]:
         """Aggregate raw client updates with adaptive server-side clipping and RDP accounting."""
 
         adaptive_cfg = self.config.get("adaptive_clipped_rdp", {})
@@ -225,6 +260,7 @@ class FederatedServer:
             generator=self._adaptive_noise_generator(round_index),
         )
         self.global_state = add_update(self.global_state, noisy_update)
+        self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
         total_clients = int(adaptive_cfg.get("total_clients", len(results)))
         sampling_rate = float(len(results)) / float(max(total_clients, 1))
         if self.adaptive_accountant is not None:
@@ -238,11 +274,13 @@ class FederatedServer:
             )
         return weights
 
-    def aggregate_dense(self, results, round_index: int = 0) -> list[float]:
+    def aggregate_dense(self, results, round_index: int = 0, round_base_state: StateDict | None = None) -> list[float]:
         """Aggregate dense client payloads for FedAvg-style methods."""
 
         algorithm = str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower()
         sample_weights = [result.num_samples for result in results]
+        if round_base_state is None:
+            round_base_state = _clone_state_dict(self.global_state)
         if algorithm == "fedaware":
             aware_cfg = self.config.get("fedaware", {})
             updates = [result.state for result in results]
@@ -260,6 +298,7 @@ class FederatedServer:
                     (name, averaged_update[name] + scaled[name]) for name in scaled
                 )
             self.global_state = add_update(self.global_state, averaged_update)
+            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
             return weights
         if algorithm == "secure_quantized_fedavg":
             weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
@@ -268,17 +307,21 @@ class FederatedServer:
             quantization_dtype = str(self.config.get("federated", {}).get("quantization_dtype", "float16"))
             compressed_base = dequantize_state_update(quantize_state_update(self.global_state, dtype=quantization_dtype))
             self.global_state = add_update(compressed_base, averaged_update)
+            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
             return weights
         if algorithm == "adaptive_clipped_rdp_fedavg":
-            return self._aggregate_adaptive_clipped_rdp(results, round_index)
+            return self._aggregate_adaptive_clipped_rdp(results, round_index, round_base_state)
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         averaged_update = average_states([result.state for result in results], sample_weights)
         self.global_state = add_update(self.global_state, averaged_update)
+        self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
         return weights
 
-    def aggregate_sparse(self, results) -> list[float]:
+    def aggregate_sparse(self, results, round_base_state: StateDict | None = None) -> list[float]:
         """Aggregate sparse client updates for compressed FedAvg."""
 
+        if round_base_state is None:
+            round_base_state = _clone_state_dict(self.global_state)
         weights = [result.num_samples for result in results]
         total = float(sum(weights))
         update = None
@@ -287,19 +330,48 @@ class FederatedServer:
             scaled = {name: tensor * (weight / total) for name, tensor in dense.items()}
             update = scaled if update is None else {name: update[name] + scaled[name] for name in scaled}
         self.global_state = add_update(self.global_state, update)
+        self._update_oracle_evaluation_state(round_base_state, results, weights)
         return [weight / total for weight in weights]
 
-    def evaluate_global(self) -> dict[str, float]:
-        """Evaluate the current global model on the server validation set."""
+    def evaluate_protocol(self) -> dict[str, float]:
+        """Evaluate the protocol-visible global model on the validation set."""
 
         self.model.load_state_dict(self.global_state)
         return evaluate(self.model, self.val_loader, self.device)
 
-    def test_global(self) -> dict[str, float]:
-        """Evaluate the current global model on the server test set."""
+    def evaluate_oracle(self) -> dict[str, float]:
+        """Evaluate the oracle full-update model on the validation set."""
+
+        state = self.oracle_global_state if self.oracle_global_state is not None else self.global_state
+        self.model.load_state_dict(state)
+        return evaluate(self.model, self.val_loader, self.device)
+
+    def evaluate_global(self) -> dict[str, float]:
+        """Evaluate the active validation state according to the configured mode."""
+
+        if self._uses_oracle_evaluation():
+            return self.evaluate_oracle()
+        return self.evaluate_protocol()
+
+    def test_protocol(self) -> dict[str, float]:
+        """Evaluate the protocol-visible global model on the test set."""
 
         self.model.load_state_dict(self.global_state)
         return evaluate(self.model, self.test_loader, self.device)
+
+    def test_oracle(self) -> dict[str, float]:
+        """Evaluate the oracle full-update model on the test set."""
+
+        state = self.oracle_global_state if self.oracle_global_state is not None else self.global_state
+        self.model.load_state_dict(state)
+        return evaluate(self.model, self.test_loader, self.device)
+
+    def test_global(self) -> dict[str, float]:
+        """Evaluate the active test state according to the configured mode."""
+
+        if self._uses_oracle_evaluation():
+            return self.test_oracle()
+        return self.test_protocol()
 
     def record_round(
         self,
@@ -309,6 +381,8 @@ class FederatedServer:
         metrics: dict[str, float],
         round_time_seconds: float,
         elapsed_time_seconds: float,
+        protocol_metrics: dict[str, float] | None = None,
+        oracle_metrics: dict[str, float] | None = None,
     ) -> RoundRecord:
         """Create and log a round record with communication metadata.
 
@@ -369,6 +443,7 @@ class FederatedServer:
             )
             for result, aggregation_weight in zip(results, aggregation_weights)
         ]
+        protocol_metrics = metrics if protocol_metrics is None else protocol_metrics
         record = RoundRecord(
             round=round_index,
             algorithm=str(self.config.get("federated", {}).get("algorithm", "fedavg")),
@@ -414,6 +489,13 @@ class FederatedServer:
             adaptive_clip_median_norm=None if self.last_privacy_step is None else self.last_privacy_step.median_update_norm,
             adaptive_reference_clip_norm=None if self.last_privacy_step is None else self.last_privacy_step.reference_clip_norm,
             adaptive_noise_std=None if self.last_privacy_step is None else self.last_privacy_step.noise_std,
+            evaluation_mode=self.evaluation_mode,
+            protocol_val_mse=protocol_metrics.get("mse"),
+            protocol_val_mae=protocol_metrics.get("mae"),
+            protocol_val_mape=protocol_metrics.get("mape"),
+            oracle_val_mse=None if oracle_metrics is None else oracle_metrics.get("mse"),
+            oracle_val_mae=None if oracle_metrics is None else oracle_metrics.get("mae"),
+            oracle_val_mape=None if oracle_metrics is None else oracle_metrics.get("mape"),
             clients=client_records,
         )
         self.history.append(record)
@@ -500,6 +582,8 @@ class FederatedServer:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.global_state, output_dir / "model.pt")
+        if self._uses_oracle_evaluation() and self.oracle_global_state is not None:
+            torch.save(self.oracle_global_state, output_dir / "oracle_model.pt")
         config_formats = config.get("artifacts", {}).get("config_formats")
         saved_configs = save_experiment_config(config, output_dir, config_formats)
         logger.info("Saved experiment config artifacts: {}", [str(path) for path in saved_configs])
