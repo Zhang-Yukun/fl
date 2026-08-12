@@ -382,6 +382,28 @@ def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
     assert all(client["parameter_download_bytes"] == client["download_bytes"] for client in clients)
 
 
+def test_qsgd_fedavg_uses_stochastic_multilevel_quantization(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=qsgd_fedavg",
+            "federated.rounds=1",
+            "federated.qsgd_levels=31",
+            "federated.quantization_seed=2026",
+            "attack.enabled=false",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    clients = metrics[0]["clients"]
+
+    assert result["last_upload_compression_ratio"] > 1.5
+    assert all(client["payload_kind"] == "qsgd_update" for client in clients)
+    assert all(client["compressor"] == "qsgd_31_levels" for client in clients)
+    assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
+
+
 def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",

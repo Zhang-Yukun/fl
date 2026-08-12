@@ -19,6 +19,7 @@ from federated_ts.utils.serialization import (
     add_update,
     average_states,
     decompress_topk,
+    dequantize_qsgd_state_update,
     dequantize_state_update,
     quantize_state_update,
     serialize_model,
@@ -320,6 +321,14 @@ class FederatedServer:
         if algorithm == "sign_fedavg":
             weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
             dense_updates = [dequantize_state_update(result.state) for result in results]
+            averaged_update = average_states(dense_updates, sample_weights)
+            self.global_state = add_update(self.global_state, averaged_update)
+            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
+            return weights
+        if algorithm == "qsgd_fedavg":
+            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
+            levels = int(self.config.get("federated", {}).get("qsgd_levels", 127))
+            dense_updates = [dequantize_qsgd_state_update(result.state, levels=levels) for result in results]
             averaged_update = average_states(dense_updates, sample_weights)
             self.global_state = add_update(self.global_state, averaged_update)
             self._update_oracle_evaluation_state(round_base_state, results, sample_weights)

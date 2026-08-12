@@ -312,3 +312,46 @@ def privatize_sparse_update(sparse: SparseUpdate, clip_norm: float, noise_multip
     if noise_multiplier > 0 and clip_norm > 0:
         values = values + torch.randn_like(values) * (noise_multiplier * clip_norm)
     return SparseUpdate(sparse.names, sparse.shapes, sparse.indices.clone(), values, sparse.total_numel)
+
+
+def quantize_qsgd_state_update(
+    update: StateDict,
+    levels: int,
+    generator: torch.Generator | None = None,
+) -> StateDict:
+    """Quantize a dense update with QSGD-style stochastic level coding."""
+
+    if levels <= 0:
+        raise ValueError("levels must be positive")
+    quantized: StateDict = OrderedDict()
+    for name, tensor in update.items():
+        base = tensor.detach().cpu().clone().to(torch.float32)
+        norm = float(torch.linalg.vector_norm(base.reshape(-1)).item())
+        scale = max(norm, 1e-12)
+        scaled = torch.clamp(base.abs() / scale, 0.0, 1.0) * float(levels)
+        lower = torch.floor(scaled)
+        probability = scaled - lower
+        if generator is not None:
+            random = torch.rand(scaled.shape, generator=generator, dtype=torch.float32)
+        else:
+            random = torch.rand(scaled.shape, dtype=torch.float32)
+        bucket = torch.clamp(lower + (random < probability).to(torch.float32), 0.0, float(levels))
+        signed_bucket = bucket * torch.sign(base)
+        quantized[name] = signed_bucket.to(torch.int16)
+        quantized[f"{name}{QUANT_SCALE_SUFFIX}"] = torch.tensor(scale, dtype=torch.float32)
+    return quantized
+
+
+def dequantize_qsgd_state_update(update: StateDict, levels: int) -> StateDict:
+    """Restore a QSGD-style quantized update to float32 tensors."""
+
+    if levels <= 0:
+        raise ValueError("levels must be positive")
+    restored: StateDict = OrderedDict()
+    for name, tensor in update.items():
+        if name.endswith(QUANT_SCALE_SUFFIX):
+            continue
+        scale_name = f"{name}{QUANT_SCALE_SUFFIX}"
+        scale = float(update[scale_name].detach().cpu().item()) if scale_name in update else 1.0
+        restored[name] = tensor.detach().cpu().to(torch.float32) * (scale / float(levels))
+    return restored

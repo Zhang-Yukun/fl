@@ -1,0 +1,12 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_qsgd
+  output_dir: outputs/rawdata2_qsgd
+
+federated:
+  algorithm: qsgd_fedavg
+  rounds: 500
+  local_epochs: 1
+  qsgd_levels: 63
+  quantization_seed: 2026

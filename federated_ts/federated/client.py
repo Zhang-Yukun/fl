@@ -15,6 +15,7 @@ from federated_ts.utils.serialization import (
     compress_randomk,
     compress_topk,
     dequantize_state_update,
+    quantize_qsgd_state_update,
     quantize_state_update,
     load_serialized,
     privatize_state_update,
@@ -196,6 +197,26 @@ class FederatedClient:
                 transport_upload_bytes=state_num_bytes(quantized),
                 payload_kind="sign_update",
                 compressor="sign_mean_abs",
+            )
+        if algorithm == "qsgd_fedavg":
+            update = subtract_state(local_state, global_state)
+            levels = int(self.config.get("federated", {}).get("qsgd_levels", 127))
+            quantized = quantize_qsgd_state_update(
+                update,
+                levels=levels,
+                generator=self._upload_quantization_generator(round_index),
+            )
+            return ClientResult(
+                **common,
+                state=quantized,
+                **evaluation_kwargs,
+                upload_bytes=state_num_bytes(quantized),
+                upload_parameters=state_num_parameters(quantized),
+                parameter_upload_bytes=state_num_bytes(quantized),
+                parameter_upload_parameters=state_num_parameters(quantized),
+                transport_upload_bytes=state_num_bytes(quantized),
+                payload_kind="qsgd_update",
+                compressor=f"qsgd_{levels}_levels",
             )
         if compressed:
             update = subtract_state(local_state, global_state)
