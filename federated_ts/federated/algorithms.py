@@ -42,7 +42,7 @@ from federated_ts.utils.serialization import (
 )
 from federated_ts.federated.server import EarlyStopper, FederatedServer, RoundRecord
 from federated_ts.utils.tracking import Tracker
-from federated_ts.engine.training import evaluate, train_one_epoch
+from federated_ts.engine.training import evaluate, predict_first_batch, train_one_epoch
 
 
 def configure_torch_runtime(config: dict[str, Any]) -> None:
@@ -672,13 +672,14 @@ def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: l
     """Build per-round and cumulative attack metrics for tracking/logging."""
 
     round_attacks = round_result.attacks
+    overall_avg_mse = 0.0 if not cumulative_results else sum(result.mse for result in cumulative_results) / len(cumulative_results)
     payload: dict[str, float] = {
         "attack/round_index": float(round_result.round_index),
         "attack/time_seconds": round_result.time_seconds,
         "attack/evaluations_this_round": float(len(round_attacks)),
         "attack/clients_this_round": float(round_result.clients_this_round),
         "attack/samples_per_client": float(round_result.samples_per_client),
-        "attack/overall_avg_mse_so_far": sum(result.mse for result in cumulative_results) / len(cumulative_results),
+        "attack/overall_avg_mse_so_far": overall_avg_mse,
         "attack/success_rate_so_far": attack_success_rate(cumulative_results),
     }
     for name in sorted({result.name for result in round_attacks}):
@@ -687,7 +688,7 @@ def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: l
         payload[f"{prefix}/mse"] = sum(result.mse for result in subset) / len(subset)
         payload[f"{prefix}/reconstruction_mse"] = payload[f"{prefix}/mse"]
         cumulative_subset = [result for result in cumulative_results if result.name == name]
-        payload[f"{prefix}/avg_mse_so_far"] = sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
+        payload[f"{prefix}/avg_mse_so_far"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
         payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
         payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
         payload[f"{prefix}/iterations"] = float(subset[0].iterations)
@@ -791,6 +792,18 @@ class AsyncAttackManager:
             self.attack_results.extend(round_result.attacks)
             payload = _round_attack_payload(round_result, self.attack_results)
             self.tracker.log(payload, step=round_index)
+            seen_methods: set[str] = set()
+            if hasattr(self.tracker, "log_attack_reconstruction"):
+                for result in round_result.attacks:
+                    method = str(result.name)
+                    if method in seen_methods:
+                        continue
+                    seen_methods.add(method)
+                    self.tracker.log_attack_reconstruction(
+                        f"attack/{method}/reconstruction",
+                        result,
+                        step=round_index,
+                    )
             logger.info("Round {} attack metrics {}", round_index, payload)
 
     def finalize(self) -> None:
@@ -908,6 +921,11 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
         "run/best_val_mae": best_metrics["mae"],
         "run/best_val_mape": best_metrics["mape"],
     })
+    try:
+        prediction, target = predict_first_batch(model, test_loader, device)
+        tracker.log_prediction_plot("prediction/centralized/test", prediction, target, step=best_epoch, title="centralized test prediction")
+    except Exception as exc:
+        logger.debug("Skip centralized prediction plot: {}", exc)
     tracker.finish()
     with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(
@@ -1039,6 +1057,11 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
     tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
+    try:
+        prediction, target = predict_first_batch(server.model, test_loader, device)
+        tracker.log_prediction_plot("prediction/federated/test", prediction, target, step=best_round, title="federated test prediction")
+    except Exception as exc:
+        logger.debug("Skip federated prediction plot: {}", exc)
     attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)
     with (output_dir / "attack_results.json").open("w", encoding="utf-8") as handle:
         json.dump(attack_records, handle, ensure_ascii=False, indent=2)

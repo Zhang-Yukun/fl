@@ -94,6 +94,24 @@ def evaluate(model: nn.Module, loader: Iterable, device: torch.device) -> dict[s
     return {"mse": mse(pred, target), "mae": mae(pred, target), "mape": mape(pred, target)}
 
 
+@torch.no_grad()
+def predict_first_batch(
+    model: nn.Module,
+    loader: Iterable,
+    device: torch.device,
+    max_samples: int | None = 1,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return one prediction batch and its ground-truth target."""
+
+    model.eval()
+    x, y = next(iter(loader))
+    if max_samples is not None:
+        x = x[:max_samples]
+        y = y[:max_samples]
+    prediction = model(x.to(device)).cpu()
+    return prediction, y.cpu()
+
+
 def first_batch_sample(
     loader: Iterable,
     device: torch.device,
