@@ -1,0 +1,10 @@
+torch
+numpy
+pandas
+PyYAML
+loguru
+wandb==0.28.1
+grpcio
+einops
+reformer-pytorch
+matplotlib

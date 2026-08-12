@@ -1,0 +1,28 @@
+includes: rawdata2_adaptive_clipped_rdp_fedavg.yaml
+
+experiment:
+  name: rawdata2_adaptive_clipped_rdp_fedavg_deterministic
+  output_dir: outputs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic
+
+runtime:
+  seed: 2026
+  deterministic: true
+  num_threads: 1
+  num_interop_threads: 1
+
+data:
+  shuffle_train: false
+
+model:
+  dropout: 0.0
+
+attack:
+  seed: 2026
+  async_enabled: false
+
+tracking:
+  enabled: true
+  offline: true
+
+adaptive_clipped_rdp:
+  seed: 2026

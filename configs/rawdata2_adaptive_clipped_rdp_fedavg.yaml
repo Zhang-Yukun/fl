@@ -1,0 +1,22 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_adaptive_clipped_rdp_fedavg
+  mode: federated
+  output_dir: outputs/rawdata2_adaptive_clipped_rdp_fedavg
+
+federated:
+  algorithm: adaptive_clipped_rdp_fedavg
+  rounds: 500
+  local_epochs: 1
+
+adaptive_clipped_rdp:
+  noise_multiplier: 0.001
+  reference_clip_norm: 10.0
+  min_clip_norm: 0.1
+  max_clip_norm: 10.0
+  clip_factor: 1.2
+  rdp_alpha: 16.0
+  delta: 1.0e-5
+  total_clients: 3
+  seed: 2026
