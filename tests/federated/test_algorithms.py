@@ -170,6 +170,27 @@ def test_config_artifact_formats_are_configurable(tmp_path):
     assert (tmp_path / "config.toml").exists()
 
 
+def test_federated_run_saves_periodic_snapshot(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "artifacts.save_every_rounds=1",
+        ],
+    )
+    run_federated(config)
+
+    snapshot_dir = tmp_path / "snapshots" / "round_0001"
+    assert (snapshot_dir / "config.yaml").exists()
+    assert (snapshot_dir / "metrics.json").exists()
+    assert (snapshot_dir / "summary.json").exists()
+    assert (snapshot_dir / "model.pt").exists()
+    assert (snapshot_dir / "resume_state.pt").exists()
+
+
 def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",

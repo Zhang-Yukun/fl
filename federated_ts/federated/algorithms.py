@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - numpy is expected in the training env
     np = None
 from loguru import logger
 
-from federated_ts.utils.artifacts import save_experiment_config
+from federated_ts.utils.artifacts import save_experiment_config, save_federated_snapshot, should_save_periodic_artifacts
 from federated_ts.security.attacks import (
     attack_success_rate,
     attach_attack_metadata,
@@ -204,6 +204,148 @@ def _round_history_communication_summary(history: list[RoundRecord]) -> dict[str
         "total_transport_upload_overhead_bytes": sum(record.total_transport_upload_overhead_bytes for record in history),
         "total_transport_download_overhead_bytes": sum(record.total_transport_download_overhead_bytes for record in history),
     }
+
+
+def _build_federated_summary(
+    *,
+    server: FederatedServer,
+    test_metrics: dict[str, float],
+    total_elapsed: float,
+    best_round: int,
+    best_metrics: dict[str, float],
+    attack_records: list[dict[str, Any]],
+    attack_summary: dict[str, Any],
+    attack_target_type: str,
+    protocol_test_metrics: dict[str, float] | None = None,
+    oracle_test_metrics: dict[str, float] | None = None,
+    transport: str | None = None,
+) -> dict[str, Any]:
+    """Build a summary payload shared by final outputs and periodic snapshots."""
+
+    history = server.history
+    last_privacy = history[-1] if history else None
+    summary = {
+        "test": test_metrics,
+        "evaluation_mode": server.evaluation_mode,
+        "protocol_test": test_metrics if protocol_test_metrics is None else protocol_test_metrics,
+        "oracle_test": oracle_test_metrics,
+        "rounds": len(history),
+        "total_time_seconds": total_elapsed,
+        "best_round": best_round,
+        "best_val_mse": best_metrics["mse"],
+        "best_val_mae": best_metrics["mae"],
+        "best_val_mape": best_metrics["mape"],
+        "test_checkpoint": "best_validation",
+        "last_upload_compression_ratio": history[-1].upload_compression_ratio if history else 0.0,
+        "last_total_communication_ratio": history[-1].total_communication_ratio if history else 0.0,
+        "last_communication_ratio": history[-1].communication_ratio if history else 0.0,
+        **_round_history_communication_summary(history),
+        "attack_target_type": attack_summary.get("target_type", attack_target_type),
+        "attack_primary_metric": attack_summary["primary_metric"],
+        "attack_primary_metric_direction": attack_summary["primary_metric_direction"],
+        "attack_overall_avg_mse": attack_summary["overall_avg_mse"],
+        "attack_success_rate": attack_summary["overall_success_rate"],
+        "attack_evaluations": len(attack_records),
+        "attack_summary": attack_summary,
+        "privacy_accountant": None if last_privacy is None else last_privacy.privacy_accountant,
+        "privacy_epsilon": None if last_privacy is None else last_privacy.privacy_epsilon,
+        "privacy_delta": None if last_privacy is None else last_privacy.privacy_delta,
+        "privacy_rdp_alpha": None if last_privacy is None else last_privacy.privacy_rdp_alpha,
+        "privacy_rdp_total": None if last_privacy is None else last_privacy.privacy_rdp_total,
+        "privacy_sampling_rate": None if last_privacy is None else last_privacy.privacy_sampling_rate,
+        "adaptive_clip_norm": None if last_privacy is None else last_privacy.adaptive_clip_norm,
+        "adaptive_clip_median_norm": None if last_privacy is None else last_privacy.adaptive_clip_median_norm,
+        "adaptive_reference_clip_norm": None if last_privacy is None else last_privacy.adaptive_reference_clip_norm,
+        "adaptive_noise_std": None if last_privacy is None else last_privacy.adaptive_noise_std,
+        "privacy_trust_model": "central_dp_trusted_aggregator" if (last_privacy is not None and last_privacy.privacy_accountant is not None) else None,
+    }
+    if transport is not None:
+        summary["transport"] = transport
+    return summary
+
+
+def _build_federated_resume_state(
+    *,
+    round_index: int,
+    server: FederatedServer,
+    best_global_state: StateDict,
+    best_oracle_state: StateDict | None,
+    best_metrics: dict[str, float],
+    best_round: int,
+) -> dict[str, Any]:
+    """Capture the minimal federated state needed to continue a stopped run."""
+
+    return {
+        "round_index": int(round_index),
+        "global_state": _clone_state(server.global_state),
+        "oracle_global_state": None if server.oracle_global_state is None else _clone_state(server.oracle_global_state),
+        "best_global_state": _clone_state(best_global_state),
+        "best_oracle_state": None if best_oracle_state is None else _clone_state(best_oracle_state),
+        "best_metrics": dict(best_metrics),
+        "best_round": int(best_round),
+        "history": [asdict(record) for record in server.history],
+    }
+
+
+def _save_periodic_federated_snapshot(
+    *,
+    output_dir: Path,
+    config: dict[str, Any],
+    server: FederatedServer,
+    round_index: int,
+    start_time: float,
+    best_global_state: StateDict,
+    best_oracle_state: StateDict | None,
+    best_metrics: dict[str, float],
+    best_round: int,
+    attack_results: list[Any],
+    attack_target_type: str,
+    transport: str | None = None,
+) -> None:
+    """Persist a periodic round snapshot without waiting for unfinished async attacks."""
+
+    if not should_save_periodic_artifacts(config, round_index + 1):
+        return
+    test_metrics = server.test_global()
+    protocol_test_metrics = server.test_protocol() if server._uses_oracle_evaluation() else test_metrics
+    oracle_test_metrics = server.test_oracle() if server._uses_oracle_evaluation() else None
+    attack_records = [result.to_record() for result in attack_results]
+    attack_summary = summarize_attack_results(
+        attack_results,
+        float(config.get("attack", {}).get("success_rate_threshold", 0.03)),
+    )
+    summary = _build_federated_summary(
+        server=server,
+        test_metrics=test_metrics,
+        total_elapsed=time.perf_counter() - start_time,
+        best_round=best_round,
+        best_metrics=best_metrics,
+        attack_records=attack_records,
+        attack_summary=attack_summary,
+        attack_target_type=attack_target_type,
+        protocol_test_metrics=protocol_test_metrics,
+        oracle_test_metrics=oracle_test_metrics,
+        transport=transport,
+    )
+    snapshot_dir = save_federated_snapshot(
+        output_dir,
+        config,
+        snapshot_name=f"round_{round_index + 1:04d}",
+        model_state=server.global_state,
+        oracle_model_state=server.oracle_global_state if server._uses_oracle_evaluation() else None,
+        metrics_history=server.history,
+        summary=summary,
+        attack_records=attack_records,
+        resume_state=_build_federated_resume_state(
+            round_index=round_index + 1,
+            server=server,
+            best_global_state=best_global_state,
+            best_oracle_state=best_oracle_state,
+            best_metrics=best_metrics,
+            best_round=best_round,
+        ),
+    )
+    logger.info("Saved periodic snapshot at round {} to {}", round_index, snapshot_dir)
 
 
 def _wandb_cumulative_communication_payload(history: list[RoundRecord]) -> dict[str, float | int]:
@@ -870,6 +1012,19 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             attack_target_type,
         )
         attack_manager.submit(attack_task)
+        _save_periodic_federated_snapshot(
+            output_dir=output_dir,
+            config=config,
+            server=server,
+            round_index=round_index,
+            start_time=start_time,
+            best_global_state=best_global_state,
+            best_oracle_state=best_oracle_state,
+            best_metrics=best_metrics,
+            best_round=best_round,
+            attack_results=attack_manager.attack_results,
+            attack_target_type=attack_target_type,
+        )
         if stopper.update(metrics["mse"]):
             logger.info("Early stopping at round {}", round_index)
             break
@@ -891,42 +1046,18 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         attack_manager.attack_results,
         float(config.get("attack", {}).get("success_rate_threshold", 0.03)),
     )
-    last_privacy = server.history[-1] if server.history else None
-    summary = {
-        "test": test_metrics,
-        "evaluation_mode": server.evaluation_mode,
-        "protocol_test": protocol_test_metrics,
-        "oracle_test": oracle_test_metrics,
-        "rounds": len(server.history),
-        "total_time_seconds": total_elapsed,
-        "best_round": best_round,
-        "best_val_mse": best_metrics["mse"],
-        "best_val_mae": best_metrics["mae"],
-        "best_val_mape": best_metrics["mape"],
-        "test_checkpoint": "best_validation",
-        "last_upload_compression_ratio": server.history[-1].upload_compression_ratio if server.history else 0.0,
-        "last_total_communication_ratio": server.history[-1].total_communication_ratio if server.history else 0.0,
-        "last_communication_ratio": server.history[-1].communication_ratio if server.history else 0.0,
-        **_round_history_communication_summary(server.history),
-        "attack_target_type": attack_summary.get("target_type", attack_target_type),
-        "attack_primary_metric": attack_summary["primary_metric"],
-        "attack_primary_metric_direction": attack_summary["primary_metric_direction"],
-        "attack_overall_avg_mse": attack_summary["overall_avg_mse"],
-        "attack_success_rate": attack_summary["overall_success_rate"],
-        "attack_evaluations": len(attack_records),
-        "attack_summary": attack_summary,
-        "privacy_accountant": None if last_privacy is None else last_privacy.privacy_accountant,
-        "privacy_epsilon": None if last_privacy is None else last_privacy.privacy_epsilon,
-        "privacy_delta": None if last_privacy is None else last_privacy.privacy_delta,
-        "privacy_rdp_alpha": None if last_privacy is None else last_privacy.privacy_rdp_alpha,
-        "privacy_rdp_total": None if last_privacy is None else last_privacy.privacy_rdp_total,
-        "privacy_sampling_rate": None if last_privacy is None else last_privacy.privacy_sampling_rate,
-        "adaptive_clip_norm": None if last_privacy is None else last_privacy.adaptive_clip_norm,
-        "adaptive_clip_median_norm": None if last_privacy is None else last_privacy.adaptive_clip_median_norm,
-        "adaptive_reference_clip_norm": None if last_privacy is None else last_privacy.adaptive_reference_clip_norm,
-        "adaptive_noise_std": None if last_privacy is None else last_privacy.adaptive_noise_std,
-        "privacy_trust_model": "central_dp_trusted_aggregator" if (last_privacy is not None and last_privacy.privacy_accountant is not None) else None,
-    }
+    summary = _build_federated_summary(
+        server=server,
+        test_metrics=test_metrics,
+        total_elapsed=total_elapsed,
+        best_round=best_round,
+        best_metrics=best_metrics,
+        attack_records=attack_records,
+        attack_summary=attack_summary,
+        attack_target_type=attack_target_type,
+        protocol_test_metrics=protocol_test_metrics,
+        oracle_test_metrics=oracle_test_metrics,
+    )
     tracker.log({
         "run/best_round": best_round,
         "run/best_val_mse": best_metrics["mse"],

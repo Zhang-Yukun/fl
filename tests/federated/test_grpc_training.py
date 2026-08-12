@@ -183,6 +183,31 @@ def test_grpc_coordinator_aggregates_one_round_and_saves_summary(tmp_path):
     assert summary["total_transport_bytes"] == metrics[0]["total_transport_bytes"]
 
 
+def test_grpc_coordinator_saves_periodic_snapshot(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+            "artifacts.save_every_rounds=1",
+        ],
+    )
+    coordinator = GrpcFederatedCoordinator(config)
+    response = _submit_one_round(coordinator, config)
+
+    assert response["stop"] is True
+    snapshot_dir = tmp_path / "snapshots" / "round_0001"
+    assert (snapshot_dir / "config.yaml").exists()
+    assert (snapshot_dir / "metrics.json").exists()
+    assert (snapshot_dir / "summary.json").exists()
+    assert (snapshot_dir / "model.pt").exists()
+    assert (snapshot_dir / "resume_state.pt").exists()
+
+
 def test_grpc_coordinator_saves_attack_results(tmp_path):
     """The gRPC coordinator should persist DLG/iDLG artifacts when attacks are enabled."""
 

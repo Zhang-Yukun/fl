@@ -4,6 +4,7 @@ Example:
     Save experiment parameters in the default YAML format::
 
         from pathlib import Path
+
         from federated_ts.utils.artifacts import save_experiment_config
 
         paths = save_experiment_config({"training": {"lr": 0.001}}, Path("outputs/run"))
@@ -12,9 +13,12 @@ Example:
 
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 import json
 from pathlib import Path
 from typing import Any, Iterable
+
+import torch
 
 import yaml
 
@@ -136,3 +140,53 @@ def _toml_value(value: Any) -> str:
     if value is None:
         return '""'
     return json.dumps(str(value), ensure_ascii=False)
+
+
+def _json_ready(value: Any) -> Any:
+    """Convert nested artifact payloads into JSON-serializable structures."""
+
+    if is_dataclass(value):
+        return _json_ready(asdict(value))
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    return value
+
+
+def should_save_periodic_artifacts(config: dict[str, Any], round_count: int) -> bool:
+    """Return whether periodic artifacts should be saved after the current round count."""
+
+    interval = int(config.get("artifacts", {}).get("save_every_rounds", 0) or 0)
+    return interval > 0 and round_count > 0 and round_count % interval == 0
+
+
+def save_federated_snapshot(
+    output_dir: str | Path,
+    config: dict[str, Any],
+    *,
+    snapshot_name: str,
+    model_state: Any,
+    metrics_history: Any,
+    summary: dict[str, Any],
+    attack_records: list[dict[str, Any]],
+    oracle_model_state: Any | None = None,
+    resume_state: dict[str, Any] | None = None,
+) -> Path:
+    """Persist one round snapshot with the same artifact shape as final outputs."""
+
+    snapshot_dir = Path(output_dir) / "snapshots" / snapshot_name
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(model_state, snapshot_dir / "model.pt")
+    if oracle_model_state is not None:
+        torch.save(oracle_model_state, snapshot_dir / "oracle_model.pt")
+    if resume_state is not None:
+        torch.save(resume_state, snapshot_dir / "resume_state.pt")
+    save_experiment_config(config, snapshot_dir, config.get("artifacts", {}).get("config_formats"))
+    with (snapshot_dir / "metrics.json").open("w", encoding="utf-8") as handle:
+        json.dump(_json_ready(metrics_history), handle, ensure_ascii=False, indent=2)
+    with (snapshot_dir / "summary.json").open("w", encoding="utf-8") as handle:
+        json.dump(_json_ready(summary), handle, ensure_ascii=False, indent=2)
+    with (snapshot_dir / "attack_results.json").open("w", encoding="utf-8") as handle:
+        json.dump(_json_ready(attack_records), handle, ensure_ascii=False, indent=2)
+    return snapshot_dir

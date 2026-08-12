@@ -24,9 +24,12 @@ from federated_ts.datasets.rare_earth import build_federated_loaders
 from federated_ts.federated.algorithms import (
     AsyncAttackManager,
     _attack_target_type,
+    _build_federated_resume_state,
+    _build_federated_summary,
     _build_attack_round_task,
     _clone_state,
     _round_history_communication_summary,
+    _save_periodic_federated_snapshot,
     _update_best_checkpoint,
     _wandb_cumulative_communication_payload,
     _wandb_round_payload,
@@ -239,43 +242,19 @@ class GrpcFederatedCoordinator:
             self.attack_results,
             float(self.config.get('attack', {}).get('success_rate_threshold', 0.03)),
         )
-        last_privacy = self.server.history[-1] if self.server.history else None
-        summary = {
-            'test': test_metrics,
-            'evaluation_mode': self.server.evaluation_mode,
-            'protocol_test': protocol_test_metrics,
-            'oracle_test': oracle_test_metrics,
-            'rounds': len(self.server.history),
-            'total_time_seconds': total_elapsed,
-            'best_round': self.best_round,
-            'best_val_mse': self.best_metrics['mse'],
-            'best_val_mae': self.best_metrics['mae'],
-            'best_val_mape': self.best_metrics['mape'],
-            'test_checkpoint': 'best_validation',
-            'last_upload_compression_ratio': self.server.history[-1].upload_compression_ratio if self.server.history else 0.0,
-            'last_total_communication_ratio': self.server.history[-1].total_communication_ratio if self.server.history else 0.0,
-            'last_communication_ratio': self.server.history[-1].communication_ratio if self.server.history else 0.0,
-            **_round_history_communication_summary(self.server.history),
-            'transport': 'grpc',
-            'attack_target_type': attack_summary.get('target_type', self.attack_target_type),
-            'attack_primary_metric': attack_summary['primary_metric'],
-            'attack_primary_metric_direction': attack_summary['primary_metric_direction'],
-            'attack_overall_avg_mse': attack_summary['overall_avg_mse'],
-            'attack_success_rate': attack_summary['overall_success_rate'],
-            'attack_evaluations': len(attack_records),
-            'attack_summary': attack_summary,
-            'privacy_accountant': None if last_privacy is None else last_privacy.privacy_accountant,
-            'privacy_epsilon': None if last_privacy is None else last_privacy.privacy_epsilon,
-            'privacy_delta': None if last_privacy is None else last_privacy.privacy_delta,
-            'privacy_rdp_alpha': None if last_privacy is None else last_privacy.privacy_rdp_alpha,
-            'privacy_rdp_total': None if last_privacy is None else last_privacy.privacy_rdp_total,
-            'privacy_sampling_rate': None if last_privacy is None else last_privacy.privacy_sampling_rate,
-            'adaptive_clip_norm': None if last_privacy is None else last_privacy.adaptive_clip_norm,
-            'adaptive_clip_median_norm': None if last_privacy is None else last_privacy.adaptive_clip_median_norm,
-            'adaptive_reference_clip_norm': None if last_privacy is None else last_privacy.adaptive_reference_clip_norm,
-            'adaptive_noise_std': None if last_privacy is None else last_privacy.adaptive_noise_std,
-            'privacy_trust_model': 'central_dp_trusted_aggregator' if (last_privacy is not None and last_privacy.privacy_accountant is not None) else None,
-        }
+        summary = _build_federated_summary(
+            server=self.server,
+            test_metrics=test_metrics,
+            total_elapsed=total_elapsed,
+            best_round=self.best_round,
+            best_metrics=self.best_metrics,
+            attack_records=attack_records,
+            attack_summary=attack_summary,
+            attack_target_type=self.attack_target_type,
+            protocol_test_metrics=protocol_test_metrics,
+            oracle_test_metrics=oracle_test_metrics,
+            transport='grpc',
+        )
         self.tracker.log({
             **{f'test/{key}': value for key, value in test_metrics.items()},
             'run/rounds': len(self.server.history),
@@ -340,6 +319,20 @@ class GrpcFederatedCoordinator:
                 )
                 self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=self.round_index)
                 self._run_attacks(self.round_index, round_base_state, results)
+                _save_periodic_federated_snapshot(
+                    output_dir=self.output_dir,
+                    config=self.config,
+                    server=self.server,
+                    round_index=self.round_index,
+                    start_time=self.start_time,
+                    best_global_state=self.best_global_state,
+                    best_oracle_state=self.best_oracle_state,
+                    best_metrics=self.best_metrics,
+                    best_round=self.best_round,
+                    attack_results=self.attack_results,
+                    attack_target_type=self.attack_target_type,
+                    transport='grpc',
+                )
                 self.pending = {}
                 self.round_index += 1
                 self.round_start_time = time.perf_counter()
