@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 
+from federated_ts.modeling.ega import EncodedStatePayload, encode_state_update, load_ega_codec
 from federated_ts.modeling import build_model
 from federated_ts.utils.serialization import (
     SparseUpdate,
@@ -36,6 +37,7 @@ class ClientResult:
     loss: float
     state: StateDict | None = None
     sparse_update: SparseUpdate | None = None
+    ega_payload: EncodedStatePayload | None = None
     dense_bytes: int = 0
     dense_parameters: int = 0
     download_bytes: int = 0
@@ -69,13 +71,39 @@ class ClientResult:
 class FederatedClient:
     """Local trainer that receives global parameters and returns an update."""
 
-    def __init__(self, client_id: str, train_loader, config: dict[str, Any], device: torch.device):
+    def __init__(
+        self,
+        client_id: str,
+        train_loader,
+        config: dict[str, Any],
+        device: torch.device,
+        total_train_samples: int | None = None,
+        total_clients: int | None = None,
+        allow_ega_pretrain: bool = False,
+    ):
         """Create a client bound to one local training loader."""
 
         self.client_id = client_id
         self.train_loader = train_loader
         self.config = config
         self.device = device
+        self.total_train_samples = total_train_samples if total_train_samples is not None else self._loader_num_samples(train_loader)
+        self.total_clients = total_clients if total_clients is not None else 1
+        self.ega_codec = None
+        if str(config.get("federated", {}).get("algorithm", "fedavg")).lower() == "ega_fedavg":
+            self.ega_codec = load_ega_codec(
+                config,
+                device=device,
+                num_clients=self.total_clients,
+                allow_pretrain=allow_ega_pretrain,
+            )
+
+    @staticmethod
+    def _loader_num_samples(loader) -> int:
+        """Return the number of samples carried by one loader-like object."""
+
+        dataset = getattr(loader, "dataset", None)
+        return len(dataset) if dataset is not None else len(loader)
 
     def _upload_quantization_generator(self, round_index: int) -> torch.Generator | None:
         """Create a deterministic per-client generator for randomized upload quantization."""
@@ -112,7 +140,13 @@ class FederatedClient:
             "evaluation_payload_kind": "dense_full_update",
         }
 
-    def train(self, global_state: StateDict, compressed: bool = False, round_index: int = 0) -> ClientResult:
+    def train(
+        self,
+        global_state: StateDict,
+        compressed: bool = False,
+        round_index: int = 0,
+        round_context: dict[str, Any] | None = None,
+    ) -> ClientResult:
         """Train locally from global weights and return the transmitted payload.
 
         Example:
@@ -145,7 +179,7 @@ class FederatedClient:
         dense_parameters = state_num_parameters(local_state)
         common = dict(
             client_id=self.client_id,
-            num_samples=len(self.train_loader.dataset),
+            num_samples=self._loader_num_samples(self.train_loader),
             loss=float(sum(losses) / len(losses)),
             dense_bytes=dense_bytes,
             dense_parameters=dense_parameters,
@@ -217,6 +251,39 @@ class FederatedClient:
                 transport_upload_bytes=state_num_bytes(quantized),
                 payload_kind="qsgd_update",
                 compressor=f"qsgd_{levels}_levels",
+            )
+        if algorithm == "ega_fedavg":
+            if self.ega_codec is None:
+                raise RuntimeError("EGA codec was not initialized on the client")
+            ega_cfg = self.config.get("ega", {})
+            contribution_scale = float(self._loader_num_samples(self.train_loader)) / float(max(self.total_train_samples, 1))
+            contribution_scale *= float(self.total_clients)
+            normalization = float(
+                (round_context or {}).get(
+                    "ega_normalization",
+                    ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)),
+                )
+            )
+            payload = encode_state_update(
+                subtract_state(local_state, global_state),
+                self.ega_codec,
+                quantization_level=int(ega_cfg.get("quantization_level", 64)),
+                normalization=max(normalization, float(ega_cfg.get("min_normalization", 1e-6))),
+                block_size=int(ega_cfg.get("block_size", 256)),
+                contribution_scale=contribution_scale,
+                generator=self._upload_quantization_generator(round_index),
+            )
+            return ClientResult(
+                **common,
+                ega_payload=payload,
+                **evaluation_kwargs,
+                upload_bytes=payload.nbytes,
+                upload_parameters=payload.num_parameters,
+                parameter_upload_bytes=payload.nbytes,
+                parameter_upload_parameters=payload.num_parameters,
+                transport_upload_bytes=payload.nbytes,
+                payload_kind="ega_encoded_update",
+                compressor=f"ega_b{payload.block_size}_h{payload.encoded_dim}_s{payload.quantization_level}",
             )
         if compressed:
             update = subtract_state(local_state, global_state)

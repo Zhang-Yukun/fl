@@ -13,6 +13,7 @@ from loguru import logger
 
 from federated_ts.utils.artifacts import save_experiment_config
 from federated_ts.modeling import build_model
+from federated_ts.modeling.ega import EncodedStatePayload, decode_attack_view_from_mean_difference, decode_mean_encoded_payload, load_ega_codec
 from federated_ts.utils.aggregation import fedaware_weights
 from federated_ts.utils.serialization import (
     StateDict,
@@ -193,6 +194,8 @@ class FederatedServer:
     last_privacy_step: AdaptiveRdpStep | None = field(init=False, default=None)
     oracle_global_state: StateDict | None = field(init=False, default=None)
     evaluation_mode: str = field(init=False, default="protocol")
+    ega_codec: Any | None = field(init=False, default=None)
+    ega_normalization: float | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         """Build the initial global model after dataclass initialization."""
@@ -201,6 +204,17 @@ class FederatedServer:
         self.global_state = serialize_model(self.model)
         self.oracle_global_state = _clone_state_dict(self.global_state)
         self.evaluation_mode = str(self.config.get("evaluation", {}).get("mode", "protocol")).lower()
+        algorithm = str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower()
+        if algorithm == "ega_fedavg":
+            ega_cfg = self.config.get("ega", {})
+            total_clients = int(ega_cfg.get("num_clients", len(self.config.get("data", {}).get("clients", [])) or 1))
+            self.ega_codec = load_ega_codec(
+                self.config,
+                device=self.device,
+                num_clients=total_clients,
+                allow_pretrain=True,
+            )
+            self.ega_normalization = float(ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)))
         adaptive_cfg = self.config.get("adaptive_clipped_rdp", {})
         if str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower() == "adaptive_clipped_rdp_fedavg":
             self.adaptive_accountant = AdaptiveClippedRdpAccountant(
@@ -213,6 +227,20 @@ class FederatedServer:
             state_num_parameters(self.global_state),
             state_num_bytes(self.global_state),
         )
+
+    def build_round_context(self) -> dict[str, Any]:
+        """Return server-controlled per-round context forwarded to clients."""
+
+        if self.ega_normalization is None:
+            return {}
+        return {"ega_normalization": float(self.ega_normalization)}
+
+    def decode_ega_attack_view(self, payloads: list[EncodedStatePayload], target_index: int) -> StateDict:
+        """Return the honest-but-curious server attack view for one EGA client."""
+
+        if self.ega_codec is None:
+            raise RuntimeError("EGA codec is not initialized on the server")
+        return decode_attack_view_from_mean_difference(payloads, target_index, self.ega_codec)
 
     def _uses_oracle_evaluation(self) -> bool:
         """Return whether validation/test should use oracle full updates."""
@@ -335,6 +363,23 @@ class FederatedServer:
             return weights
         if algorithm == "adaptive_clipped_rdp_fedavg":
             return self._aggregate_adaptive_clipped_rdp(results, round_index, round_base_state)
+        if algorithm == "ega_fedavg":
+            if self.ega_codec is None:
+                raise RuntimeError("EGA codec is not initialized on the server")
+            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
+            payloads = [result.ega_payload for result in results]
+            if any(payload is None for payload in payloads):
+                raise ValueError("EGA aggregation requires ega_payload from every client")
+            averaged_update = decode_mean_encoded_payload(payloads, self.ega_codec)
+            self.global_state = add_update(self.global_state, averaged_update)
+            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
+            ega_cfg = self.config.get("ega", {})
+            if str(ega_cfg.get("normalization_strategy", "fixed")).lower() == "previous_round_max_abs":
+                self.ega_normalization = max(
+                    float(ega_cfg.get("min_normalization", 1e-6)),
+                    max(float(tensor.abs().max().item()) for tensor in averaged_update.values()),
+                )
+            return weights
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         averaged_update = average_states([result.state for result in results], sample_weights)
         self.global_state = add_update(self.global_state, averaged_update)
@@ -407,6 +452,7 @@ class FederatedServer:
         elapsed_time_seconds: float,
         protocol_metrics: dict[str, float] | None = None,
         oracle_metrics: dict[str, float] | None = None,
+        silent: bool = False,
     ) -> RoundRecord:
         """Create and log a round record with communication metadata.
 
@@ -527,72 +573,73 @@ class FederatedServer:
         cumulative_parameter_download_bytes = sum(item.total_parameter_download_bytes for item in self.history)
         cumulative_transport_upload_bytes = sum(item.total_transport_upload_bytes for item in self.history)
         cumulative_transport_download_bytes = sum(item.total_transport_download_bytes for item in self.history)
-        logger.info(
-            "Round {} algorithm={} val_mse={:.6f} time={:.2f}s parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({}) upload_ratio={:.2f} total_ratio={:.2f}",
-            round_index,
-            record.algorithm,
-            record.val_mse,
-            record.round_time_seconds,
-            record.total_upload_bytes,
-            _format_num_bytes(record.total_upload_bytes),
-            record.total_download_bytes,
-            _format_num_bytes(record.total_download_bytes),
-            record.total_transport_upload_bytes,
-            _format_num_bytes(record.total_transport_upload_bytes),
-            record.total_transport_download_bytes,
-            _format_num_bytes(record.total_transport_download_bytes),
-            record.upload_compression_ratio,
-            record.total_communication_ratio,
-        )
-        if self.last_privacy_step is not None:
+        if not silent:
             logger.info(
-                "Round {} adaptive_rdp clip_median={:.6f} raw_clip={:.6f} clip_norm={:.6f} noise_std={:.6f} q={:.6f} rdp_round={:.6f} rdp_total={:.6f} epsilon={:.6f} delta={:.2e}",
+                "Round {} algorithm={} val_mse={:.6f} time={:.2f}s parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({}) upload_ratio={:.2f} total_ratio={:.2f}",
                 round_index,
-                self.last_privacy_step.median_update_norm,
-                self.last_privacy_step.raw_clip_norm,
-                self.last_privacy_step.adaptive_clip_norm,
-                self.last_privacy_step.noise_std,
-                self.last_privacy_step.sampling_rate,
-                self.last_privacy_step.round_rdp,
-                self.last_privacy_step.total_rdp,
-                self.last_privacy_step.epsilon,
-                self.last_privacy_step.delta,
+                record.algorithm,
+                record.val_mse,
+                record.round_time_seconds,
+                record.total_upload_bytes,
+                _format_num_bytes(record.total_upload_bytes),
+                record.total_download_bytes,
+                _format_num_bytes(record.total_download_bytes),
+                record.total_transport_upload_bytes,
+                _format_num_bytes(record.total_transport_upload_bytes),
+                record.total_transport_download_bytes,
+                _format_num_bytes(record.total_transport_download_bytes),
+                record.upload_compression_ratio,
+                record.total_communication_ratio,
             )
-        logger.info(
-            "Round {} cumulative parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({})",
-            round_index,
-            cumulative_parameter_upload_bytes,
-            _format_num_bytes(cumulative_parameter_upload_bytes),
-            cumulative_parameter_download_bytes,
-            _format_num_bytes(cumulative_parameter_download_bytes),
-            cumulative_transport_upload_bytes,
-            _format_num_bytes(cumulative_transport_upload_bytes),
-            cumulative_transport_download_bytes,
-            _format_num_bytes(cumulative_transport_download_bytes),
-        )
-        for client in client_records:
+            if self.last_privacy_step is not None:
+                logger.info(
+                    "Round {} adaptive_rdp clip_median={:.6f} raw_clip={:.6f} clip_norm={:.6f} noise_std={:.6f} q={:.6f} rdp_round={:.6f} rdp_total={:.6f} epsilon={:.6f} delta={:.2e}",
+                    round_index,
+                    self.last_privacy_step.median_update_norm,
+                    self.last_privacy_step.raw_clip_norm,
+                    self.last_privacy_step.adaptive_clip_norm,
+                    self.last_privacy_step.noise_std,
+                    self.last_privacy_step.sampling_rate,
+                    self.last_privacy_step.round_rdp,
+                    self.last_privacy_step.total_rdp,
+                    self.last_privacy_step.epsilon,
+                    self.last_privacy_step.delta,
+                )
             logger.info(
-                "Round {} client={} samples={} payload={} compressor={} clip_norm={} noise_multiplier={} agg_weight={:.6f} loss={:.6f} parameter_upload={} ({})/{} params parameter_download={} ({})/{} params transport_upload={} ({}) transport_download={} ({})",
+                "Round {} cumulative parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({})",
                 round_index,
-                client.client_id,
-                client.num_samples,
-                client.payload_kind,
-                client.compressor,
-                client.privacy_clip_norm,
-                client.privacy_noise_multiplier,
-                client.aggregation_weight,
-                client.loss,
-                client.upload_bytes,
-                _format_num_bytes(client.upload_bytes),
-                client.upload_parameters,
-                client.download_bytes,
-                _format_num_bytes(client.download_bytes),
-                client.download_parameters,
-                client.transport_upload_bytes,
-                _format_num_bytes(client.transport_upload_bytes),
-                client.transport_download_bytes,
-                _format_num_bytes(client.transport_download_bytes),
+                cumulative_parameter_upload_bytes,
+                _format_num_bytes(cumulative_parameter_upload_bytes),
+                cumulative_parameter_download_bytes,
+                _format_num_bytes(cumulative_parameter_download_bytes),
+                cumulative_transport_upload_bytes,
+                _format_num_bytes(cumulative_transport_upload_bytes),
+                cumulative_transport_download_bytes,
+                _format_num_bytes(cumulative_transport_download_bytes),
             )
+            for client in client_records:
+                logger.info(
+                    "Round {} client={} samples={} payload={} compressor={} clip_norm={} noise_multiplier={} agg_weight={:.6f} loss={:.6f} parameter_upload={} ({})/{} params parameter_download={} ({})/{} params transport_upload={} ({}) transport_download={} ({})",
+                    round_index,
+                    client.client_id,
+                    client.num_samples,
+                    client.payload_kind,
+                    client.compressor,
+                    client.privacy_clip_norm,
+                    client.privacy_noise_multiplier,
+                    client.aggregation_weight,
+                    client.loss,
+                    client.upload_bytes,
+                    _format_num_bytes(client.upload_bytes),
+                    client.upload_parameters,
+                    client.download_bytes,
+                    _format_num_bytes(client.download_bytes),
+                    client.download_parameters,
+                    client.transport_upload_bytes,
+                    _format_num_bytes(client.transport_upload_bytes),
+                    client.transport_download_bytes,
+                    _format_num_bytes(client.transport_download_bytes),
+                )
         return record
 
     def save(self, output_dir: str | Path, config: dict[str, Any]) -> None:

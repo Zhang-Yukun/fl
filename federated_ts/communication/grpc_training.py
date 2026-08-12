@@ -41,7 +41,7 @@ from federated_ts.federated.client import ClientResult, FederatedClient
 from federated_ts.federated.server import EarlyStopper, FederatedServer
 from federated_ts.security.attacks import save_attack_artifacts, summarize_attack_results
 from federated_ts.utils.logging import setup_logging
-from federated_ts.utils.artifacts import save_experiment_config
+from federated_ts.utils.artifacts import save_experiment_config, should_save_periodic_artifacts
 from federated_ts.utils.serialization import state_num_bytes, state_num_parameters
 from federated_ts.utils.tracking import Tracker
 from federated_ts.engine.training import predict_first_batch
@@ -63,6 +63,13 @@ def _transport_delta(current: dict[str, int], previous: dict[str, int]) -> dict[
 
     return {key: int(current.get(key, 0)) - int(previous.get(key, 0)) for key in current.keys()}
 
+
+
+def _loader_num_samples(loader: Any) -> int:
+    """Return the number of samples carried by one loader-like object."""
+
+    dataset = getattr(loader, "dataset", None)
+    return len(dataset) if dataset is not None else len(loader)
 
 
 def _apply_transport_metrics(
@@ -117,11 +124,20 @@ class GrpcFederatedCoordinator:
         self.device = resolve_device(config)
         train_loaders, val_loader, test_loader = build_federated_loaders(config)
         self.expected_clients = tuple(train_loaders.keys())
+        self.server = FederatedServer(config, val_loader, test_loader, self.device)
+        total_train_samples = sum(_loader_num_samples(loader) for loader in train_loaders.values())
         self.attack_clients = [
-            FederatedClient(client_id, loader, config, self.device)
+            FederatedClient(
+                client_id,
+                loader,
+                config,
+                self.device,
+                total_train_samples=total_train_samples,
+                total_clients=len(train_loaders),
+                allow_ega_pretrain=False,
+            )
             for client_id, loader in train_loaders.items()
         ]
-        self.server = FederatedServer(config, val_loader, test_loader, self.device)
         self.compressed = str(config['federated'].get('algorithm', 'fedavg')).lower() in {
             'compressed_fedavg',
             'sparse_fedavg',
@@ -144,6 +160,7 @@ class GrpcFederatedCoordinator:
         self.finalize_requested = False
         self.finalization_started = False
         self.finalization_completed = False
+        self.pending_final_round_thread: threading.Thread | None = None
         self.lock = threading.Lock()
         self.attack_manager = AsyncAttackManager(config, self.tracker)
         self.attack_results = self.attack_manager.attack_results
@@ -190,10 +207,14 @@ class GrpcFederatedCoordinator:
     def finalize_if_requested(self) -> bool:
         """Run final artifact persistence once, outside the RPC hot path."""
 
+        pending_thread = None
         with self.lock:
             if not self.finalize_requested or self.finalization_started:
                 return self.finalization_completed
             self.finalization_started = True
+            pending_thread = self.pending_final_round_thread
+        if pending_thread is not None:
+            pending_thread.join()
         self._finalize()
         with self.lock:
             self.finalization_completed = True
@@ -207,6 +228,7 @@ class GrpcFederatedCoordinator:
                 'round': self.round_index,
                 'state': self.server.global_state,
                 'compressed': self.compressed,
+                'round_context': self.server.build_round_context(),
                 'stop': self.stopped,
             }
 
@@ -221,8 +243,55 @@ class GrpcFederatedCoordinator:
             self.max_rounds,
             round_base_state,
             self.attack_target_type,
+            server=self.server,
         )
         self.attack_manager.submit(task)
+
+    def _finish_final_round_bookkeeping(self, round_index: int, results, aggregation_weights, round_base_state) -> None:
+        """Complete final-round validation and artifact bookkeeping off the submit hot path."""
+
+        metrics = self.server.evaluate_global()
+        protocol_metrics = self.server.evaluate_protocol() if self.server._uses_oracle_evaluation() else metrics
+        oracle_metrics = self.server.evaluate_oracle() if self.server._uses_oracle_evaluation() else None
+        self.best_global_state, self.best_metrics, self.best_round, improved = _update_best_checkpoint(
+            best_state=self.best_global_state,
+            best_metrics=self.best_metrics,
+            best_index=self.best_round,
+            candidate_state=self.server.global_state,
+            candidate_metrics=metrics,
+            candidate_index=round_index,
+            label='round',
+        )
+        if improved and self.server._uses_oracle_evaluation():
+            self.best_oracle_state = _clone_state(self.server.oracle_global_state)
+        record = self.server.record_round(
+            round_index,
+            results,
+            aggregation_weights,
+            metrics,
+            round_time_seconds=time.perf_counter() - self.round_start_time,
+            elapsed_time_seconds=time.perf_counter() - self.start_time,
+            protocol_metrics=protocol_metrics,
+            oracle_metrics=oracle_metrics,
+            silent=True,
+        )
+        self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=round_index)
+        self._run_attacks(round_index, round_base_state, results)
+        if should_save_periodic_artifacts(self.config, round_index + 1):
+            _save_periodic_federated_snapshot(
+                output_dir=self.output_dir,
+                config=self.config,
+                server=self.server,
+                round_index=round_index,
+                start_time=self.start_time,
+                best_global_state=self.best_global_state,
+                best_oracle_state=self.best_oracle_state,
+                best_metrics=self.best_metrics,
+                best_round=self.best_round,
+                attack_results=self.attack_results,
+                attack_target_type=self.attack_target_type,
+                transport='grpc',
+            )
 
     def _finalize(self) -> None:
         """Persist final model artifacts and a summary compatible with the main FL path."""
@@ -300,53 +369,74 @@ class GrpcFederatedCoordinator:
                     aggregation_weights = self.server.aggregate_sparse(results, round_base_state=round_base_state)
                 else:
                     aggregation_weights = self.server.aggregate_dense(results, round_index=self.round_index, round_base_state=round_base_state)
-                metrics = self.server.evaluate_global()
-                protocol_metrics = self.server.evaluate_protocol() if self.server._uses_oracle_evaluation() else metrics
-                oracle_metrics = self.server.evaluate_oracle() if self.server._uses_oracle_evaluation() else None
-                self.best_global_state, self.best_metrics, self.best_round, improved = _update_best_checkpoint(
-                    best_state=self.best_global_state,
-                    best_metrics=self.best_metrics,
-                    best_index=self.best_round,
-                    candidate_state=self.server.global_state,
-                    candidate_metrics=metrics,
-                    candidate_index=self.round_index,
-                    label='round',
-                )
-                if improved and self.server._uses_oracle_evaluation():
-                    self.best_oracle_state = _clone_state(self.server.oracle_global_state)
-                record = self.server.record_round(
-                    self.round_index,
-                    results,
-                    aggregation_weights,
-                    metrics,
-                    round_time_seconds=time.perf_counter() - self.round_start_time,
-                    elapsed_time_seconds=time.perf_counter() - self.start_time,
-                    protocol_metrics=protocol_metrics,
-                    oracle_metrics=oracle_metrics,
-                )
-                self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=self.round_index)
-                self._run_attacks(self.round_index, round_base_state, results)
-                _save_periodic_federated_snapshot(
-                    output_dir=self.output_dir,
-                    config=self.config,
-                    server=self.server,
-                    round_index=self.round_index,
-                    start_time=self.start_time,
-                    best_global_state=self.best_global_state,
-                    best_oracle_state=self.best_oracle_state,
-                    best_metrics=self.best_metrics,
-                    best_round=self.best_round,
-                    attack_results=self.attack_results,
-                    attack_target_type=self.attack_target_type,
-                    transport='grpc',
-                )
-                self.pending = {}
-                self.round_index += 1
-                self.round_start_time = time.perf_counter()
-                self.stopped = self.round_index >= self.max_rounds or self.stopper.update(metrics['mse'])
-                if self.stopped:
+                next_round_index = self.round_index + 1
+                if next_round_index >= self.max_rounds:
+                    current_round_index = self.round_index
+                    self.pending = {}
+                    self.round_index = next_round_index
+                    self.round_start_time = time.perf_counter()
+                    self.stopped = True
                     self.stop_time_seconds = time.perf_counter()
                     self.finalize_requested = True
+                    self.pending_final_round_thread = threading.Thread(
+                        target=self._finish_final_round_bookkeeping,
+                        args=(current_round_index, results, aggregation_weights, round_base_state),
+                        name='grpc-final-round',
+                        daemon=True,
+                    )
+                    self.pending_final_round_thread.start()
+                else:
+                    metrics = self.server.evaluate_global()
+                    protocol_metrics = self.server.evaluate_protocol() if self.server._uses_oracle_evaluation() else metrics
+                    oracle_metrics = self.server.evaluate_oracle() if self.server._uses_oracle_evaluation() else None
+                    self.best_global_state, self.best_metrics, self.best_round, improved = _update_best_checkpoint(
+                        best_state=self.best_global_state,
+                        best_metrics=self.best_metrics,
+                        best_index=self.best_round,
+                        candidate_state=self.server.global_state,
+                        candidate_metrics=metrics,
+                        candidate_index=self.round_index,
+                        label='round',
+                    )
+                    if improved and self.server._uses_oracle_evaluation():
+                        self.best_oracle_state = _clone_state(self.server.oracle_global_state)
+                    will_stop = self.stopper.update(metrics['mse'])
+                    record = self.server.record_round(
+                        self.round_index,
+                        results,
+                        aggregation_weights,
+                        metrics,
+                        round_time_seconds=time.perf_counter() - self.round_start_time,
+                        elapsed_time_seconds=time.perf_counter() - self.start_time,
+                        protocol_metrics=protocol_metrics,
+                        oracle_metrics=oracle_metrics,
+                        silent=will_stop,
+                    )
+                    if not will_stop:
+                        self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=self.round_index)
+                    self._run_attacks(self.round_index, round_base_state, results)
+                    if (not will_stop) or should_save_periodic_artifacts(self.config, self.round_index + 1):
+                        _save_periodic_federated_snapshot(
+                            output_dir=self.output_dir,
+                            config=self.config,
+                            server=self.server,
+                            round_index=self.round_index,
+                            start_time=self.start_time,
+                            best_global_state=self.best_global_state,
+                            best_oracle_state=self.best_oracle_state,
+                            best_metrics=self.best_metrics,
+                            best_round=self.best_round,
+                            attack_results=self.attack_results,
+                            attack_target_type=self.attack_target_type,
+                            transport='grpc',
+                        )
+                    self.pending = {}
+                    self.round_index = next_round_index
+                    self.round_start_time = time.perf_counter()
+                    self.stopped = will_stop
+                    if self.stopped:
+                        self.stop_time_seconds = time.perf_counter()
+                        self.finalize_requested = True
             return {'accepted': True, 'stop': self.stopped, 'round': self.round_index}
 
 
@@ -409,7 +499,16 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
     train_loaders, _, _ = build_federated_loaders(config)
     if client_id not in train_loaders:
         raise ValueError(f'Unknown client_id {client_id}; expected one of {sorted(train_loaders)}')
-    client = FederatedClient(client_id, train_loaders[client_id], config, device)
+    total_train_samples = sum(_loader_num_samples(loader) for loader in train_loaders.values())
+    client = FederatedClient(
+        client_id,
+        train_loaders[client_id],
+        config,
+        device,
+        total_train_samples=total_train_samples,
+        total_clients=len(train_loaders),
+        allow_ega_pretrain=False,
+    )
     rpc = FederatedRpcClient(address, max_message_length=max_message_length)
     def _ack_stop() -> None:
         try:
@@ -442,7 +541,12 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
             address,
         )
         train_start = time.perf_counter()
-        result = client.train(global_payload['state'], compressed=global_payload['compressed'], round_index=round_index)
+        result = client.train(
+            global_payload['state'],
+            compressed=global_payload['compressed'],
+            round_index=round_index,
+            round_context=global_payload.get('round_context'),
+        )
         train_time_seconds = time.perf_counter() - train_start
         current_transport_snapshot = rpc.snapshot_counters()
         _apply_transport_metrics(result, _transport_delta(current_transport_snapshot, last_transport_snapshot), round_index=round_index)

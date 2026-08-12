@@ -1,0 +1,31 @@
+includes: rawdata2_patchtst.yaml
+
+experiment:
+  name: rawdata2_ega
+  output_dir: outputs/rawdata2_ega
+
+federated:
+  algorithm: ega_fedavg
+  rounds: 500
+  local_epochs: 1
+  quantization_seed: 2026
+
+ega:
+  artifact_path: artifacts/ega/rawdata2_ega.pt
+  block_size: 256
+  encoded_dim: 128
+  hidden_dim: 512
+  residual_blocks: 2
+  quantization_level: 64
+  normalization: 1.0
+  initial_normalization: 1.0
+  min_normalization: 0.001
+  normalization_strategy: previous_round_max_abs
+  pretrain:
+    device: cpu
+    epochs: 100
+    batch_size: 64
+    lr: 0.001
+    train_groups: 10000
+    val_groups: 5000
+    seed: 2026

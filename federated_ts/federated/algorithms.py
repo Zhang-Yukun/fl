@@ -110,11 +110,18 @@ def resolve_device(config: dict[str, Any]) -> torch.device:
     return torch.device(requested)
 
 
+def _loader_num_samples(loader: Any) -> int:
+    """Return the number of samples carried by one loader-like object."""
+
+    dataset = getattr(loader, "dataset", None)
+    return len(dataset) if dataset is not None else len(loader)
+
+
 def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     """Return whether the configured FL algorithm compresses client uploads."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if algorithm in {"fedavg", "fedaware", "secure_quantized_fedavg", "adaptive_clipped_rdp_fedavg", "sign_fedavg", "qsgd_fedavg"}:
+    if algorithm in {"fedavg", "fedaware", "secure_quantized_fedavg", "adaptive_clipped_rdp_fedavg", "sign_fedavg", "qsgd_fedavg", "ega_fedavg"}:
         return False
     if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl", "dp_topk_fedavg", "randomk_fedavg"}:
         return True
@@ -501,14 +508,22 @@ def _attack_target_type(config: dict[str, Any]) -> str:
     return str(config.get("attack", {}).get("target_type", "update_payload")).lower()
 
 
-def _extract_attack_payload(config: dict[str, Any], result) -> StateDict:
+def _extract_attack_payload(config: dict[str, Any], result, results, server: FederatedServer | None = None) -> StateDict:
     """Return the actual transmitted client payload as a dense state update."""
 
+    algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
+    if algorithm == "ega_fedavg":
+        if server is None:
+            raise ValueError("EGA attack extraction requires server context")
+        payloads = [item.ega_payload for item in results]
+        if any(payload is None for payload in payloads):
+            raise ValueError("EGA attack extraction requires payloads from every client")
+        target_index = next(index for index, item in enumerate(results) if item.client_id == result.client_id)
+        return server.decode_ega_attack_view(payloads, target_index)
     if result.sparse_update is not None:
         return decompress_topk(result.sparse_update)
     if result.state is None:
         raise ValueError(f"Client {result.client_id} did not produce an attackable payload")
-    algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
     if algorithm == "secure_quantized_fedavg":
         return dequantize_state_update(result.state)
     return _clone_state(result.state)
@@ -579,6 +594,7 @@ def _build_attack_round_task(
     max_rounds: int,
     round_base_state: StateDict,
     attack_target_type: str,
+    server: FederatedServer | None = None,
 ) -> AttackRoundTask | None:
     """Capture one round of attack inputs as immutable CPU snapshots."""
 
@@ -609,7 +625,7 @@ def _build_attack_round_task(
                 )
             else:
                 real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
-                target = _extract_attack_payload(config, result)
+                target = _extract_attack_payload(config, result, results, server=server)
                 reference_inputs = client.train_reference_inputs()
             samples.append(
                 AttackSampleTask(
@@ -977,7 +993,19 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     device = resolve_device(config)
     train_loaders, val_loader, test_loader = build_federated_loaders(config)
     server = FederatedServer(config, val_loader, test_loader, device)
-    clients = [FederatedClient(client_id, loader, config, device) for client_id, loader in train_loaders.items()]
+    total_train_samples = sum(_loader_num_samples(loader) for loader in train_loaders.values())
+    clients = [
+        FederatedClient(
+            client_id,
+            loader,
+            config,
+            device,
+            total_train_samples=total_train_samples,
+            total_clients=len(train_loaders),
+            allow_ega_pretrain=False,
+        )
+        for client_id, loader in train_loaders.items()
+    ]
     compressed = is_compressed_algorithm(config)
     algorithm = str(config["federated"].get("algorithm", "fedavg"))
     attack_target_type = _attack_target_type(config)
@@ -1005,7 +1033,14 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     for round_index in range(max_rounds):
         round_start = time.perf_counter()
         round_base_state = _clone_state(server.global_state)
-        results = [client.train(round_base_state, compressed=compressed, round_index=round_index) for client in clients]
+        round_context = server.build_round_context()
+        if round_context:
+            results = [
+                client.train(round_base_state, compressed=compressed, round_index=round_index, round_context=round_context)
+                for client in clients
+            ]
+        else:
+            results = [client.train(round_base_state, compressed=compressed, round_index=round_index) for client in clients]
         if compressed:
             aggregation_weights = server.aggregate_sparse(results, round_base_state=round_base_state)
         else:
@@ -1043,6 +1078,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             max_rounds,
             round_base_state,
             attack_target_type,
+            server=server,
         )
         attack_manager.submit(attack_task)
         _save_periodic_federated_snapshot(

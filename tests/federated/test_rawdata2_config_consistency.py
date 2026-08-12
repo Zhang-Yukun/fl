@@ -18,9 +18,10 @@ def test_rawdata2_training_lengths_are_consistent():
     randomk = load_config(CONFIG_DIR / "rawdata2_randomk.yaml")
     sign = load_config(CONFIG_DIR / "rawdata2_sign.yaml")
     qsgd = load_config(CONFIG_DIR / "rawdata2_qsgd.yaml")
+    ega = load_config(CONFIG_DIR / "rawdata2_ega.yaml")
 
     assert base["training"]["epochs"] == 500
-    for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl, randomk, sign, qsgd):
+    for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl, randomk, sign, qsgd, ega):
         assert config["federated"]["rounds"] == 500
         assert config["federated"]["local_epochs"] == 1
 

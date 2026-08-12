@@ -18,6 +18,7 @@ def test_rawdata2_run_scripts_are_separate_and_executable():
         "run_rawdata2_randomk.sh": ["configs/rawdata2_randomk.yaml"],
         "run_rawdata2_sign.sh": ["configs/rawdata2_sign.yaml"],
         "run_rawdata2_qsgd.sh": ["configs/rawdata2_qsgd.yaml"],
+        "run_rawdata2_ega.sh": ["configs/rawdata2_ega.yaml"],
     }
     for name, markers in expected.items():
         path = SCRIPT_DIR / name

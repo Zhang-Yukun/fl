@@ -404,6 +404,49 @@ def test_qsgd_fedavg_uses_stochastic_multilevel_quantization(tmp_path):
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
 
 
+def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=ega_fedavg",
+            "federated.rounds=1",
+            "federated.quantization_seed=2026",
+            "attack.enabled=false",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    config["ega"] = {
+        "artifact_path": str(tmp_path / "ega_codec.pt"),
+        "block_size": 8,
+        "encoded_dim": 4,
+        "hidden_dim": 16,
+        "residual_blocks": 1,
+        "quantization_level": 16,
+        "normalization": 1.0,
+        "initial_normalization": 1.0,
+        "min_normalization": 1e-4,
+        "normalization_strategy": "fixed",
+        "pretrain": {
+            "device": "cpu",
+            "epochs": 2,
+            "batch_size": 16,
+            "lr": 1e-3,
+            "train_groups": 64,
+            "val_groups": 16,
+            "seed": 2026,
+        },
+    }
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    clients = metrics[0]["clients"]
+
+    assert (tmp_path / "ega_codec.pt").exists()
+    assert result["last_upload_compression_ratio"] > 1.0
+    assert all(client["payload_kind"] == "ega_encoded_update" for client in clients)
+    assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
+
+
+
 def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
