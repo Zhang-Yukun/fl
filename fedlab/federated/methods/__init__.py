@@ -5,6 +5,7 @@ from fedlab.federated.methods.registry import build_method, get_registered_metho
 
 # Import migrated methods and then stub registrations to keep the registry complete.
 from fedlab.federated.methods import dense as _dense  # noqa: F401
+from fedlab.federated.methods import quantized as _quantized  # noqa: F401
 from fedlab.federated.methods import stubs as _stubs  # noqa: F401
 
 __all__ = [

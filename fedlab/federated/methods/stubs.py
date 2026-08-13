@@ -29,30 +29,6 @@ class _LegacyStubMethod(FederatedMethod):
         raise RuntimeError(f"{self.name} has not been migrated to the pluggable runtime yet")
 
 
-@federated_method('secure_quantized_fedavg', compressed=False, description='Dense quantized upload FedAvg')
-class SecureQuantizedFedAvgStub(_LegacyStubMethod):
-    """Registered quantized dense FedAvg stub for the migration registry."""
-
-    name = 'secure_quantized_fedavg'
-    capabilities = MethodCapabilities(compressed=False, implemented=False, description='Dense quantized upload FedAvg')
-
-
-@federated_method('sign_fedavg', compressed=False, description='Sign-based dense upload FedAvg')
-class SignFedAvgStub(_LegacyStubMethod):
-    """Registered sign-based FedAvg stub for the migration registry."""
-
-    name = 'sign_fedavg'
-    capabilities = MethodCapabilities(compressed=False, implemented=False, description='Sign-based dense upload FedAvg')
-
-
-@federated_method('qsgd_fedavg', compressed=False, description='QSGD quantized dense upload FedAvg')
-class QsgdFedAvgStub(_LegacyStubMethod):
-    """Registered QSGD FedAvg stub for the migration registry."""
-
-    name = 'qsgd_fedavg'
-    capabilities = MethodCapabilities(compressed=False, implemented=False, description='QSGD quantized dense upload FedAvg')
-
-
 @federated_method('compressed_fedavg', compressed=True, description='Legacy top-k sparse FedAvg alias')
 class CompressedFedAvgStub(_LegacyStubMethod):
     """Registered legacy compressed FedAvg stub for the migration registry."""

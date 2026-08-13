@@ -28,6 +28,9 @@ IMPLEMENTED_METHODS = {
     'adaptive_clipped_rdp_fedavg',
     'fedavg',
     'fedaware',
+    'qsgd_fedavg',
+    'secure_quantized_fedavg',
+    'sign_fedavg',
 }
 
 
