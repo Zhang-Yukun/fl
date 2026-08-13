@@ -8,22 +8,14 @@ from typing import Any
 
 import torch
 
-from fedlab.modeling.ega import EncodedStatePayload, encode_state_update, load_ega_codec
+from fedlab.modeling.ega import EncodedStatePayload, encode_state_update
 from fedlab.federated.methods import build_method
 from fedlab.modeling import build_model
 from fedlab.utils.serialization import (
     SparseUpdate,
     StateDict,
-    compress_randomk,
-    compress_topk,
-    dequantize_state_update,
-    quantize_qsgd_state_update,
-    quantize_state_update,
     load_serialized,
-    privatize_state_update,
     serialize_model,
-    serialize_trainable_model,
-    serialize_untrainable_model,
     state_num_bytes,
     state_num_parameters,
     subtract_state,
@@ -93,14 +85,9 @@ class FederatedClient:
         self.total_train_samples = total_train_samples if total_train_samples is not None else self._loader_num_samples(train_loader)
         self.total_clients = total_clients if total_clients is not None else 1
         self.method = build_method(str(config.get("federated", {}).get("algorithm", "fedavg")))
+        self.allow_ega_pretrain = allow_ega_pretrain
         self.ega_codec = None
-        if str(config.get("federated", {}).get("algorithm", "fedavg")).lower() == "ega_fedavg":
-            self.ega_codec = load_ega_codec(
-                config,
-                device=device,
-                num_clients=self.total_clients,
-                allow_pretrain=allow_ega_pretrain,
-            )
+        self.method.configure_client(self)
 
     @staticmethod
     def _loader_num_samples(loader) -> int:
@@ -159,12 +146,12 @@ class FederatedClient:
         """
 
         algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
-        received_global_state = global_state
-        download_state = global_state
-        if algorithm == "secure_quantized_fedavg":
-            quantization_dtype = str(self.config.get("federated", {}).get("quantization_dtype", "float16"))
-            download_state = quantize_state_update(global_state, dtype=quantization_dtype)
-            received_global_state = dequantize_state_update(download_state)
+        download_state, received_global_state = self.method.prepare_client_state(
+            client=self,
+            global_state=global_state,
+            round_index=round_index,
+            round_context=round_context or {},
+        )
 
         model = build_model(self.config).to(self.device)
         load_serialized(model, received_global_state, self.device)
@@ -195,173 +182,18 @@ class FederatedClient:
             dense_download_reference_bytes=state_num_bytes(global_state),
             dense_download_reference_parameters=state_num_parameters(global_state),
         )
-        if self.method.capabilities.implemented:
-            return self.method.client_update(
-                client=self,
-                model=model,
-                local_state=local_state,
-                global_state=global_state,
-                received_global_state=received_global_state,
-                download_state=download_state,
-                round_index=round_index,
-                round_context=round_context or {},
-                common=common,
-                evaluation_kwargs=evaluation_kwargs,
-                result_cls=ClientResult,
-            )
-        if algorithm == "secure_quantized_fedavg":
-            update = subtract_state(local_state, received_global_state)
-            privacy_cfg = self.config.get("privacy", {})
-            privacy_clip_norm = float(privacy_cfg.get("clip_norm", 0.0))
-            privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.0))
-            update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
-            quantized = quantize_state_update(
-                update,
-                dtype=str(self.config.get("federated", {}).get("quantization_dtype", "float16")),
-                stochastic_rounding=bool(self.config.get("federated", {}).get("quantization_stochastic_rounding", False)),
-                generator=self._upload_quantization_generator(round_index),
-            )
-            return ClientResult(
-                **common,
-                state=quantized,
-                **evaluation_kwargs,
-                upload_bytes=state_num_bytes(quantized),
-                upload_parameters=state_num_parameters(quantized),
-                parameter_upload_bytes=state_num_bytes(quantized),
-                parameter_upload_parameters=state_num_parameters(quantized),
-                transport_upload_bytes=state_num_bytes(quantized),
-                payload_kind="quantized_update",
-                compressor=str(self.config.get("federated", {}).get("quantization_dtype", "float16")) + "_quantized_dense",
-                privacy_clip_norm=privacy_clip_norm,
-                privacy_noise_multiplier=privacy_noise_multiplier,
-            )
-        if algorithm == "sign_fedavg":
-            update = subtract_state(local_state, global_state)
-            quantized = quantize_state_update(update, dtype="sign")
-            return ClientResult(
-                **common,
-                state=quantized,
-                **evaluation_kwargs,
-                upload_bytes=state_num_bytes(quantized),
-                upload_parameters=state_num_parameters(quantized),
-                parameter_upload_bytes=state_num_bytes(quantized),
-                parameter_upload_parameters=state_num_parameters(quantized),
-                transport_upload_bytes=state_num_bytes(quantized),
-                payload_kind="sign_update",
-                compressor="sign_mean_abs",
-            )
-        if algorithm == "qsgd_fedavg":
-            update = subtract_state(local_state, global_state)
-            levels = int(self.config.get("federated", {}).get("qsgd_levels", 127))
-            quantized = quantize_qsgd_state_update(
-                update,
-                levels=levels,
-                generator=self._upload_quantization_generator(round_index),
-            )
-            return ClientResult(
-                **common,
-                state=quantized,
-                **evaluation_kwargs,
-                upload_bytes=state_num_bytes(quantized),
-                upload_parameters=state_num_parameters(quantized),
-                parameter_upload_bytes=state_num_bytes(quantized),
-                parameter_upload_parameters=state_num_parameters(quantized),
-                transport_upload_bytes=state_num_bytes(quantized),
-                payload_kind="qsgd_update",
-                compressor=f"qsgd_{levels}_levels",
-            )
-        if algorithm == "ega_fedavg":
-            if self.ega_codec is None:
-                raise RuntimeError("EGA codec was not initialized on the client")
-            ega_cfg = self.config.get("ega", {})
-            contribution_scale = float(self._loader_num_samples(self.train_loader)) / float(max(self.total_train_samples, 1))
-            contribution_scale *= float(self.total_clients)
-            normalization = float(
-                (round_context or {}).get(
-                    "ega_normalization",
-                    ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)),
-                )
-            )
-            payload = encode_state_update(
-                subtract_state(local_state, global_state),
-                self.ega_codec,
-                quantization_level=int(ega_cfg.get("quantization_level", 64)),
-                normalization=max(normalization, float(ega_cfg.get("min_normalization", 1e-6))),
-                block_size=int(ega_cfg.get("block_size", 256)),
-                contribution_scale=contribution_scale,
-                generator=self._upload_quantization_generator(round_index),
-            )
-            return ClientResult(
-                **common,
-                ega_payload=payload,
-                **evaluation_kwargs,
-                upload_bytes=payload.nbytes,
-                upload_parameters=payload.num_parameters,
-                parameter_upload_bytes=payload.nbytes,
-                parameter_upload_parameters=payload.num_parameters,
-                transport_upload_bytes=payload.nbytes,
-                payload_kind="ega_encoded_update",
-                compressor=f"ega_b{payload.block_size}_h{payload.encoded_dim}_s{payload.quantization_level}",
-            )
-        if compressed:
-            trainable_state = serialize_trainable_model(model)
-            untrainable_state = serialize_untrainable_model(model)
-            global_trainable_state = type(global_state)((name, global_state[name]) for name in trainable_state.keys())
-            global_untrainable_state = type(global_state)((name, global_state[name]) for name in untrainable_state.keys())
-            update = subtract_state(trainable_state, global_trainable_state)
-            buffer_update = subtract_state(untrainable_state, global_untrainable_state)
-            fraction = float(self.config["federated"].get("topk_fraction", 0.05))
-            payload_kind = "sparse_update"
-            compressor = "topk"
-            privacy_clip_norm = 0.0
-            privacy_noise_multiplier = 0.0
-            if algorithm in {"soteriafl", "dp_topk_fedavg"}:
-                privacy_cfg = self.config.get("privacy", {})
-                privacy_clip_norm = float(privacy_cfg.get("clip_norm", 1.0))
-                privacy_noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.1))
-                update = privatize_state_update(update, privacy_clip_norm, privacy_noise_multiplier)
-                if algorithm == "soteriafl":
-                    sparse = compress_randomk(update, fraction, generator=self._randomk_generator(round_index))
-                    payload_kind = "soteriafl_randomk_dp_update"
-                    compressor = "randomk_unbiased"
-                else:
-                    sparse = compress_topk(update, fraction)
-                    payload_kind = "dp_topk_dp_update"
-                    compressor = "topk_dp"
-            elif algorithm == "randomk_fedavg":
-                sparse = compress_randomk(update, fraction, generator=self._randomk_generator(round_index))
-                payload_kind = "randomk_update"
-                compressor = "randomk_unbiased"
-            else:
-                sparse = compress_topk(update, fraction)
-            dense_buffer_bytes = state_num_bytes(buffer_update)
-            dense_buffer_parameters = state_num_parameters(buffer_update)
-            return ClientResult(
-                **common,
-                state=buffer_update,
-                sparse_update=sparse,
-                **evaluation_kwargs,
-                upload_bytes=sparse.nbytes + dense_buffer_bytes,
-                upload_parameters=sparse.values.numel() + dense_buffer_parameters,
-                parameter_upload_bytes=sparse.nbytes + dense_buffer_bytes,
-                parameter_upload_parameters=sparse.values.numel() + dense_buffer_parameters,
-                transport_upload_bytes=sparse.nbytes + dense_buffer_bytes,
-                payload_kind=payload_kind,
-                compressor=compressor,
-                privacy_clip_norm=privacy_clip_norm,
-                privacy_noise_multiplier=privacy_noise_multiplier,
-            )
-        dense_update = subtract_state(local_state, global_state)
-        return ClientResult(
-            **common,
-            state=dense_update,
-            **evaluation_kwargs,
-            upload_bytes=dense_bytes,
-            upload_parameters=dense_parameters,
-            parameter_upload_bytes=dense_bytes,
-            parameter_upload_parameters=dense_parameters,
-            transport_upload_bytes=dense_bytes,
-            payload_kind="dense_update",
+        return self.method.client_update(
+            client=self,
+            model=model,
+            local_state=local_state,
+            global_state=global_state,
+            received_global_state=received_global_state,
+            download_state=download_state,
+            round_index=round_index,
+            round_context=round_context or {},
+            common=common,
+            evaluation_kwargs=evaluation_kwargs,
+            result_cls=ClientResult,
         )
 
     def gradient_sample(self, global_state: StateDict, max_samples: int | None = None, batch_index: int = 0):

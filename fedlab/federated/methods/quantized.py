@@ -38,6 +38,13 @@ class SecureQuantizedFedAvgMethod(_QuantizedDenseMethod):
     name = 'secure_quantized_fedavg'
     capabilities = MethodCapabilities(compressed=False, implemented=True, description='Dense quantized upload FedAvg')
 
+    def prepare_client_state(self, *, global_state, client, round_index: int, round_context: dict[str, Any]):
+        """Quantize the download payload before the client loads it for training."""
+
+        quantization_dtype = str(client.config.get('federated', {}).get('quantization_dtype', 'float16'))
+        download_state = quantize_state_update(global_state, dtype=quantization_dtype)
+        return download_state, dequantize_state_update(download_state)
+
     def client_update(
         self,
         *,

@@ -24,19 +24,7 @@ EXPECTED_METHODS = {
     'sparse_fedavg': True,
 }
 
-IMPLEMENTED_METHODS = {
-    'adaptive_clipped_rdp_fedavg',
-    'compressed_fedavg',
-    'dp_topk_fedavg',
-    'fedavg',
-    'fedaware',
-    'qsgd_fedavg',
-    'randomk_fedavg',
-    'secure_quantized_fedavg',
-    'sign_fedavg',
-    'soteriafl',
-    'sparse_fedavg',
-}
+IMPLEMENTED_METHODS = set(EXPECTED_METHODS)
 
 
 def test_method_registry_covers_current_algorithm_names():

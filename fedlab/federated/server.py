@@ -13,15 +13,11 @@ from loguru import logger
 from fedlab.utils.artifacts import save_experiment_config
 from fedlab.federated.methods import build_method
 from fedlab.modeling import build_model
-from fedlab.modeling.ega import EncodedStatePayload, decode_attack_view_from_mean_difference, decode_mean_encoded_payload, load_ega_codec
+from fedlab.modeling.ega import EncodedStatePayload, decode_attack_view_from_mean_difference, decode_mean_encoded_payload
 from fedlab.utils.serialization import (
     StateDict,
     add_update,
     average_states,
-    decompress_topk,
-    dequantize_qsgd_state_update,
-    dequantize_state_update,
-    quantize_state_update,
     serialize_model,
     state_num_bytes,
     state_num_parameters,
@@ -204,17 +200,6 @@ class FederatedServer:
         self.global_state = serialize_model(self.model)
         self.oracle_global_state = _clone_state_dict(self.global_state)
         self.evaluation_mode = str(self.config.get("evaluation", {}).get("mode", "protocol")).lower()
-        algorithm = str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower()
-        if algorithm == "ega_fedavg":
-            ega_cfg = self.config.get("ega", {})
-            total_clients = int(ega_cfg.get("num_clients", len(self.config.get("data", {}).get("clients", [])) or 1))
-            self.ega_codec = load_ega_codec(
-                self.config,
-                device=self.device,
-                num_clients=total_clients,
-                allow_pretrain=True,
-            )
-            self.ega_normalization = float(ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)))
         self.method.configure_server(self)
         logger.info(
             "Initialized global model with {} parameters ({} bytes) using method={}",
@@ -226,9 +211,7 @@ class FederatedServer:
     def build_round_context(self) -> dict[str, Any]:
         """Return server-controlled per-round context forwarded to clients."""
 
-        if self.ega_normalization is None:
-            return {}
-        return {"ega_normalization": float(self.ega_normalization)}
+        return self.method.build_round_context(self)
 
     def decode_ega_attack_view(self, payloads: list[EncodedStatePayload], target_index: int) -> StateDict:
         """Return the honest-but-curious server attack view for one EGA client."""
@@ -307,89 +290,27 @@ class FederatedServer:
         return weights
 
     def aggregate_dense(self, results, round_index: int = 0, round_base_state: StateDict | None = None) -> list[float]:
-        """Aggregate dense client payloads for FedAvg-style methods."""
+        """Aggregate dense client payloads through the active method implementation."""
 
-        algorithm = str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower()
-        sample_weights = [result.num_samples for result in results]
         if round_base_state is None:
             round_base_state = _clone_state_dict(self.global_state)
-        if algorithm == "secure_quantized_fedavg":
-            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-            dense_updates = [dequantize_state_update(result.state) for result in results]
-            averaged_update = average_states(dense_updates, sample_weights)
-            quantization_dtype = str(self.config.get("federated", {}).get("quantization_dtype", "float16"))
-            compressed_base = dequantize_state_update(quantize_state_update(self.global_state, dtype=quantization_dtype))
-            self.global_state = add_update(compressed_base, averaged_update)
-            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
-            return weights
-        if algorithm == "sign_fedavg":
-            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-            dense_updates = [dequantize_state_update(result.state) for result in results]
-            averaged_update = average_states(dense_updates, sample_weights)
-            self.global_state = add_update(self.global_state, averaged_update)
-            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
-            return weights
-        if algorithm == "qsgd_fedavg":
-            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-            levels = int(self.config.get("federated", {}).get("qsgd_levels", 127))
-            dense_updates = [dequantize_qsgd_state_update(result.state, levels=levels) for result in results]
-            averaged_update = average_states(dense_updates, sample_weights)
-            self.global_state = add_update(self.global_state, averaged_update)
-            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
-            return weights
-        if algorithm == "ega_fedavg":
-            if self.ega_codec is None:
-                raise RuntimeError("EGA codec is not initialized on the server")
-            weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-            payloads = [result.ega_payload for result in results]
-            if any(payload is None for payload in payloads):
-                raise ValueError("EGA aggregation requires ega_payload from every client")
-            averaged_update = decode_mean_encoded_payload(payloads, self.ega_codec)
-            self.global_state = add_update(self.global_state, averaged_update)
-            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
-            ega_cfg = self.config.get("ega", {})
-            if str(ega_cfg.get("normalization_strategy", "fixed")).lower() == "previous_round_max_abs":
-                self.ega_normalization = max(
-                    float(ega_cfg.get("min_normalization", 1e-6)),
-                    max(float(tensor.abs().max().item()) for tensor in averaged_update.values()),
-                )
-            return weights
-        if self.method.capabilities.implemented:
-            return self.method.aggregate(
-                server=self,
-                results=results,
-                round_index=round_index,
-                round_base_state=round_base_state,
-            )
-        weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-        averaged_update = average_states([result.state for result in results], sample_weights)
-        self.global_state = add_update(self.global_state, averaged_update)
-        self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
-        return weights
+        return self.method.aggregate(
+            server=self,
+            results=results,
+            round_index=round_index,
+            round_base_state=round_base_state,
+        )
 
     def aggregate_sparse(self, results, round_base_state: StateDict | None = None) -> list[float]:
-        """Aggregate sparse client updates for compressed FedAvg."""
+        """Aggregate sparse client payloads through the active method implementation."""
 
         if round_base_state is None:
             round_base_state = _clone_state_dict(self.global_state)
-        if self.method.capabilities.implemented:
-            return self.method.aggregate(
-                server=self,
-                results=results,
-                round_base_state=round_base_state,
-            )
-        weights = [result.num_samples for result in results]
-        total = float(sum(weights))
-        update = None
-        for result, weight in zip(results, weights):
-            dense = decompress_topk(result.sparse_update)
-            if result.state is not None:
-                dense.update(result.state)
-            scaled = {name: tensor * (weight / total) for name, tensor in dense.items()}
-            update = scaled if update is None else {name: update[name] + scaled[name] for name in scaled}
-        self.global_state = add_update(self.global_state, update)
-        self._update_oracle_evaluation_state(round_base_state, results, weights)
-        return [weight / total for weight in weights]
+        return self.method.aggregate(
+            server=self,
+            results=results,
+            round_base_state=round_base_state,
+        )
 
     def evaluate_protocol(self) -> dict[str, float]:
         """Evaluate the protocol-visible global model on the validation set."""

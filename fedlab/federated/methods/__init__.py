@@ -7,7 +7,7 @@ from fedlab.federated.methods.registry import build_method, get_registered_metho
 from fedlab.federated.methods import dense as _dense  # noqa: F401
 from fedlab.federated.methods import quantized as _quantized  # noqa: F401
 from fedlab.federated.methods import sparse as _sparse  # noqa: F401
-from fedlab.federated.methods import stubs as _stubs  # noqa: F401
+from fedlab.federated.methods import encoded as _encoded  # noqa: F401
 
 __all__ = [
     'FederatedMethod',

@@ -510,26 +510,7 @@ def _extract_attack_payload(config: dict[str, Any], result, results, server: Fed
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
     method = build_method(algorithm)
-    if method.capabilities.implemented:
-        return method.extract_attack_payload(result=result, results=results, server=server, clone_state=_clone_state)
-    if algorithm == "ega_fedavg":
-        if server is None:
-            raise ValueError("EGA attack extraction requires server context")
-        payloads = [item.ega_payload for item in results]
-        if any(payload is None for payload in payloads):
-            raise ValueError("EGA attack extraction requires payloads from every client")
-        target_index = next(index for index, item in enumerate(results) if item.client_id == result.client_id)
-        return server.decode_ega_attack_view(payloads, target_index)
-    if result.sparse_update is not None:
-        payload = decompress_topk(result.sparse_update)
-        if result.state is not None:
-            payload.update(_clone_state(result.state))
-        return payload
-    if result.state is None:
-        raise ValueError(f"Client {result.client_id} did not produce an attackable payload")
-    if algorithm == "secure_quantized_fedavg":
-        return dequantize_state_update(result.state)
-    return _clone_state(result.state)
+    return method.extract_attack_payload(result=result, results=results, server=server, clone_state=_clone_state)
 
 
 @dataclass

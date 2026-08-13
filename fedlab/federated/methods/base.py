@@ -42,6 +42,18 @@ class FederatedMethod(ABC):
 
         return {}
 
+    def prepare_client_state(
+        self,
+        *,
+        client: Any,
+        global_state: Any,
+        round_index: int,
+        round_context: dict[str, Any],
+    ) -> tuple[Any, Any]:
+        """Return the transmitted download state and the state loaded for local training."""
+
+        return global_state, global_state
+
     @abstractmethod
     def client_update(self, **kwargs: Any) -> Any:
         """Build the algorithm-specific client payload from one local update."""
