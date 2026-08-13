@@ -60,7 +60,6 @@ Federated `summary.json` is the main artifact for final comparison.
 | `total_time_seconds` | float | Total end-to-end wall-clock time |
 | `last_upload_compression_ratio` | float | FedAvg reference upload bytes divided by the actual parameter upload bytes of the last round |
 | `last_total_communication_ratio` | float | FedAvg reference total bytes divided by the actual parameter total bytes of the last round |
-| `last_communication_ratio` | float | Alias of the last-round upload compression ratio; kept for backward compatibility |
 | `last_parameter_upload_bytes` | int | Parameter bytes uploaded by all clients in the last round |
 | `last_parameter_download_bytes` | int | Parameter bytes downloaded by all clients in the last round |
 | `last_parameter_total_bytes` | int | Sum of last-round parameter upload and parameter download bytes |
@@ -260,7 +259,6 @@ Federated `metrics.json` is a list of round records. Each item corresponds to on
 | --- | --- | --- |
 | `name` | string | Attack method name, usually `DLG` or `iDLG` |
 | `mse` | float or null | Primary privacy metric value used for this record |
-| `reconstruction_mse` | float or null | Alias of `mse` kept for compatibility |
 | `psnr` | float or null | Peak signal-to-noise ratio of the reconstruction |
 | `ssim` | float or null | Structural similarity score |
 | `iterations` | int | Number of optimizer steps used in the attack loop |
