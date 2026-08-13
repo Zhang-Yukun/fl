@@ -9,6 +9,7 @@ from typing import Any
 import torch
 
 from fedlab.modeling.ega import EncodedStatePayload, encode_state_update, load_ega_codec
+from fedlab.federated.methods import build_method
 from fedlab.modeling import build_model
 from fedlab.utils.serialization import (
     SparseUpdate,
@@ -91,6 +92,7 @@ class FederatedClient:
         self.device = device
         self.total_train_samples = total_train_samples if total_train_samples is not None else self._loader_num_samples(train_loader)
         self.total_clients = total_clients if total_clients is not None else 1
+        self.method = build_method(str(config.get("federated", {}).get("algorithm", "fedavg")))
         self.ega_codec = None
         if str(config.get("federated", {}).get("algorithm", "fedavg")).lower() == "ega_fedavg":
             self.ega_codec = load_ega_codec(

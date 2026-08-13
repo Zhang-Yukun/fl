@@ -36,6 +36,7 @@ from fedlab.federated.algorithms import (
     configure_random_seed,
     configure_torch_runtime,
     resolve_device,
+    is_compressed_algorithm,
 )
 from fedlab.federated.client import ClientResult, FederatedClient
 from fedlab.federated.server import EarlyStopper, FederatedServer
@@ -138,13 +139,7 @@ class GrpcFederatedCoordinator:
             )
             for client_id, loader in train_loaders.items()
         ]
-        self.compressed = str(config['federated'].get('algorithm', 'fedavg')).lower() in {
-            'compressed_fedavg',
-            'sparse_fedavg',
-            'dp_topk_fedavg',
-            'soteriafl',
-            'randomk_fedavg',
-        }
+        self.compressed = is_compressed_algorithm(config)
         self.max_rounds = int(config['federated'].get('rounds', 20))
         self.stopper = EarlyStopper(
             int(config['training'].get('patience', 5)),

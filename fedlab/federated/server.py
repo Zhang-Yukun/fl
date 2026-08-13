@@ -12,6 +12,7 @@ import torch
 from loguru import logger
 
 from fedlab.utils.artifacts import save_experiment_config
+from fedlab.federated.methods import build_method
 from fedlab.modeling import build_model
 from fedlab.modeling.ega import EncodedStatePayload, decode_attack_view_from_mean_difference, decode_mean_encoded_payload, load_ega_codec
 from fedlab.utils.aggregation import fedaware_weights
@@ -188,6 +189,7 @@ class FederatedServer:
     test_loader: Any
     device: torch.device
     model: torch.nn.Module = field(init=False)
+    method: Any = field(init=False)
     global_state: StateDict = field(init=False)
     history: list[RoundRecord] = field(default_factory=list)
     adaptive_accountant: AdaptiveClippedRdpAccountant | None = field(init=False, default=None)
@@ -201,6 +203,7 @@ class FederatedServer:
         """Build the initial global model after dataclass initialization."""
 
         self.model = build_model(self.config).to(self.device)
+        self.method = build_method(str(self.config.get("federated", {}).get("algorithm", "fedavg")))
         self.global_state = serialize_model(self.model)
         self.oracle_global_state = _clone_state_dict(self.global_state)
         self.evaluation_mode = str(self.config.get("evaluation", {}).get("mode", "protocol")).lower()
@@ -222,10 +225,12 @@ class FederatedServer:
                 delta=float(adaptive_cfg.get("delta", 1e-5)),
                 noise_multiplier=float(adaptive_cfg.get("noise_multiplier", 0.0)),
             )
+        self.method.configure_server(self)
         logger.info(
-            "Initialized global model with {} parameters ({} bytes)",
+            "Initialized global model with {} parameters ({} bytes) using method={}",
             state_num_parameters(self.global_state),
             state_num_bytes(self.global_state),
+            self.method.name,
         )
 
     def build_round_context(self) -> dict[str, Any]:

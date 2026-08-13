@@ -29,6 +29,7 @@ from fedlab.security.attacks import (
     summarize_attack_results,
 )
 from fedlab.federated.client import FederatedClient
+from fedlab.federated.methods import build_method, is_registered_compressed
 from fedlab.datasets import build_federated_loaders
 from fedlab.utils.logging import setup_logging
 from fedlab.modeling import build_model
@@ -121,11 +122,7 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     """Return whether the configured FL algorithm compresses client uploads."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if algorithm in {"fedavg", "fedaware", "secure_quantized_fedavg", "adaptive_clipped_rdp_fedavg", "sign_fedavg", "qsgd_fedavg", "ega_fedavg"}:
-        return False
-    if algorithm in {"compressed_fedavg", "sparse_fedavg", "soteriafl", "dp_topk_fedavg", "randomk_fedavg"}:
-        return True
-    raise ValueError(f"Unknown federated algorithm: {algorithm}")
+    return is_registered_compressed(algorithm)
 
 
 def _should_run_attack(config: dict[str, Any], round_index: int, max_rounds: int) -> bool:
@@ -1012,7 +1009,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         for client_id, loader in train_loaders.items()
     ]
     compressed = is_compressed_algorithm(config)
-    algorithm = str(config["federated"].get("algorithm", "fedavg"))
+    method = build_method(str(config["federated"].get("algorithm", "fedavg")))
+    algorithm = method.name
     attack_target_type = _attack_target_type(config)
     logger.info(
         "Starting federated run algorithm={} clients={} compressed_uploads={} attack_target_type={}",
