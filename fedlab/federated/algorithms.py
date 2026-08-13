@@ -521,7 +521,10 @@ def _extract_attack_payload(config: dict[str, Any], result, results, server: Fed
         target_index = next(index for index, item in enumerate(results) if item.client_id == result.client_id)
         return server.decode_ega_attack_view(payloads, target_index)
     if result.sparse_update is not None:
-        return decompress_topk(result.sparse_update)
+        payload = decompress_topk(result.sparse_update)
+        if result.state is not None:
+            payload.update(_clone_state(result.state))
+        return payload
     if result.state is None:
         raise ValueError(f"Client {result.client_id} did not produce an attackable payload")
     if algorithm == "secure_quantized_fedavg":

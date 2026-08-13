@@ -396,6 +396,8 @@ class FederatedServer:
         update = None
         for result, weight in zip(results, weights):
             dense = decompress_topk(result.sparse_update)
+            if result.state is not None:
+                dense.update(result.state)
             scaled = {name: tensor * (weight / total) for name, tensor in dense.items()}
             update = scaled if update is None else {name: update[name] + scaled[name] for name in scaled}
         self.global_state = add_update(self.global_state, update)

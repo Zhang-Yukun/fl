@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -290,6 +291,61 @@ def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
     assert isinstance(target, dict)
     assert torch.equal(target["weight"], torch.tensor([[0.0, 2.0]]))
     assert not torch.equal(target["weight"], oracle_update["weight"])
+
+
+def test_attack_payload_merges_sparse_and_dense_buffer_updates():
+    config = {"federated": {"algorithm": "randomk_fedavg"}}
+    protocol_update = OrderedDict([("weight", torch.tensor([[0.0, 2.0]]))])
+    buffer_update = OrderedDict([("running_var", torch.tensor([0.25, 0.5]))])
+    result = client_module.ClientResult(
+        client_id="Nd2O3",
+        num_samples=1,
+        loss=0.0,
+        state=buffer_update,
+        sparse_update=compress_topk(protocol_update, 1.0),
+        payload_kind="randomk_update",
+    )
+
+    payload = algorithms_module._extract_attack_payload(config, result, [result])
+
+    assert set(payload.keys()) == {"weight", "running_var"}
+    assert torch.equal(payload["weight"], protocol_update["weight"])
+    assert torch.equal(payload["running_var"], buffer_update["running_var"])
+
+
+def test_sparse_aggregation_merges_dense_buffer_updates(tmp_path):
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml")
+    config["experiment"]["output_dir"] = str(tmp_path)
+    _, val_loader, test_loader = build_federated_loaders(config)
+    server = server_module.FederatedServer(config, val_loader, test_loader, torch.device("cpu"))
+    server.global_state = OrderedDict([
+        ("weight", torch.zeros(2)),
+        ("running_var", torch.ones(2)),
+    ])
+    round_base_state = OrderedDict((name, tensor.clone()) for name, tensor in server.global_state.items())
+    results = [
+        client_module.ClientResult(
+            client_id="c1",
+            num_samples=1,
+            loss=0.0,
+            state=OrderedDict([("running_var", torch.tensor([0.5, -0.25]))]),
+            sparse_update=compress_topk(OrderedDict([("weight", torch.tensor([1.0, 0.0]))]), 1.0),
+            payload_kind="randomk_update",
+        ),
+        client_module.ClientResult(
+            client_id="c2",
+            num_samples=3,
+            loss=0.0,
+            state=OrderedDict([("running_var", torch.tensor([0.25, 0.75]))]),
+            sparse_update=compress_topk(OrderedDict([("weight", torch.tensor([0.0, 2.0]))]), 1.0),
+            payload_kind="randomk_update",
+        ),
+    ]
+
+    server.aggregate_sparse(results, round_base_state=round_base_state)
+
+    assert torch.allclose(server.global_state["weight"], torch.tensor([0.25, 1.5]))
+    assert torch.allclose(server.global_state["running_var"], torch.tensor([1.3125, 1.5]))
 
 
 def test_randomk_fedavg_uses_unbiased_sparse_payloads(tmp_path):

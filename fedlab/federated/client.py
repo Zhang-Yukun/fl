@@ -21,6 +21,8 @@ from fedlab.utils.serialization import (
     load_serialized,
     privatize_state_update,
     serialize_model,
+    serialize_trainable_model,
+    serialize_untrainable_model,
     state_num_bytes,
     state_num_parameters,
     subtract_state,
@@ -286,7 +288,12 @@ class FederatedClient:
                 compressor=f"ega_b{payload.block_size}_h{payload.encoded_dim}_s{payload.quantization_level}",
             )
         if compressed:
-            update = subtract_state(local_state, global_state)
+            trainable_state = serialize_trainable_model(model)
+            untrainable_state = serialize_untrainable_model(model)
+            global_trainable_state = type(global_state)((name, global_state[name]) for name in trainable_state.keys())
+            global_untrainable_state = type(global_state)((name, global_state[name]) for name in untrainable_state.keys())
+            update = subtract_state(trainable_state, global_trainable_state)
+            buffer_update = subtract_state(untrainable_state, global_untrainable_state)
             fraction = float(self.config["federated"].get("topk_fraction", 0.05))
             payload_kind = "sparse_update"
             compressor = "topk"
@@ -311,15 +318,18 @@ class FederatedClient:
                 compressor = "randomk_unbiased"
             else:
                 sparse = compress_topk(update, fraction)
+            dense_buffer_bytes = state_num_bytes(buffer_update)
+            dense_buffer_parameters = state_num_parameters(buffer_update)
             return ClientResult(
                 **common,
+                state=buffer_update,
                 sparse_update=sparse,
                 **evaluation_kwargs,
-                upload_bytes=sparse.nbytes,
-                upload_parameters=sparse.values.numel(),
-                parameter_upload_bytes=sparse.nbytes,
-                parameter_upload_parameters=sparse.values.numel(),
-                transport_upload_bytes=sparse.nbytes,
+                upload_bytes=sparse.nbytes + dense_buffer_bytes,
+                upload_parameters=sparse.values.numel() + dense_buffer_parameters,
+                parameter_upload_bytes=sparse.nbytes + dense_buffer_bytes,
+                parameter_upload_parameters=sparse.values.numel() + dense_buffer_parameters,
+                transport_upload_bytes=sparse.nbytes + dense_buffer_bytes,
                 payload_kind=payload_kind,
                 compressor=compressor,
                 privacy_clip_norm=privacy_clip_norm,
