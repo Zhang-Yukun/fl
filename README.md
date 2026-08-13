@@ -27,11 +27,17 @@ artifacts, and extension points, see
 - `fedlab.datasets.rare_earth`: rare-earth CSV loading and sliding-window datasets.
 - `fedlab.modeling.forecasting`: forecasting model registry and implementations.
 - `fedlab.engine.training`: local train/evaluate loops.
-- `fedlab.federated.algorithms`: centralized training, FedAvg, FedAWARE, and compressed FedAvg.
-- `fedlab.federated.client` and `fedlab.federated.server`: FL endpoint logic.
+- `fedlab.federated.methods`: pluggable federated algorithm implementations grouped by dense, sparse, quantized, and encoded families.
+- `fedlab.federated.client` and `fedlab.federated.server`: algorithm-agnostic FL endpoint runtime that delegates payload construction, aggregation, and attack-view extraction to the active method.
+- `fedlab.federated.algorithms`: single-process federated orchestration, attack scheduling, and evaluation flow built on the method registry.
 - `fedlab.utils.aggregation`: adaptive aggregation helpers for Xu et al.'s FedAWARE weighting.
 - `fedlab.security.attacks`: DLG and iDLG-style gradient reconstruction attacks.
 - `fedlab.communication.grpc_service`: gRPC transport helpers for multi-process training.
+
+To add a new federated algorithm, create one method module under
+`fedlab/federated/methods/`, register it, then add the config/script/tests.
+The runtime no longer requires scattered string-branch edits across client,
+server, and orchestration code.
 
 
 ## Multi-Process gRPC

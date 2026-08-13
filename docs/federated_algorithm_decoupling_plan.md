@@ -98,3 +98,16 @@
 - `docs/框架使用手册.md`
 - 算法接入说明
 - 攻击/评估语义说明
+
+
+## 当前落地状态
+
+截至当前版本，方案已经按既定顺序完成：
+
+1. 已引入 `fedlab/federated/methods/base.py` 与 `registry.py`
+2. 运行时已通过方法注册表解析算法对象
+3. dense / sparse / quantized / encoded 内置算法已迁移到各自模块
+4. `client.py` / `server.py` / `algorithms.py` 已收敛为运行时编排层
+5. 新增算法的主接入点已切换为 `fedlab/federated/methods/`
+
+后续继续扩展算法时，应优先复用该方法层，不再回退到运行时字符串分支。

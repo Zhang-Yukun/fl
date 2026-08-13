@@ -23,15 +23,22 @@
 
 ## 3. 攻击目标是什么
 
+当前框架把每轮联邦语义显式拆成三层：
+
+- `aggregation payload`：真正参与服务器聚合的上传内容
+- `attack view`：服务器攻击端真实可见的内容
+- `evaluation state`：仅用于评测恢复的附加状态
+
 当前默认攻击目标为 `update_payload`，不是原始梯度。
 
 具体含义如下：
 
-- 若算法为普通稠密上传，攻击目标为客户端上传的 `result.state`
-- 若算法为 Top-K 稀疏上传，攻击目标先由 `result.sparse_update` 解压为稠密更新
+- 若算法为普通稠密上传，攻击目标为方法对象导出的 dense update
+- 若算法为 Top-K 稀疏上传，攻击目标先由 `result.sparse_update` 解压为稠密更新，并与 dense buffer update 合并
 - 若算法为量化上传，攻击目标先由量化后的上传内容反量化为稠密更新
+- 若算法为编码上传，攻击目标为方法对象显式导出的协议可见视图
 
-因此，`update_payload` 模式的目标尽量对齐服务器在通信中实际看到的客户端上传内容。
+因此，`update_payload` 模式的目标尽量对齐服务器在通信中实际看到的客户端上传内容，而不是简单读取某个固定字段。
 
 框架也支持 `attack.target_type=gradient`：
 
@@ -201,8 +208,9 @@
 原因是攻击使用的是独立快照：
 
 - 聚合前全局模型 `round_base_state` 的克隆
-- 攻击目标 payload 的克隆
+- 方法对象导出的 `attack view` 克隆
 - `real_x / real_y / reference_inputs` 的克隆
+- 如启用 `evaluation.mode=oracle_full_update`，评测使用的 `evaluation state` 与攻击视图分离
 
 因此异步攻击不会修改聚合结果，也不会直接污染验证集或测试集性能。
 
