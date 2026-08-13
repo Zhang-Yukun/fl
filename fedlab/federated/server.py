@@ -372,6 +372,12 @@ class FederatedServer:
 
         if round_base_state is None:
             round_base_state = _clone_state_dict(self.global_state)
+        if self.method.capabilities.implemented:
+            return self.method.aggregate(
+                server=self,
+                results=results,
+                round_base_state=round_base_state,
+            )
         weights = [result.num_samples for result in results]
         total = float(sum(weights))
         update = None
