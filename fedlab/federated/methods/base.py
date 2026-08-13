@@ -1,0 +1,54 @@
+"""Base interfaces for pluggable federated algorithms."""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any, ClassVar
+
+
+@dataclass(frozen=True)
+class MethodCapabilities:
+    """Static capability flags exposed by one federated algorithm.
+
+    Example:
+        ``MethodCapabilities(compressed=True, description="Top-k sparse upload")``
+        marks one method as a compressed communication variant.
+    """
+
+    compressed: bool = False
+    description: str = ""
+
+
+class FederatedMethod(ABC):
+    """Abstract interface implemented by all federated algorithm modules.
+
+    The runtime should only depend on this interface and the registry instead of
+    dispatching on algorithm-name string branches.
+    """
+
+    name: ClassVar[str]
+    capabilities: ClassVar[MethodCapabilities] = MethodCapabilities()
+
+    def configure_client(self, client: Any) -> None:
+        """Attach algorithm-specific state to a client before training starts."""
+
+    def configure_server(self, server: Any) -> None:
+        """Attach algorithm-specific state to a server before training starts."""
+
+    def build_round_context(self, server: Any) -> dict[str, Any]:
+        """Return any per-round context the server must broadcast to clients."""
+
+        return {}
+
+    @abstractmethod
+    def client_update(self, **kwargs: Any) -> Any:
+        """Build the algorithm-specific client payload from one local update."""
+
+    @abstractmethod
+    def aggregate(self, **kwargs: Any) -> list[float]:
+        """Aggregate one round of client payloads and return client weights."""
+
+    @abstractmethod
+    def extract_attack_payload(self, **kwargs: Any) -> Any:
+        """Return the true payload view exposed to the server-side attacker."""
