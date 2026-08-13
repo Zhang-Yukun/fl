@@ -12,11 +12,12 @@ class MethodCapabilities:
     """Static capability flags exposed by one federated algorithm.
 
     Example:
-        ``MethodCapabilities(compressed=True, description="Top-k sparse upload")``
-        marks one method as a compressed communication variant.
+        ``MethodCapabilities(compressed=True, implemented=True, description="Top-k sparse upload")``
+        marks one method as a migrated compressed communication variant.
     """
 
     compressed: bool = False
+    implemented: bool = False
     description: str = ""
 
 

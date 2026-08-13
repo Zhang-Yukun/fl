@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,6 @@ from fedlab.utils.artifacts import save_experiment_config
 from fedlab.federated.methods import build_method
 from fedlab.modeling import build_model
 from fedlab.modeling.ega import EncodedStatePayload, decode_attack_view_from_mean_difference, decode_mean_encoded_payload, load_ega_codec
-from fedlab.utils.aggregation import fedaware_weights
 from fedlab.utils.serialization import (
     StateDict,
     add_update,
@@ -30,7 +28,6 @@ from fedlab.utils.serialization import (
 )
 from fedlab.engine.training import evaluate
 from fedlab.utils.privacy_accounting import (
-    AdaptiveClippedRdpAccountant,
     AdaptiveRdpStep,
     adaptive_clip_threshold,
     add_gaussian_noise,
@@ -218,13 +215,6 @@ class FederatedServer:
                 allow_pretrain=True,
             )
             self.ega_normalization = float(ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)))
-        adaptive_cfg = self.config.get("adaptive_clipped_rdp", {})
-        if str(self.config.get("federated", {}).get("algorithm", "fedavg")).lower() == "adaptive_clipped_rdp_fedavg":
-            self.adaptive_accountant = AdaptiveClippedRdpAccountant(
-                rdp_alpha=float(adaptive_cfg.get("rdp_alpha", 16.0)),
-                delta=float(adaptive_cfg.get("delta", 1e-5)),
-                noise_multiplier=float(adaptive_cfg.get("noise_multiplier", 0.0)),
-            )
         self.method.configure_server(self)
         logger.info(
             "Initialized global model with {} parameters ({} bytes) using method={}",
@@ -323,25 +313,6 @@ class FederatedServer:
         sample_weights = [result.num_samples for result in results]
         if round_base_state is None:
             round_base_state = _clone_state_dict(self.global_state)
-        if algorithm == "fedaware":
-            aware_cfg = self.config.get("fedaware", {})
-            updates = [result.state for result in results]
-            weights = fedaware_weights(
-                updates,
-                sample_weights,
-                alpha=float(aware_cfg.get("alpha", 0.5)),
-                steps=int(aware_cfg.get("steps", 50)),
-                lr=float(aware_cfg.get("lr", 0.1)),
-            )
-            averaged_update = None
-            for update, weight in zip(updates, weights):
-                scaled = OrderedDict((name, tensor * weight) for name, tensor in update.items())
-                averaged_update = scaled if averaged_update is None else OrderedDict(
-                    (name, averaged_update[name] + scaled[name]) for name in scaled
-                )
-            self.global_state = add_update(self.global_state, averaged_update)
-            self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
-            return weights
         if algorithm == "secure_quantized_fedavg":
             weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
             dense_updates = [dequantize_state_update(result.state) for result in results]
@@ -366,8 +337,6 @@ class FederatedServer:
             self.global_state = add_update(self.global_state, averaged_update)
             self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
             return weights
-        if algorithm == "adaptive_clipped_rdp_fedavg":
-            return self._aggregate_adaptive_clipped_rdp(results, round_index, round_base_state)
         if algorithm == "ega_fedavg":
             if self.ega_codec is None:
                 raise RuntimeError("EGA codec is not initialized on the server")
@@ -385,6 +354,13 @@ class FederatedServer:
                     max(float(tensor.abs().max().item()) for tensor in averaged_update.values()),
                 )
             return weights
+        if self.method.capabilities.implemented:
+            return self.method.aggregate(
+                server=self,
+                results=results,
+                round_index=round_index,
+                round_base_state=round_base_state,
+            )
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         averaged_update = average_states([result.state for result in results], sample_weights)
         self.global_state = add_update(self.global_state, averaged_update)

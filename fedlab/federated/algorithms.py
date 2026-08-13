@@ -509,6 +509,9 @@ def _extract_attack_payload(config: dict[str, Any], result, results, server: Fed
     """Return the actual transmitted client payload as a dense state update."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
+    method = build_method(algorithm)
+    if method.capabilities.implemented:
+        return method.extract_attack_payload(result=result, results=results, server=server, clone_state=_clone_state)
     if algorithm == "ega_fedavg":
         if server is None:
             raise ValueError("EGA attack extraction requires server context")

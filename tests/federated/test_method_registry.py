@@ -24,6 +24,12 @@ EXPECTED_METHODS = {
     'sparse_fedavg': True,
 }
 
+IMPLEMENTED_METHODS = {
+    'adaptive_clipped_rdp_fedavg',
+    'fedavg',
+    'fedaware',
+}
+
 
 def test_method_registry_covers_current_algorithm_names():
     registered = {item.name: item.compressed for item in list_registered_methods()}
@@ -41,6 +47,7 @@ def test_registered_method_exposes_expected_capabilities(name, compressed):
     assert isinstance(method, FederatedMethod)
     assert method.name == name
     assert method.capabilities.compressed is compressed
+    assert method.capabilities.implemented is (name in IMPLEMENTED_METHODS)
 
 
 def test_runtime_compressed_resolution_matches_registry():

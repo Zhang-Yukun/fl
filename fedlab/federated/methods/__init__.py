@@ -3,7 +3,8 @@
 from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
 from fedlab.federated.methods.registry import build_method, get_registered_method, is_registered_compressed, list_registered_methods, register_method
 
-# Import stub registrations eagerly so the registry reflects current algorithm coverage.
+# Import migrated methods and then stub registrations to keep the registry complete.
+from fedlab.federated.methods import dense as _dense  # noqa: F401
 from fedlab.federated.methods import stubs as _stubs  # noqa: F401
 
 __all__ = [

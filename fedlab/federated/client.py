@@ -195,6 +195,20 @@ class FederatedClient:
             dense_download_reference_bytes=state_num_bytes(global_state),
             dense_download_reference_parameters=state_num_parameters(global_state),
         )
+        if self.method.capabilities.implemented:
+            return self.method.client_update(
+                client=self,
+                model=model,
+                local_state=local_state,
+                global_state=global_state,
+                received_global_state=received_global_state,
+                download_state=download_state,
+                round_index=round_index,
+                round_context=round_context or {},
+                common=common,
+                evaluation_kwargs=evaluation_kwargs,
+                result_cls=ClientResult,
+            )
         if algorithm == "secure_quantized_fedavg":
             update = subtract_state(local_state, received_global_state)
             privacy_cfg = self.config.get("privacy", {})
