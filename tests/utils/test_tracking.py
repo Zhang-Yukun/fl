@@ -1,4 +1,4 @@
-from fedlab.utils.tracking import Tracker
+from fedlab.utils.tracking import Tracker, _to_series
 
 
 class _FakeRun:
@@ -94,3 +94,11 @@ def test_tracker_log_attack_reconstruction_creates_wandb_image():
     payload, step = tracker.run.calls[0]
     assert step == 2
     assert "DLG" in payload["attack/DLG/reconstruction"].caption
+
+
+def test_to_series_preserves_time_axis_for_common_forecasting_shapes():
+    torch = __import__("torch")
+
+    assert _to_series(torch.tensor([[[1.0], [2.0], [3.0]]])) == [1.0, 2.0, 3.0]
+    assert _to_series(torch.tensor([[1.0], [2.0], [3.0]])) == [1.0, 2.0, 3.0]
+    assert _to_series(torch.tensor([[[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]])) == [1.0, 2.0, 3.0]

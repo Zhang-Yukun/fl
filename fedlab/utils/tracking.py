@@ -99,7 +99,11 @@ class Tracker:
 
 
 def _to_series(tensor) -> list[float]:
-    """Flatten a time-series tensor to one plottable 1D sequence."""
+    """Flatten a time-series tensor to one plottable 1D sequence.
+
+    Example:
+        ``[1, 96, 1]`` becomes a 96-step series instead of collapsing to one point.
+    """
 
     if tensor is None:
         return []
@@ -110,8 +114,12 @@ def _to_series(tensor) -> list[float]:
         return [float(data.item())]
     if data.ndim == 1:
         return [float(value) for value in data.tolist()]
-    while data.ndim > 1:
+    if data.ndim >= 2 and data.shape[0] == 1:
         data = data[0]
+    while data.ndim > 1 and data.shape[-1] == 1:
+        data = data[..., 0]
+    if data.ndim > 1:
+        data = data.reshape(data.shape[0], -1)[:, 0]
     return [float(value) for value in data.tolist()]
 
 
