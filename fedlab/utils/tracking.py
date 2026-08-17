@@ -125,7 +125,7 @@ def _to_series(tensor) -> list[float]:
 
 
 def _prediction_figure(input_series, prediction, target, title: str | None = None):
-    """Return a matplotlib figure for input-context and prediction comparison."""
+    """Return a single-axis matplotlib figure for context and forecast comparison."""
 
     try:
         import matplotlib.pyplot as plt
@@ -138,21 +138,24 @@ def _prediction_figure(input_series, prediction, target, title: str | None = Non
     target_series = _to_series(target)
     if not pred_series or not target_series:
         return None
-    figure, axes = plt.subplots(1, 2, figsize=(12, 3))
+    figure, axis = plt.subplots(figsize=(10, 3.5))
+    history_steps = list(range(len(input_values)))
+    forecast_steps = list(range(len(input_values), len(input_values) + len(target_series)))
     if input_values:
-        axes[0].plot(input_values, label="input_x", linewidth=2.0)
-        axes[0].legend(loc="best")
-    axes[0].set_title("Input context")
-    axes[0].set_xlabel("step")
-    axes[0].set_ylabel("value")
-    axes[0].grid(True, alpha=0.3)
-    axes[1].plot(target_series, label="target_y", linewidth=2.0)
-    axes[1].plot(pred_series, label="prediction_y", linewidth=2.0)
-    axes[1].set_title(title or "Prediction vs target")
-    axes[1].set_xlabel("step")
-    axes[1].set_ylabel("value")
-    axes[1].legend(loc="best")
-    axes[1].grid(True, alpha=0.3)
+        axis.plot(history_steps, input_values, label="input_x", linewidth=2.0)
+        if target_series:
+            axis.plot([history_steps[-1], forecast_steps[0]], [input_values[-1], target_series[0]], linewidth=1.2, alpha=0.5, color='tab:orange', linestyle=':')
+        if pred_series:
+            axis.plot([history_steps[-1], forecast_steps[0]], [input_values[-1], pred_series[0]], linewidth=1.2, alpha=0.5, color='tab:green', linestyle=':')
+    axis.plot(forecast_steps, target_series, label="target_y", linewidth=2.0)
+    axis.plot(forecast_steps, pred_series, label="prediction_y", linewidth=2.0)
+    if input_values:
+        axis.axvline(len(input_values) - 0.5, color='gray', linestyle='--', linewidth=1.0, alpha=0.7)
+    axis.set_title(title or "Prediction vs target")
+    axis.set_xlabel("step")
+    axis.set_ylabel("value")
+    axis.legend(loc="best")
+    axis.grid(True, alpha=0.3)
     figure.tight_layout()
     return figure
 

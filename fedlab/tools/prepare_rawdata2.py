@@ -57,6 +57,44 @@ def _split_frame(frame: pd.DataFrame, train_ratio: float = 0.8, val_ratio: float
     return frame.iloc[:train_end].copy(), frame.iloc[train_end:val_end].copy(), frame.iloc[val_end:].copy()
 
 
+def _build_interpolated_merged_frame(series_by_client: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Build a daily wide frame with linear interpolation across missing dates.
+
+    Example:
+        ``_build_interpolated_merged_frame({"Nd2O3": daily_frame})`` returns a
+        daily wide table spanning the full min-max date range.
+    """
+
+    if not series_by_client:
+        raise ValueError("At least one client series is required")
+    merged = []
+    for client_id, daily in series_by_client.items():
+        wide = daily.copy()
+        wide["date"] = pd.to_datetime(wide["date"], errors="coerce")
+        wide = wide.dropna(subset=["date"]).rename(columns={"value": client_id}).set_index("date")
+        merged.append(wide[[client_id]])
+    wide_frame = pd.concat(merged, axis=1, sort=True).sort_index()
+    full_index = pd.date_range(wide_frame.index.min(), wide_frame.index.max(), freq="D")
+    wide_frame = wide_frame.reindex(full_index)
+    wide_frame = wide_frame.interpolate(method="linear", limit_direction="both").ffill().bfill()
+    wide_frame.index.name = "date"
+    return wide_frame.reset_index().assign(date=lambda frame: frame["date"].dt.strftime("%Y-%m-%d"))
+
+
+def _split_merged_frame_by_client(
+    merged_frame: pd.DataFrame,
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.1,
+) -> dict[str, tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]]:
+    """Split an interpolated wide frame into per-client chronological partitions."""
+
+    splits: dict[str, tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]] = {}
+    for client_id in [column for column in merged_frame.columns if column != "date"]:
+        client_frame = merged_frame[["date", client_id]].rename(columns={client_id: "value"})
+        splits[client_id] = _split_frame(client_frame, train_ratio=train_ratio, val_ratio=val_ratio)
+    return splits
+
+
 def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int]]:
     """Prepare all rawdata2 Excel files into client and server CSV files.
 
@@ -70,24 +108,30 @@ def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int
     summary = {}
     server_val = []
     server_test = []
-    merged = []
+    series_by_client: dict[str, pd.DataFrame] = {}
     for path in sorted(raw_dir.glob("*.xls")):
         client_id, daily = _read_daily_series(path)
-        train, val, test = _split_frame(daily)
+        series_by_client[client_id] = daily
+
+    merged_frame = _build_interpolated_merged_frame(series_by_client)
+    split_by_client = _split_merged_frame_by_client(merged_frame)
+    for client_id, (train, val, test) in split_by_client.items():
         client_dir = output_dir / "clients" / client_id
         client_dir.mkdir(parents=True, exist_ok=True)
         for name, split in {"train": train, "val": val, "test": test}.items():
             split.to_csv(client_dir / f"{name}.csv", index=False)
-        for split_name, split, target in [("val", val, server_val), ("test", test, server_test)]:
+        for split in (val, test):
+            if split is val:
+                target = server_val
+            else:
+                target = server_test
             combined = split.copy()
             combined.insert(1, "client", client_id)
             target.append(combined)
-        wide = daily.rename(columns={"value": client_id}).set_index("date")
-        merged.append(wide)
-        summary[client_id] = {"total": len(daily), "train": len(train), "val": len(val), "test": len(test)}
+        summary[client_id] = {"total": len(train) + len(val) + len(test), "train": len(train), "val": len(val), "test": len(test)}
     pd.concat(server_val, ignore_index=True).to_csv(output_dir / "server" / "val.csv", index=False)
     pd.concat(server_test, ignore_index=True).to_csv(output_dir / "server" / "test.csv", index=False)
-    pd.concat(merged, axis=1).sort_index().reset_index().to_csv(output_dir / "merged_wide.csv", index=False)
+    merged_frame.to_csv(output_dir / "merged_wide.csv", index=False)
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
 
@@ -96,7 +140,7 @@ def main() -> None:
     """Parse CLI arguments and prepare rawdata2 files."""
 
     parser = argparse.ArgumentParser(description="Prepare rawdata2 rare-earth data for federated training")
-    parser.add_argument("--raw-dir", default="../Time-Series-Prediction/dataset/data_preprocess/rawdata2")
+    parser.add_argument("--raw-dir", default="../data/raw_data")
     parser.add_argument("--output-dir", default="../data/rare_earth_rawdata2")
     args = parser.parse_args()
     summary = prepare_rawdata2(Path(args.raw_dir), Path(args.output_dir))

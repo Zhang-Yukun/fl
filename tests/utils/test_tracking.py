@@ -1,4 +1,4 @@
-from fedlab.utils.tracking import Tracker, _to_series
+from fedlab.utils.tracking import Tracker, _prediction_figure, _to_series
 
 
 class _FakeRun:
@@ -103,3 +103,22 @@ def test_to_series_preserves_time_axis_for_common_forecasting_shapes():
     assert _to_series(torch.tensor([[[1.0], [2.0], [3.0]]])) == [1.0, 2.0, 3.0]
     assert _to_series(torch.tensor([[1.0], [2.0], [3.0]])) == [1.0, 2.0, 3.0]
     assert _to_series(torch.tensor([[[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]])) == [1.0, 2.0, 3.0]
+
+
+def test_prediction_figure_draws_single_axis_with_history_and_forecast():
+    torch = __import__("torch")
+
+    figure = _prediction_figure(
+        torch.tensor([[[0.0], [0.5], [1.0], [1.5]]]),
+        torch.tensor([[[1.1], [1.9], [3.2]]]),
+        torch.tensor([[[1.0], [2.0], [3.0]]]),
+        title="demo",
+    )
+
+    assert figure is not None
+    assert len(figure.axes) == 1
+    axis = figure.axes[0]
+    labels = [line.get_label() for line in axis.lines]
+    assert "input_x" in labels
+    assert "target_y" in labels
+    assert "prediction_y" in labels

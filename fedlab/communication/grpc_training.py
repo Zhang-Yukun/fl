@@ -271,6 +271,11 @@ class GrpcFederatedCoordinator:
             silent=True,
         )
         self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=round_index)
+        try:
+            input_series, prediction, target = predict_first_batch(self.server.model, self.server.val_loader, self.server.device)
+            self.tracker.log_prediction_plot('prediction/grpc/val', input_series, prediction, target, step=round_index, title='grpc val prediction')
+        except Exception as exc:
+            logger.debug('Skip gRPC val prediction plot: {}', exc)
         self._run_attacks(round_index, round_base_state, results)
         if should_save_periodic_artifacts(self.config, round_index + 1):
             _save_periodic_federated_snapshot(

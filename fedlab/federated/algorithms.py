@@ -907,6 +907,11 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
             "epoch/time_seconds": epoch_time,
             "run/elapsed_time_seconds": elapsed,
         }, step=epoch)
+        try:
+            input_series, prediction, target = predict_first_batch(model, val_loader, device)
+            tracker.log_prediction_plot("prediction/centralized/val", input_series, prediction, target, step=epoch, title="centralized val prediction")
+        except Exception as exc:
+            logger.debug("Skip centralized val prediction plot: {}", exc)
         if stopper.update(metrics["mse"]):
             logger.info("Centralized early stopping at epoch {}", epoch)
             break
@@ -1057,6 +1062,11 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             oracle_metrics=oracle_metrics,
         )
         tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(server.history)}, step=round_index)
+        try:
+            input_series, prediction, target = predict_first_batch(server.model, val_loader, device)
+            tracker.log_prediction_plot("prediction/federated/val", input_series, prediction, target, step=round_index, title="federated val prediction")
+        except Exception as exc:
+            logger.debug("Skip federated val prediction plot: {}", exc)
         attack_task = _build_attack_round_task(
             config,
             clients,
