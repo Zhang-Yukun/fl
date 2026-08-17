@@ -131,8 +131,8 @@ def predict_first_batch(
     loader: Iterable,
     device: torch.device,
     max_samples: int | None = 1,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return one prediction batch and its ground-truth target."""
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return one input batch, its prediction, and the ground-truth target."""
 
     model.eval()
     x, y = next(iter(loader))
@@ -140,7 +140,7 @@ def predict_first_batch(
         x = x[:max_samples]
         y = y[:max_samples]
     prediction = _prediction(model, x.to(device)).cpu()
-    return prediction, y.cpu()
+    return x.cpu(), prediction, y.cpu()
 
 
 def first_batch_sample(

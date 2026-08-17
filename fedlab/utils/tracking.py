@@ -71,14 +71,15 @@ class Tracker:
     def log_prediction_plot(
         self,
         key: str,
+        input_series,
         prediction,
         target,
         step: int | None = None,
         title: str | None = None,
     ) -> None:
-        """Render and log a target-vs-prediction line chart."""
+        """Render and log an input-context plus target-vs-prediction chart."""
 
-        figure = _prediction_figure(prediction, target, title=title)
+        figure = _prediction_figure(input_series, prediction, target, title=title)
         if figure is None:
             return
         self.log_image(key, figure, step=step, caption=title)
@@ -123,8 +124,8 @@ def _to_series(tensor) -> list[float]:
     return [float(value) for value in data.tolist()]
 
 
-def _prediction_figure(prediction, target, title: str | None = None):
-    """Return a matplotlib figure for prediction/target comparison."""
+def _prediction_figure(input_series, prediction, target, title: str | None = None):
+    """Return a matplotlib figure for input-context and prediction comparison."""
 
     try:
         import matplotlib.pyplot as plt
@@ -132,19 +133,26 @@ def _prediction_figure(prediction, target, title: str | None = None):
         logger.warning("Prediction plot disabled: {}", exc)
         return None
 
+    input_values = _to_series(input_series)
     pred_series = _to_series(prediction)
     target_series = _to_series(target)
     if not pred_series or not target_series:
         return None
-    figure, axis = plt.subplots(figsize=(9, 3))
-    axis.plot(target_series, label="target", linewidth=2.0)
-    axis.plot(pred_series, label="prediction", linewidth=2.0)
-    axis.set_xlabel("step")
-    axis.set_ylabel("value")
-    if title:
-        axis.set_title(title)
-    axis.legend(loc="best")
-    axis.grid(True, alpha=0.3)
+    figure, axes = plt.subplots(1, 2, figsize=(12, 3))
+    if input_values:
+        axes[0].plot(input_values, label="input_x", linewidth=2.0)
+        axes[0].legend(loc="best")
+    axes[0].set_title("Input context")
+    axes[0].set_xlabel("step")
+    axes[0].set_ylabel("value")
+    axes[0].grid(True, alpha=0.3)
+    axes[1].plot(target_series, label="target_y", linewidth=2.0)
+    axes[1].plot(pred_series, label="prediction_y", linewidth=2.0)
+    axes[1].set_title(title or "Prediction vs target")
+    axes[1].set_xlabel("step")
+    axes[1].set_ylabel("value")
+    axes[1].legend(loc="best")
+    axes[1].grid(True, alpha=0.3)
     figure.tight_layout()
     return figure
 

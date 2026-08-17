@@ -64,6 +64,7 @@ def test_tracker_log_prediction_plot_creates_wandb_image():
 
     tracker.log_prediction_plot(
         "prediction/test",
+        input_series=__import__("torch").tensor([[[0.0], [0.5], [1.0], [1.5]]]),
         prediction=__import__("torch").tensor([[[1.0], [2.0], [3.0]]]),
         target=__import__("torch").tensor([[[1.5], [2.5], [3.5]]]),
         step=5,

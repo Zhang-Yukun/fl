@@ -939,8 +939,8 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
         "run/best_val_mape": best_metrics["mape"],
     })
     try:
-        prediction, target = predict_first_batch(model, test_loader, device)
-        tracker.log_prediction_plot("prediction/centralized/test", prediction, target, step=best_epoch, title="centralized test prediction")
+        input_series, prediction, target = predict_first_batch(model, test_loader, device)
+        tracker.log_prediction_plot("prediction/centralized/test", input_series, prediction, target, step=best_epoch, title="centralized test prediction")
     except Exception as exc:
         logger.debug("Skip centralized prediction plot: {}", exc)
     tracker.finish()
@@ -1096,8 +1096,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     server.save(output_dir, config)
     tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
     try:
-        prediction, target = predict_first_batch(server.model, test_loader, device)
-        tracker.log_prediction_plot("prediction/federated/test", prediction, target, step=best_round, title="federated test prediction")
+        input_series, prediction, target = predict_first_batch(server.model, test_loader, device)
+        tracker.log_prediction_plot("prediction/federated/test", input_series, prediction, target, step=best_round, title="federated test prediction")
     except Exception as exc:
         logger.debug("Skip federated prediction plot: {}", exc)
     attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)

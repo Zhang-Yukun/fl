@@ -337,8 +337,8 @@ class GrpcFederatedCoordinator:
             'privacy/adaptive_clip_norm': summary['adaptive_clip_norm'],
         })
         try:
-            prediction, target = predict_first_batch(self.server.model, self.server.test_loader, self.server.device)
-            self.tracker.log_prediction_plot('prediction/grpc/test', prediction, target, step=self.best_round, title='grpc test prediction')
+            input_series, prediction, target = predict_first_batch(self.server.model, self.server.test_loader, self.server.device)
+            self.tracker.log_prediction_plot('prediction/grpc/test', input_series, prediction, target, step=self.best_round, title='grpc test prediction')
         except Exception as exc:
             logger.debug('Skip gRPC prediction plot: {}', exc)
         self.tracker.finish()
