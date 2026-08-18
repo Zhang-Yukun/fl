@@ -43,7 +43,7 @@ Centralized `summary.json` contains:
 | `test.mse` | float | Mean squared error on the test set |
 | `test.mae` | float | Mean absolute error on the test set |
 | `test.mape` | float | Mean absolute percentage error on the test set |
-| `epochs` | int | Number of completed training epochs |
+| `rounds` | int | Number of completed centralized training rounds |
 | `total_time_seconds` | float | Total wall-clock training time |
 
 ### Federated and gRPC Modes
@@ -140,21 +140,21 @@ Centralized `metrics.json` is an object:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `history` | list[object] | Per-epoch training history |
+| `history` | list[object] | Per-round training history |
 | `test` | object | Final test metrics |
-| `epochs` | int | Number of recorded epochs |
+| `rounds` | int | Number of recorded rounds |
 | `total_time_seconds` | float | Total wall-clock time |
 
 Each item of `history` contains:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `epoch` | int | Epoch index starting from 0 |
+| `round` | int | Round index starting from 0 |
 | `train_loss` | float | Mean training loss across all client loaders treated centrally |
 | `val_mse` | float | Validation MSE |
 | `val_mae` | float | Validation MAE |
 | `val_mape` | float | Validation MAPE |
-| `epoch_time_seconds` | float | Wall-clock time of this epoch |
+| `round_time_seconds` | float | Wall-clock time of this round |
 | `elapsed_time_seconds` | float | Elapsed wall-clock time since training started |
 
 ### Federated and gRPC Modes

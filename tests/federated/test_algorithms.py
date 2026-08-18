@@ -887,7 +887,7 @@ def test_centralized_run_restores_best_validation_checkpoint(tmp_path, monkeypat
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            "centralized.epochs=2",
+            "centralized.rounds=2",
             "training.patience=10",
             "tracking.enabled=false",
             "runtime.device=cpu",
@@ -905,13 +905,13 @@ def test_centralized_run_restores_best_validation_checkpoint(tmp_path, monkeypat
     )
     monkeypatch.setattr(algorithms_module, "build_model", lambda _config: model)
 
-    epoch_state = {"count": 0}
+    round_state = {"count": 0}
 
     def fake_train_one_epoch(model, loader, optimizer, device):
-        epoch_state["count"] += 1
+        round_state["count"] += 1
         with torch.no_grad():
-            model.weight.fill_(float(epoch_state["count"]))
-        return float(epoch_state["count"])
+            model.weight.fill_(float(round_state["count"]))
+        return float(round_state["count"])
 
     def fake_evaluate(model, loader, device):
         weight = float(model.weight.item())
@@ -932,11 +932,13 @@ def test_centralized_run_restores_best_validation_checkpoint(tmp_path, monkeypat
     saved_state = torch.load(tmp_path / "centralized_model.pt", map_location="cpu")
 
     assert result["mse"] == 10.0
-    assert summary["best_epoch"] == 0
+    assert summary["best_round"] == 0
     assert summary["best_val_mse"] == 0.1
     assert summary["test_checkpoint"] == "best_validation"
-    assert metrics["best_epoch"] == 0
+    assert metrics["best_round"] == 0
     assert metrics["best_val"]["mse"] == 0.1
+    assert metrics["history"][0]["round"] == 0
+    assert "epoch" not in metrics["history"][0]
     assert float(saved_state["weight"].item()) == pytest.approx(1.0)
 
 

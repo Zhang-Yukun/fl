@@ -33,7 +33,7 @@ training:
   min_delta: 0.0
 
 centralized:
-  epochs: 10
+  rounds: 10
 
 federated:
   algorithm: compressed_fedavg

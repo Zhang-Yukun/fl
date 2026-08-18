@@ -31,7 +31,7 @@ CENTRALIZED_OVERRIDES=()
 FEDERATED_OVERRIDES=()
 
 if [[ -n "${SUITE_ROUNDS}" ]]; then
-  CENTRALIZED_OVERRIDES+=(--override "centralized.epochs=${SUITE_ROUNDS}")
+  CENTRALIZED_OVERRIDES+=(--override "centralized.rounds=${SUITE_ROUNDS}")
   FEDERATED_OVERRIDES+=(--override "federated.rounds=${SUITE_ROUNDS}")
 fi
 

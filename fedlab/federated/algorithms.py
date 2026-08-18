@@ -101,20 +101,31 @@ def configure_random_seed(config: dict[str, Any]) -> None:
     setup_seed(int(seed), deterministic=bool(runtime_cfg.get("deterministic", True)))
 
 
-def _resolve_centralized_epochs(config: dict[str, Any]) -> int:
-    """Resolve centralized training epochs from the dedicated config block.
+def _resolve_centralized_rounds(config: dict[str, Any]) -> int:
+    """Resolve centralized training rounds from the dedicated config block.
 
-    The preferred location is ``centralized.epochs``. ``training.epochs`` remains
-    as a temporary backward-compatible fallback.
+    The preferred location is ``centralized.rounds``. ``centralized.epochs`` and
+    ``training.epochs`` remain backward-compatible fallbacks while older configs
+    are phased out.
     """
 
     centralized_cfg = config.get("centralized", {})
-    if centralized_cfg.get("epochs") is not None:
-        return int(centralized_cfg.get("epochs"))
-    legacy = config.get("training", {}).get("epochs")
-    if legacy is not None:
-        logger.warning("Using deprecated training.epochs={} for centralized mode; prefer centralized.epochs", legacy)
-        return int(legacy)
+    if centralized_cfg.get("rounds") is not None:
+        return int(centralized_cfg.get("rounds"))
+    legacy_centralized = centralized_cfg.get("epochs")
+    if legacy_centralized is not None:
+        logger.warning(
+            "Using deprecated centralized.epochs={} for centralized mode; prefer centralized.rounds",
+            legacy_centralized,
+        )
+        return int(legacy_centralized)
+    legacy_training = config.get("training", {}).get("epochs")
+    if legacy_training is not None:
+        logger.warning(
+            "Using deprecated training.epochs={} for centralized mode; prefer centralized.rounds",
+            legacy_training,
+        )
+        return int(legacy_training)
     return 10
 
 
@@ -124,11 +135,18 @@ def _log_mode_specific_schedule(config: dict[str, Any], mode: str) -> None:
     if mode == "centralized":
         rounds = config.get("federated", {}).get("rounds")
         if rounds is not None:
-            logger.info("Centralized mode ignores federated.rounds={} and uses centralized.epochs", rounds)
+            logger.info("Centralized mode ignores federated.rounds={} and uses centralized.rounds", rounds)
     elif mode == "federated":
-        central_epochs = config.get("centralized", {}).get("epochs")
-        if central_epochs is not None:
-            logger.info("Federated mode ignores centralized.epochs={} and uses federated.rounds", central_epochs)
+        centralized_cfg = config.get("centralized", {})
+        central_rounds = centralized_cfg.get("rounds")
+        if central_rounds is not None:
+            logger.info("Federated mode ignores centralized.rounds={} and uses federated.rounds", central_rounds)
+        legacy_centralized = centralized_cfg.get("epochs")
+        if legacy_centralized is not None:
+            logger.info(
+                "Federated mode ignores deprecated centralized.epochs={} and uses federated.rounds",
+                legacy_centralized,
+            )
         legacy = config.get("training", {}).get("epochs")
         if legacy is not None:
             logger.info("Federated mode ignores deprecated training.epochs={} and uses federated.rounds", legacy)
@@ -926,70 +944,77 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     history = []
     best_state = serialize_model(model)
     best_metrics = {"mse": float("inf"), "mae": float("inf"), "mape": float("inf")}
-    best_epoch = -1
-    for epoch in range(_resolve_centralized_epochs(config)):
-        epoch_start = time.perf_counter()
+    best_round = -1
+    for round_index in range(_resolve_centralized_rounds(config)):
+        round_start = time.perf_counter()
         loss = sum(train_one_epoch(model, loader, optimizer, device) for loader in train_loaders.values()) / len(train_loaders)
         metrics = evaluate(model, val_loader, device)
-        best_state, best_metrics, best_epoch, _ = _update_best_checkpoint(
+        best_state, best_metrics, best_round, _ = _update_best_checkpoint(
             best_state=best_state,
             best_metrics=best_metrics,
-            best_index=best_epoch,
+            best_index=best_round,
             candidate_state=serialize_model(model),
             candidate_metrics=metrics,
-            candidate_index=epoch,
-            label="epoch",
+            candidate_index=round_index,
+            label="round",
         )
-        epoch_time = time.perf_counter() - epoch_start
+        round_time = time.perf_counter() - round_start
         elapsed = time.perf_counter() - start_time
-        epoch_record = {
-            "epoch": epoch,
+        round_record = {
+            "round": round_index,
             "train_loss": loss,
             "val_mse": metrics["mse"],
             "val_mae": metrics["mae"],
             "val_mape": metrics["mape"],
-            "epoch_time_seconds": epoch_time,
+            "round_time_seconds": round_time,
             "elapsed_time_seconds": elapsed,
         }
-        history.append(epoch_record)
+        history.append(round_record)
         logger.info(
-            "Centralized epoch {} loss={:.6f} val_mse={:.6f} time={:.2f}s elapsed={:.2f}s",
-            epoch,
+            "Centralized round {} loss={:.6f} val_mse={:.6f} time={:.2f}s elapsed={:.2f}s",
+            round_index,
             loss,
             metrics["mse"],
-            epoch_time,
+            round_time,
             elapsed,
         )
         tracker.log({
-            "epoch/loss": loss,
-            "epoch/val_mse": metrics["mse"],
-            "epoch/val_mae": metrics["mae"],
-            "epoch/val_mape": metrics["mape"],
-            "epoch/time_seconds": epoch_time,
+            "round/loss": loss,
+            "round/val_mse": metrics["mse"],
+            "round/val_mae": metrics["mae"],
+            "round/val_mape": metrics["mape"],
+            "round/time_seconds": round_time,
             "run/elapsed_time_seconds": elapsed,
-        }, step=epoch)
+        }, step=round_index)
         try:
             input_series, prediction, target = predict_first_batch(model, val_loader, device)
-            tracker.log_prediction_plot("prediction/centralized/val", input_series, prediction, target, step=epoch, title="centralized val prediction")
+            tracker.log_prediction_plot(
+                "prediction/centralized/val",
+                input_series,
+                prediction,
+                target,
+                step=round_index,
+                title="centralized val prediction",
+            )
         except Exception as exc:
             logger.debug("Skip centralized val prediction plot: {}", exc)
         if stopper.update(metrics["mse"]):
-            logger.info("Centralized early stopping at epoch {}", epoch)
+            logger.info("Centralized early stopping at round {}", round_index)
             break
     model.load_state_dict(best_state)
-    logger.info("Restored best centralized checkpoint from epoch {} for final test", best_epoch)
+    logger.info("Restored best centralized checkpoint from round {} for final test", best_round)
     torch.save(model.state_dict(), output_dir / "centralized_model.pt")
     test_metrics = evaluate(model, test_loader, device)
-    final_test_step = max(len(history), best_epoch + 1)
+    final_test_step = max(len(history), best_round + 1)
     total_elapsed = time.perf_counter() - start_time
     with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
         json.dump(
             {
                 "history": history,
                 "test": test_metrics,
-                "epochs": len(history),
+                "rounds": len(history),
                 "total_time_seconds": total_elapsed,
-                "best_epoch": best_epoch,
+                "best_round": best_round,
                 "best_val": best_metrics,
                 "test_checkpoint": "best_validation",
             },
@@ -1000,7 +1025,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     tracker.log({
         **{f"test/{key}": value for key, value in test_metrics.items()},
         "run/total_time_seconds": total_elapsed,
-        "run/best_epoch": best_epoch,
+        "run/best_round": best_round,
         "run/best_val_mse": best_metrics["mse"],
         "run/best_val_mae": best_metrics["mae"],
         "run/best_val_mape": best_metrics["mape"],
@@ -1015,9 +1040,9 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
         json.dump(
             {
                 "test": test_metrics,
-                "epochs": len(history),
+                "rounds": len(history),
                 "total_time_seconds": total_elapsed,
-                "best_epoch": best_epoch,
+                "best_round": best_round,
                 "best_val_mse": best_metrics["mse"],
                 "best_val_mae": best_metrics["mae"],
                 "best_val_mape": best_metrics["mape"],

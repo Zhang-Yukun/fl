@@ -67,11 +67,11 @@ def test_oracle_evaluation_enabled_only_for_approximate_methods():
         assert config.get("evaluation", {}).get("mode") == "oracle_full_update"
 
 
-def test_centralized_epochs_are_not_shared_with_federated_configs():
+def test_centralized_rounds_are_not_shared_with_federated_configs():
     centralized = load_config(CONFIG_DIR / "rawdata2_centralized.yaml")
     fedavg = load_config(CONFIG_DIR / "rawdata2_fedavg.yaml")
 
-    assert centralized.get("centralized", {}).get("epochs") == 500
+    assert centralized.get("centralized", {}).get("rounds") == 500
     assert "epochs" not in centralized.get("training", {})
-    assert fedavg.get("centralized", {}).get("epochs") is None
+    assert fedavg.get("centralized", {}).get("rounds") is None
     assert fedavg["federated"]["rounds"] == 300

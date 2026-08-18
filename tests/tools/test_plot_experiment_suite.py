@@ -29,14 +29,14 @@ def test_plot_experiment_suite_loads_runs_plots_and_reports(tmp_path):
         centralized_dir / "metrics.json",
         {
             "history": [
-                {"epoch": 0, "val_mse": 1.0, "val_mae": 0.4, "val_mape": 10.0},
-                {"epoch": 1, "val_mse": 0.8, "val_mae": 0.3, "val_mape": 8.0},
+                {"round": 0, "val_mse": 1.0, "val_mae": 0.4, "val_mape": 10.0},
+                {"round": 1, "val_mse": 0.8, "val_mae": 0.3, "val_mape": 8.0},
             ],
             "test": {"mse": 0.7},
-            "epochs": 2,
+            "rounds": 2,
         },
     )
-    _write_json(centralized_dir / "summary.json", {"test": {"mse": 0.7}, "epochs": 2})
+    _write_json(centralized_dir / "summary.json", {"test": {"mse": 0.7}, "rounds": 2})
 
     _write_json(
         fedavg_dir / "metrics.json",

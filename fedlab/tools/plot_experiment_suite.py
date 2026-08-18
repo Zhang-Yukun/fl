@@ -64,7 +64,7 @@ def _load_centralized_series(run_dir: Path, metrics: dict[str, Any], summary: di
     history = metrics.get("history")
     if not isinstance(history, list) or not history:
         raise ValueError(f"Centralized metrics history is empty in {run_dir}")
-    steps = [int(record["epoch"]) for record in history]
+    steps = [int(record["round"]) if "round" in record else int(record["epoch"]) for record in history]
     test = (summary or {}).get("test") or {}
     test_mse = float(test["mse"]) if "mse" in test else None
     algorithm = str((summary or {}).get("algorithm", "centralized"))
@@ -234,7 +234,7 @@ def plot_validation_metric(
         values = getattr(series, f"val_{metric_name}")
         if not series.steps or not values:
             continue
-        x_label = "epoch" if series.kind == "centralized" else "round"
+        x_label = "round"
         _plot_series_with_optional_padding(series.steps, values, f"{series.label} ({x_label})", max_step)
     plt.xlabel("Epoch / Round")
     plt.ylabel(f"Validation {metric_name.upper()}")

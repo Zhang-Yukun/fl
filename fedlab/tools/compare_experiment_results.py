@@ -113,8 +113,8 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
             result['test'] = summary.get('test', {}) or {}
             if 'rounds' in summary:
                 result['summary_rounds'] = summary['rounds']
-            if 'epochs' in summary:
-                result['summary_epochs'] = summary['epochs']
+            elif 'epochs' in summary:
+                result['summary_rounds'] = summary['epochs']
     return result
 
 
@@ -199,8 +199,6 @@ def print_run_summary(title: str, summary: dict[str, Any]) -> None:
     print(f'  rounds(metrics): {summary["rounds"]}')
     if 'summary_rounds' in summary:
         print(f'  rounds(summary): {summary["summary_rounds"]}')
-    if 'summary_epochs' in summary:
-        print(f'  epochs(summary): {summary["summary_epochs"]}')
     print(f'  total_parameter_upload_bytes: {summary["total_parameter_upload_bytes"]} ({format_bytes(summary["total_parameter_upload_bytes"])})')
     print(f'  total_parameter_download_bytes: {summary["total_parameter_download_bytes"]} ({format_bytes(summary["total_parameter_download_bytes"])})')
     print(f'  total_parameter_bytes: {summary["total_parameter_bytes"]} ({format_bytes(summary["total_parameter_bytes"])})')
