@@ -6,6 +6,29 @@ import copy
 from pathlib import Path
 from typing import Any, Iterable
 
+
+_COMMON_FEDERATED_KEYS = {"algorithm", "rounds", "local_epochs", "local_steps"}
+_ALGORITHM_FEDERATED_KEYS = {
+    "compressed_fedavg": {"topk_fraction"},
+    "sparse_fedavg": {"topk_fraction"},
+    "dp_topk_fedavg": {"topk_fraction"},
+    "randomk_fedavg": {"topk_fraction", "randomk_seed"},
+    "soteriafl": {"topk_fraction", "randomk_seed"},
+    "secure_quantized_fedavg": {"quantization_dtype", "quantization_stochastic_rounding", "quantization_seed"},
+    "qsgd_fedavg": {"qsgd_levels", "quantization_seed"},
+    "sign_fedavg": set(),
+    "fedavg": set(),
+    "fedaware": set(),
+    "adaptive_clipped_rdp_fedavg": set(),
+    "ega_fedavg": {"quantization_seed"},
+}
+_ALGORITHM_ROOT_BLOCKS = {
+    "fedaware": {"fedaware"},
+    "adaptive_clipped_rdp_fedavg": {"adaptive_clipped_rdp"},
+    "ega_fedavg": {"ega"},
+}
+_ALGORITHM_PRIVACY_USERS = {"dp_topk_fedavg", "soteriafl", "secure_quantized_fedavg"}
+
 import yaml
 from loguru import logger
 
@@ -80,12 +103,55 @@ def apply_overrides(config: dict[str, Any], overrides: Iterable[str] | None) -> 
     return result
 
 
+def _validate_no_deprecated_schedule_keys(config: dict[str, Any]) -> None:
+    """Reject deprecated schedule keys that were intentionally removed."""
+
+    centralized_cfg = config.get("centralized", {})
+    if isinstance(centralized_cfg, dict) and centralized_cfg.get("epochs") is not None:
+        raise ValueError("Deprecated config key centralized.epochs is no longer supported; use centralized.rounds")
+    training_cfg = config.get("training", {})
+    if isinstance(training_cfg, dict) and training_cfg.get("epochs") is not None:
+        raise ValueError("Deprecated config key training.epochs is no longer supported")
+
+
+def _sanitize_algorithm_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop algorithm-specific config blocks that do not apply to the active method."""
+
+    result = copy.deepcopy(config)
+    federated_cfg = result.get("federated")
+    if not isinstance(federated_cfg, dict):
+        return result
+    algorithm = str(federated_cfg.get("algorithm", "")).lower()
+    if not algorithm or algorithm not in _ALGORITHM_FEDERATED_KEYS:
+        return result
+
+    allowed_federated_keys = _COMMON_FEDERATED_KEYS | _ALGORITHM_FEDERATED_KEYS.get(algorithm, set())
+    result["federated"] = {
+        key: copy.deepcopy(value)
+        for key, value in federated_cfg.items()
+        if key in allowed_federated_keys
+    }
+
+    active_blocks = _ALGORITHM_ROOT_BLOCKS.get(algorithm, set())
+    for block_name in _ALGORITHM_ROOT_BLOCKS.values():
+        for key in block_name:
+            if key not in active_blocks:
+                result.pop(key, None)
+
+    if algorithm not in _ALGORITHM_PRIVACY_USERS:
+        result.pop("privacy", None)
+
+    return result
+
+
 def load_config(path: str | Path, overrides: Iterable[str] | None = None) -> dict[str, Any]:
     """Load a YAML config, resolve nested includes, and apply CLI overrides."""
 
     path = Path(path).expanduser().resolve()
     config = _resolve_includes(_load_one(path), path.parent)
     config = apply_overrides(config, overrides)
+    _validate_no_deprecated_schedule_keys(config)
+    config = _sanitize_algorithm_config(config)
     logger.info("Loaded config from {}", path)
     return config
 

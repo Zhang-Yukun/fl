@@ -75,3 +75,19 @@ def test_centralized_rounds_are_not_shared_with_federated_configs():
     assert "epochs" not in centralized.get("training", {})
     assert fedavg.get("centralized", {}).get("rounds") is None
     assert fedavg["federated"]["rounds"] == 300
+
+
+def test_algorithm_configs_do_not_carry_unrelated_blocks():
+    fedavg = load_config(CONFIG_DIR / "rawdata2_fedavg.yaml")
+    secure_quantized = load_config(CONFIG_DIR / "rawdata2_secure_quantized_fedavg.yaml")
+    adaptive = load_config(CONFIG_DIR / "rawdata2_adaptive_clipped_rdp_fedavg.yaml")
+    ega = load_config(CONFIG_DIR / "rawdata2_ega.yaml")
+
+    assert "privacy" not in fedavg
+    assert "fedaware" not in secure_quantized
+    assert "adaptive_clipped_rdp" not in secure_quantized
+    assert "ega" not in secure_quantized
+    assert "privacy" not in adaptive
+    assert "adaptive_clipped_rdp" in adaptive
+    assert "privacy" not in ega
+    assert "ega" in ega

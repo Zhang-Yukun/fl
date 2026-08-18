@@ -102,31 +102,12 @@ def configure_random_seed(config: dict[str, Any]) -> None:
 
 
 def _resolve_centralized_rounds(config: dict[str, Any]) -> int:
-    """Resolve centralized training rounds from the dedicated config block.
-
-    The preferred location is ``centralized.rounds``. ``centralized.epochs`` and
-    ``training.epochs`` remain backward-compatible fallbacks while older configs
-    are phased out.
-    """
+    """Resolve centralized training rounds from the dedicated config block."""
 
     centralized_cfg = config.get("centralized", {})
-    if centralized_cfg.get("rounds") is not None:
-        return int(centralized_cfg.get("rounds"))
-    legacy_centralized = centralized_cfg.get("epochs")
-    if legacy_centralized is not None:
-        logger.warning(
-            "Using deprecated centralized.epochs={} for centralized mode; prefer centralized.rounds",
-            legacy_centralized,
-        )
-        return int(legacy_centralized)
-    legacy_training = config.get("training", {}).get("epochs")
-    if legacy_training is not None:
-        logger.warning(
-            "Using deprecated training.epochs={} for centralized mode; prefer centralized.rounds",
-            legacy_training,
-        )
-        return int(legacy_training)
-    return 10
+    if centralized_cfg.get("rounds") is None:
+        return 10
+    return int(centralized_cfg.get("rounds"))
 
 
 def _log_mode_specific_schedule(config: dict[str, Any], mode: str) -> None:
@@ -141,15 +122,6 @@ def _log_mode_specific_schedule(config: dict[str, Any], mode: str) -> None:
         central_rounds = centralized_cfg.get("rounds")
         if central_rounds is not None:
             logger.info("Federated mode ignores centralized.rounds={} and uses federated.rounds", central_rounds)
-        legacy_centralized = centralized_cfg.get("epochs")
-        if legacy_centralized is not None:
-            logger.info(
-                "Federated mode ignores deprecated centralized.epochs={} and uses federated.rounds",
-                legacy_centralized,
-            )
-        legacy = config.get("training", {}).get("epochs")
-        if legacy is not None:
-            logger.info("Federated mode ignores deprecated training.epochs={} and uses federated.rounds", legacy)
 
 
 def resolve_device(config: dict[str, Any]) -> torch.device:

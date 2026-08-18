@@ -113,8 +113,6 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
             result['test'] = summary.get('test', {}) or {}
             if 'rounds' in summary:
                 result['summary_rounds'] = summary['rounds']
-            elif 'epochs' in summary:
-                result['summary_rounds'] = summary['epochs']
     return result
 
 
