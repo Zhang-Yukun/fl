@@ -946,6 +946,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     logger.info("Restored best centralized checkpoint from epoch {} for final test", best_epoch)
     torch.save(model.state_dict(), output_dir / "centralized_model.pt")
     test_metrics = evaluate(model, test_loader, device)
+    final_test_step = max(len(history), best_epoch + 1)
     total_elapsed = time.perf_counter() - start_time
     with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
         json.dump(
@@ -972,7 +973,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     })
     try:
         input_series, prediction, target = predict_first_batch(model, test_loader, device)
-        tracker.log_prediction_plot("prediction/centralized/test", input_series, prediction, target, step=best_epoch, title="centralized test prediction")
+        tracker.log_prediction_plot("prediction/centralized/test", input_series, prediction, target, step=final_test_step, title="centralized test prediction")
     except Exception as exc:
         logger.debug("Skip centralized prediction plot: {}", exc)
     tracker.finish()
@@ -1131,6 +1132,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     test_metrics = server.test_global()
     protocol_test_metrics = server.test_protocol() if server._uses_oracle_evaluation() else test_metrics
     oracle_test_metrics = server.test_oracle() if server._uses_oracle_evaluation() else None
+    final_test_step = max(len(server.history), best_round + 1)
     attack_manager.finalize()
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
@@ -1143,10 +1145,10 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     tracker.log(final_log_payload)
     try:
         input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, test_loader, device)
-        tracker.log_prediction_plot("prediction/federated/test_protocol", input_series, prediction, target, step=best_round, title="federated test protocol prediction")
+        tracker.log_prediction_plot("prediction/federated/test_protocol", input_series, prediction, target, step=final_test_step, title="federated test protocol prediction")
         if server._uses_oracle_evaluation() and server.oracle_global_state is not None:
             input_series, prediction, target = predict_first_batch_for_state(server.model, server.oracle_global_state, test_loader, device)
-            tracker.log_prediction_plot("prediction/federated/test_oracle", input_series, prediction, target, step=best_round, title="federated test oracle prediction")
+            tracker.log_prediction_plot("prediction/federated/test_oracle", input_series, prediction, target, step=final_test_step, title="federated test oracle prediction")
     except Exception as exc:
         logger.debug("Skip federated prediction plot: {}", exc)
     attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)

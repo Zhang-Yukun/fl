@@ -307,6 +307,7 @@ class GrpcFederatedCoordinator:
         protocol_test_metrics = self.server.test_protocol() if self.server._uses_oracle_evaluation() else test_metrics
         oracle_test_metrics = self.server.test_oracle() if self.server._uses_oracle_evaluation() else None
         self.server.save(self.output_dir, self.config)
+        final_test_step = max(len(self.server.history), self.best_round + 1)
         self.attack_manager.finalize()
         total_elapsed = time.perf_counter() - self.start_time
         attack_records = save_attack_artifacts(self.output_dir, self.attack_results)
@@ -353,10 +354,10 @@ class GrpcFederatedCoordinator:
         self.tracker.log(final_log_payload)
         try:
             input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.global_state, self.server.test_loader, self.server.device)
-            self.tracker.log_prediction_plot('prediction/grpc/test_protocol', input_series, prediction, target, step=self.best_round, title='grpc test protocol prediction')
+            self.tracker.log_prediction_plot('prediction/grpc/test_protocol', input_series, prediction, target, step=final_test_step, title='grpc test protocol prediction')
             if self.server._uses_oracle_evaluation() and self.server.oracle_global_state is not None:
                 input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.oracle_global_state, self.server.test_loader, self.server.device)
-                self.tracker.log_prediction_plot('prediction/grpc/test_oracle', input_series, prediction, target, step=self.best_round, title='grpc test oracle prediction')
+                self.tracker.log_prediction_plot('prediction/grpc/test_oracle', input_series, prediction, target, step=final_test_step, title='grpc test oracle prediction')
         except Exception as exc:
             logger.debug('Skip gRPC prediction plot: {}', exc)
         self.tracker.finish()
