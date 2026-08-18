@@ -498,6 +498,7 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
 
     assert (tmp_path / "ega_codec.pt").exists()
     assert result["last_upload_compression_ratio"] > 1.0
+    assert result["best_val_mse"] == result["best_val_mse"]
     assert all(client["payload_kind"] == "ega_encoded_update" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
 
