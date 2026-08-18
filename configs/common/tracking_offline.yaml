@@ -1,0 +1,4 @@
+tracking:
+  enabled: true
+  offline: true
+  project: federated-rare-earth

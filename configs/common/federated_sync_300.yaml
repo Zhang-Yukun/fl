@@ -1,0 +1,3 @@
+federated:
+  rounds: 300
+  local_epochs: 1

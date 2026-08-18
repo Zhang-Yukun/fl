@@ -1,0 +1,5 @@
+training:
+  lr: 0.001
+  epochs: 500
+  patience: 301
+  min_delta: 0.0

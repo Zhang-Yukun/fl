@@ -1,0 +1,12 @@
+model:
+  name: patchtst
+  channels: 1
+  patch_len: 16
+  stride: 8
+  d_model: 384
+  n_heads: 4
+  e_layers: 2
+  d_ff: 2048
+  factor: 3
+  activation: gelu
+  dropout: 0.1

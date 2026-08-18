@@ -7,9 +7,9 @@ CONFIG_DIR = Path(__file__).parents[2] / "configs"
 
 
 def test_rawdata2_training_lengths_are_consistent():
-    """Rawdata2 centralized and federated configs use the agreed 500-step budget."""
+    """Rawdata2 configs share the agreed rawdata2 training/round budgets."""
 
-    base = load_config(CONFIG_DIR / "rawdata2_patchtst.yaml")
+    base = load_config(CONFIG_DIR / "rawdata2_fedavg.yaml")
     fedaware = load_config(CONFIG_DIR / "rawdata2_fedaware.yaml")
     secure_quantized = load_config(CONFIG_DIR / "rawdata2_secure_quantized_fedavg.yaml")
     dp_topk = load_config(CONFIG_DIR / "rawdata2_dp_topk.yaml")
@@ -21,15 +21,16 @@ def test_rawdata2_training_lengths_are_consistent():
     ega = load_config(CONFIG_DIR / "rawdata2_ega.yaml")
 
     assert base["training"]["epochs"] == 500
+    assert base["training"]["patience"] == 301
     for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl, randomk, sign, qsgd, ega):
-        assert config["federated"]["rounds"] == 500
+        assert config["federated"]["rounds"] == 300
         assert config["federated"]["local_epochs"] == 1
 
 
 def test_shared_configs_do_not_define_compression_only_parameters():
     """Shared base configs should not carry compression-specific federated knobs."""
 
-    base = load_config(CONFIG_DIR / "rawdata2_patchtst.yaml")
+    base = load_config(CONFIG_DIR / "rawdata2_fedavg.yaml")
     default = load_config(CONFIG_DIR / "default.yaml")
     dp_topk = load_config(CONFIG_DIR / "rawdata2_dp_topk.yaml")
     topk = load_config(CONFIG_DIR / "rawdata2_fedlab_topk.yaml")

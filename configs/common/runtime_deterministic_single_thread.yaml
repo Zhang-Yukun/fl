@@ -1,0 +1,5 @@
+runtime:
+  seed: 2026
+  deterministic: true
+  num_threads: 1
+  num_interop_threads: 1

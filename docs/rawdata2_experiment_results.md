@@ -21,7 +21,7 @@ The repository's default comparison set is now:
 
 ## Full PatchTST Centralized
 
-Output directory: `outputs/rawdata2_patchtst_centralized/`
+Output directory: `outputs/rawdata2_centralized/`
 
 - Model parameters: 6,269,448
 - Model bytes: 25,077,796
@@ -35,7 +35,7 @@ Output directory: `outputs/rawdata2_patchtst_centralized/`
 
 ## Full PatchTST FedAvg
 
-Output directory: `outputs/rawdata2_patchtst_fedavg/`
+Output directory: `outputs/rawdata2_fedavg/`
 
 - Model parameters: 6,269,448
 - Model bytes: 25,077,796
@@ -70,7 +70,7 @@ New full runs should be compared against this stronger attack setting, not again
 A one-round FedAvg smoke run verified the strengthened attack path on `cuda:0` with full PatchTST and `attack.steps=300`:
 
 ```bash
-conda run -n torch_env python -m fedlab.entrypoints.train --config configs/rawdata2_patchtst.yaml --override experiment.output_dir=outputs/rawdata2_patchtst_gpu_attack_smoke --override experiment.mode=federated --override federated.rounds=1 --override training.patience=1 --override attack.frequency_rounds=1
+conda run -n torch_env python -m fedlab.entrypoints.train --config configs/rawdata2_fedavg.yaml --override experiment.output_dir=outputs/rawdata2_patchtst_gpu_attack_smoke --override experiment.mode=federated --override federated.rounds=1 --override training.patience=1 --override attack.frequency_rounds=1
 ```
 
 - Attack runtime: 18.7609 seconds

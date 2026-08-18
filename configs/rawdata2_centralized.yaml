@@ -1,0 +1,6 @@
+includes: common/rawdata2_patchtst_base.yaml
+
+experiment:
+  name: rawdata2_centralized
+  mode: centralized
+  output_dir: outputs/rawdata2_centralized

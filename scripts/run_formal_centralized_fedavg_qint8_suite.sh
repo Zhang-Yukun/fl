@@ -146,14 +146,14 @@ main() {
 
   run_single \
     centralized \
-    configs/rawdata2_patchtst.yaml \
+    configs/rawdata2_fedavg.yaml \
     centralized \
     --override experiment.mode=centralized \
     "${CENTRALIZED_OVERRIDES[@]}"
 
   run_single \
     fedavg_single_sync \
-    configs/rawdata2_patchtst.yaml \
+    configs/rawdata2_fedavg.yaml \
     federated \
     --override experiment.mode=federated \
     --override federated.algorithm=fedavg \
@@ -162,7 +162,7 @@ main() {
 
   run_single \
     fedavg_single_async \
-    configs/rawdata2_patchtst.yaml \
+    configs/rawdata2_fedavg.yaml \
     federated \
     --override experiment.mode=federated \
     --override federated.algorithm=fedavg \
@@ -173,7 +173,7 @@ main() {
 
   run_grpc \
     fedavg_grpc_sync \
-    configs/rawdata2_patchtst.yaml \
+    configs/rawdata2_fedavg.yaml \
     "${BASE_PORT}" \
     --override experiment.mode=federated \
     --override federated.algorithm=fedavg \
@@ -182,7 +182,7 @@ main() {
 
   run_grpc \
     fedavg_grpc_async \
-    configs/rawdata2_patchtst.yaml \
+    configs/rawdata2_fedavg.yaml \
     "$((BASE_PORT + 1))" \
     --override experiment.mode=federated \
     --override federated.algorithm=fedavg \

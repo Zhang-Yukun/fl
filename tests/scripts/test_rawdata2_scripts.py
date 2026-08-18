@@ -8,7 +8,7 @@ def test_rawdata2_run_scripts_are_separate_and_executable():
     """Rawdata2 default runs expose separate bash entry points."""
 
     expected = {
-        "run_rawdata2_centralized.sh": ["--mode centralized", "rawdata2_patchtst_centralized"],
+        "run_rawdata2_centralized.sh": ["--mode centralized", "rawdata2_centralized"],
         "run_rawdata2_fedavg.sh": ["--mode federated", "federated.algorithm=fedavg"],
         "run_rawdata2_soteriafl.sh": ["configs/rawdata2_soteriafl.yaml"],
         "run_rawdata2_dp_topk.sh": ["configs/rawdata2_dp_topk.yaml"],
@@ -63,7 +63,7 @@ def test_formal_suite_script_exists_and_lists_all_requested_runs():
         "qint8_single_async",
         "qint8_grpc_sync",
         "qint8_grpc_async",
-        "configs/rawdata2_patchtst.yaml",
+        "configs/rawdata2_fedavg.yaml",
         "configs/rawdata2_secure_quantized_fedavg.yaml",
         "federated.quantization_dtype=int8",
         "-m fedlab.entrypoints.train",

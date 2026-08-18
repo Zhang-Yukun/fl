@@ -1,15 +1,14 @@
-includes: rawdata2_patchtst.yaml
+includes:
+  - common/rawdata2_patchtst_base.yaml
+  - common/runtime_deterministic_single_thread.yaml
 
 experiment:
-  name: rawdata2_patchtst_small_deterministic
+  name: rawdata2_fedavg_small_deterministic
+  mode: federated
   output_dir: outputs/fedavg_consistency/single_sync
 
 runtime:
   device: cpu
-  seed: 2026
-  deterministic: true
-  num_threads: 1
-  num_interop_threads: 1
 
 data:
   batch_size: 32

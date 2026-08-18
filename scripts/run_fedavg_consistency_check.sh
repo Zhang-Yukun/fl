@@ -2,7 +2,7 @@
 set -euo pipefail
 
 GPU_ID="${GPU_ID:-0}"
-CONFIG="${CONFIG:-configs/rawdata2_patchtst_small_deterministic.yaml}"
+CONFIG="${CONFIG:-configs/rawdata2_fedavg_small_deterministic.yaml}"
 BASE_OUTPUT="${BASE_OUTPUT:-outputs/fedavg_consistency}"
 PORT_BASE="${PORT_BASE:-55100}"
 PYTHON_BIN="${PYTHON_BIN:-python}"

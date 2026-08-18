@@ -1,0 +1,5 @@
+runtime:
+  device: cuda:0
+  log_level: INFO
+  num_threads: 4
+  num_interop_threads: 1

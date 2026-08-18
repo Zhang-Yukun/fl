@@ -1,12 +1,13 @@
-includes: rawdata2_patchtst.yaml
+includes:
+  - common/rawdata2_patchtst_base.yaml
+  - common/federated_sync_300.yaml
 
 experiment:
   name: rawdata2_randomk
+  mode: federated
   output_dir: outputs/rawdata2_randomk
 
 federated:
   algorithm: randomk_fedavg
-  rounds: 500
-  local_epochs: 1
   topk_fraction: 0.10
   randomk_seed: 2026

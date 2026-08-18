@@ -1,14 +1,10 @@
-includes: rawdata2_adaptive_clipped_rdp_fedavg.yaml
+includes:
+  - common/runtime_deterministic_single_thread.yaml
+  - rawdata2_adaptive_clipped_rdp_fedavg.yaml
 
 experiment:
   name: rawdata2_adaptive_clipped_rdp_fedavg_deterministic
   output_dir: outputs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic
-
-runtime:
-  seed: 2026
-  deterministic: true
-  num_threads: 1
-  num_interop_threads: 1
 
 data:
   shuffle_train: false

@@ -3,8 +3,8 @@ set -euo pipefail
 
 source "$(dirname "$0")/run_test_matrix_common.sh" 0 test_gpu0
 
-run_train configs/rawdata2_patchtst.yaml centralized outputs/test/centralized_seed2026_pat20
-run_train configs/rawdata2_patchtst.yaml federated outputs/test/fedavg_seed2026_pat20
+run_train configs/rawdata2_centralized.yaml centralized outputs/test/centralized_seed2026_pat20
+run_train configs/rawdata2_fedavg.yaml federated outputs/test/fedavg_seed2026_pat20
 run_train configs/rawdata2_secure_quantized_fedavg.yaml federated outputs/test/secure_qfloat16_bidir_seed2026_pat20   --override federated.quantization_dtype=float16   --override federated.quantization_stochastic_rounding=false   --override federated.quantization_seed=2026
 run_train configs/rawdata2_secure_quantized_fedavg.yaml federated outputs/test/secure_qint8_bidir_seed2026_pat20   --override federated.quantization_dtype=int8   --override federated.quantization_stochastic_rounding=false   --override federated.quantization_seed=2026
 run_train configs/rawdata2_secure_quantized_fedavg.yaml federated outputs/test/secure_qint8_stoch_clip6_noise5e-05_seed2026_pat20   --override federated.quantization_dtype=int8   --override federated.quantization_stochastic_rounding=true   --override federated.quantization_seed=2026   --override privacy.clip_norm=6.0   --override privacy.noise_multiplier=0.00005

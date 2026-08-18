@@ -1,13 +1,14 @@
-includes: rawdata2_patchtst.yaml
+includes:
+  - common/rawdata2_patchtst_base.yaml
+  - common/federated_sync_300.yaml
 
 experiment:
   name: rawdata2_ega
+  mode: federated
   output_dir: outputs/rawdata2_ega
 
 federated:
   algorithm: ega_fedavg
-  rounds: 500
-  local_epochs: 1
   quantization_seed: 2026
 
 ega:
@@ -17,6 +18,7 @@ ega:
   hidden_dim: 512
   residual_blocks: 2
   quantization_level: 64
+  encode_buffers: false
   normalization: 1.0
   initial_normalization: 1.0
   min_normalization: 0.001

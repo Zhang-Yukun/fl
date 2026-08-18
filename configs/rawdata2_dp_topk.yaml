@@ -1,4 +1,6 @@
-includes: rawdata2_patchtst.yaml
+includes:
+  - common/rawdata2_patchtst_base.yaml
+  - common/federated_sync_300.yaml
 
 experiment:
   name: rawdata2_dp_topk
@@ -7,8 +9,6 @@ experiment:
 
 federated:
   algorithm: dp_topk_fedavg
-  rounds: 500
-  local_epochs: 1
   topk_fraction: 0.50
 
 privacy:

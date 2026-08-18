@@ -215,7 +215,7 @@ main() {
   local -a modes=()
   if [[ "${WORKER_KIND}" == sync ]]; then
     modes=("${sync_modes[@]}")
-    run_centralized centralized cen configs/rawdata2_patchtst.yaml
+    run_centralized centralized cen configs/rawdata2_centralized.yaml
   else
     modes=("${async_modes[@]}")
   fi
@@ -223,10 +223,10 @@ main() {
   local mode
   for mode in "${modes[@]}"; do
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc "fedavg_${mode}" "fa-${mode}" configs/rawdata2_patchtst.yaml "${port}" --override federated.algorithm=fedavg --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_grpc "fedavg_${mode}" "fa-${mode}" configs/rawdata2_fedavg.yaml "${port}" --override federated.algorithm=fedavg --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
       port=$((port + 1))
     else
-      run_single "fedavg_${mode}" "fa-${mode}" configs/rawdata2_patchtst.yaml --override federated.algorithm=fedavg --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_single "fedavg_${mode}" "fa-${mode}" configs/rawdata2_fedavg.yaml --override federated.algorithm=fedavg --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
     fi
 
     if [[ "${mode}" == grpc_* ]]; then

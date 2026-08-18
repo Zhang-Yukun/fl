@@ -3,9 +3,9 @@ includes:
   - common/federated_sync_300.yaml
 
 experiment:
-  name: rawdata2_sign
+  name: rawdata2_fedavg
   mode: federated
-  output_dir: outputs/rawdata2_sign
+  output_dir: outputs/rawdata2_fedavg
 
 federated:
-  algorithm: sign_fedavg
+  algorithm: fedavg

@@ -1,4 +1,6 @@
-includes: rawdata2_patchtst.yaml
+includes:
+  - common/rawdata2_patchtst_base.yaml
+  - common/federated_sync_300.yaml
 
 experiment:
   name: rawdata2_fedaware
@@ -7,8 +9,6 @@ experiment:
 
 federated:
   algorithm: fedaware
-  rounds: 500
-  local_epochs: 1
 
 fedaware:
   alpha: 0.5
