@@ -11,6 +11,9 @@ federated:
   algorithm: dp_topk_fedavg
   topk_fraction: 0.50
 
+evaluation:
+  mode: oracle_full_update
+
 privacy:
   clip_norm: 2.0
   noise_multiplier: 0.002

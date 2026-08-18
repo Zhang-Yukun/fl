@@ -143,6 +143,25 @@ def predict_first_batch(
     return x.cpu(), prediction, y.cpu()
 
 
+@torch.no_grad()
+def predict_first_batch_for_state(
+    model: nn.Module,
+    state: dict[str, torch.Tensor],
+    loader: Iterable,
+    device: torch.device,
+    max_samples: int | None = 1,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Load a specific state into ``model`` and predict the first batch.
+
+    Example:
+        ``predict_first_batch_for_state(model, global_state, val_loader, device)``
+        renders protocol/oracle predictions from explicitly selected states.
+    """
+
+    model.load_state_dict(state)
+    return predict_first_batch(model, loader, device, max_samples=max_samples)
+
+
 def first_batch_sample(
     loader: Iterable,
     device: torch.device,

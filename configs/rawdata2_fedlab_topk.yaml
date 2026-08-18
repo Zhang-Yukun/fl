@@ -11,6 +11,9 @@ federated:
   algorithm: sparse_fedavg
   topk_fraction: 0.10
 
+evaluation:
+  mode: oracle_full_update
+
 attack:
   reference_metric: reconstruction_mse
   client_selection: round_robin

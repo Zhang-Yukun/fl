@@ -385,6 +385,12 @@ def pretrain_ega_codec(
     criterion = nn.MSELoss()
     best_state = None
     best_val = float("inf")
+    best_epoch = -1
+    completed_epochs = 0
+    patience = pretrain_cfg.get("patience")
+    patience = None if patience is None else int(patience)
+    min_delta = float(pretrain_cfg.get("min_delta", 0.0))
+    bad_epochs = 0
     epochs = int(pretrain_cfg.get("epochs", 100))
     for epoch in range(epochs):
         codec.train()
@@ -419,9 +425,22 @@ def pretrain_ega_codec(
             avg_train,
             avg_val,
         )
-        if avg_val < best_val:
+        completed_epochs = epoch + 1
+        if avg_val < (best_val - min_delta):
             best_val = avg_val
+            best_epoch = epoch
+            bad_epochs = 0
             best_state = {name: tensor.detach().cpu().clone() for name, tensor in codec.state_dict().items()}
+        else:
+            bad_epochs += 1
+            if patience is not None and bad_epochs >= patience:
+                logger.info(
+                    "EGA pretrain early stopping at epoch {} best_epoch={} best_val_loss={:.6f}",
+                    epoch,
+                    best_epoch,
+                    best_val,
+                )
+                break
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -435,10 +454,19 @@ def pretrain_ega_codec(
                 "num_clients": num_clients,
             },
             "best_val_loss": best_val,
+            "best_epoch": best_epoch,
+            "completed_epochs": completed_epochs,
+            "stopped_early": completed_epochs < epochs,
         },
         output_path,
     )
-    logger.info("Saved pretrained EGA codec to {} best_val_loss={:.6f}", output_path, best_val)
+    logger.info(
+        "Saved pretrained EGA codec to {} best_val_loss={:.6f} best_epoch={} completed_epochs={}",
+        output_path,
+        best_val,
+        best_epoch,
+        completed_epochs,
+    )
     return output_path
 
 
@@ -456,8 +484,13 @@ def load_ega_codec(
         if not allow_pretrain:
             raise FileNotFoundError(f"EGA codec artifact not found: {path}")
         logger.info("EGA codec artifact missing at {}; start synthetic pretraining", path)
-        pretrain_device = torch.device(str(_ega_config(config).get("pretrain", {}).get("device", device)))
+        requested_device = _ega_config(config).get("pretrain", {}).get(
+            "device",
+            config.get("runtime", {}).get("device", str(device)),
+        )
+        pretrain_device = torch.device(str(requested_device))
         if pretrain_device.type == "cuda" and not torch.cuda.is_available():
+            logger.warning("Requested EGA pretrain device {} is unavailable; falling back to cpu", pretrain_device)
             pretrain_device = torch.device("cpu")
         pretrain_ega_codec(config, num_clients=num_clients, device=pretrain_device, output_path=path)
     checkpoint = torch.load(path, map_location="cpu")

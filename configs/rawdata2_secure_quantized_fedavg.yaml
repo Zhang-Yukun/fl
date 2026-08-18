@@ -13,6 +13,9 @@ federated:
   quantization_stochastic_rounding: true
   quantization_seed: 2026
 
+evaluation:
+  mode: oracle_full_update
+
 privacy:
   clip_norm: 10.0
   noise_multiplier: 0.0001

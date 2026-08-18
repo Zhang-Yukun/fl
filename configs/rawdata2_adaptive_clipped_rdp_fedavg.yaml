@@ -10,6 +10,9 @@ experiment:
 federated:
   algorithm: adaptive_clipped_rdp_fedavg
 
+evaluation:
+  mode: oracle_full_update
+
 adaptive_clipped_rdp:
   noise_multiplier: 0.001
   reference_clip_norm: 10.0

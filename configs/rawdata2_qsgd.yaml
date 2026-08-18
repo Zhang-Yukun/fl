@@ -11,3 +11,6 @@ federated:
   algorithm: qsgd_fedavg
   qsgd_levels: 63
   quantization_seed: 2026
+
+evaluation:
+  mode: oracle_full_update

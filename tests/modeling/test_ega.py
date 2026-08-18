@@ -8,6 +8,7 @@ from fedlab.modeling.ega import (
     dequantize_block_vector,
     encode_state_update,
     pack_flat_blocks,
+    pretrain_ega_codec,
     stochastic_quantize_block_vector,
 )
 
@@ -64,3 +65,35 @@ def test_pack_flat_blocks_pads_to_block_size():
 
     assert blocks.shape == (3, 4)
     assert pad == 2
+
+
+def test_pretrain_ega_codec_supports_early_stopping(tmp_path):
+    config = {
+        "runtime": {"seed": 2026, "device": "cpu"},
+        "ega": {
+            "block_size": 4,
+            "encoded_dim": 4,
+            "hidden_dim": 8,
+            "residual_blocks": 0,
+            "quantization_level": 8,
+            "pretrain": {
+                "device": "cpu",
+                "epochs": 5,
+                "patience": 1,
+                "min_delta": 1e9,
+                "batch_size": 4,
+                "lr": 1e-3,
+                "train_groups": 8,
+                "val_groups": 4,
+                "seed": 2026,
+            },
+        },
+    }
+
+    output_path = tmp_path / "ega_codec.pt"
+    pretrain_ega_codec(config, num_clients=3, device=torch.device("cpu"), output_path=output_path)
+    checkpoint = torch.load(output_path, map_location="cpu")
+
+    assert checkpoint["best_epoch"] >= 0
+    assert checkpoint["completed_epochs"] < config["ega"]["pretrain"]["epochs"]
+    assert checkpoint["stopped_early"] is True

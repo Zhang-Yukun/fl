@@ -11,3 +11,6 @@ federated:
   algorithm: randomk_fedavg
   topk_fraction: 0.10
   randomk_seed: 2026
+
+evaluation:
+  mode: oracle_full_update

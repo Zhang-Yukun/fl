@@ -11,6 +11,9 @@ federated:
   algorithm: ega_fedavg
   quantization_seed: 2026
 
+evaluation:
+  mode: oracle_full_update
+
 ega:
   artifact_path: artifacts/ega/rawdata2_ega.pt
   block_size: 256
@@ -24,8 +27,10 @@ ega:
   min_normalization: 0.001
   normalization_strategy: previous_round_max_abs
   pretrain:
-    device: cpu
-    epochs: 100
+    device: cuda:0
+    epochs: 30
+    patience: 10
+    min_delta: 0.5
     batch_size: 64
     lr: 0.001
     train_groups: 10000

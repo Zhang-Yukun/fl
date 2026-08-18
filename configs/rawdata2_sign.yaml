@@ -9,3 +9,6 @@ experiment:
 
 federated:
   algorithm: sign_fedavg
+
+evaluation:
+  mode: oracle_full_update

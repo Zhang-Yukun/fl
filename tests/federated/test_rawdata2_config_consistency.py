@@ -43,3 +43,26 @@ def test_shared_configs_do_not_define_compression_only_parameters():
     assert topk["federated"]["topk_fraction"] == 0.10
     assert soteriafl["federated"]["topk_fraction"] == 0.10
     assert randomk["federated"]["topk_fraction"] == 0.10
+
+
+def test_oracle_evaluation_enabled_only_for_approximate_methods():
+    """Approximate/perturbed rawdata2 methods should enable oracle_full_update evaluation."""
+
+    fedavg = load_config(CONFIG_DIR / "rawdata2_fedavg.yaml")
+    fedaware = load_config(CONFIG_DIR / "rawdata2_fedaware.yaml")
+    approximate = [
+        load_config(CONFIG_DIR / "rawdata2_adaptive_clipped_rdp_fedavg.yaml"),
+        load_config(CONFIG_DIR / "rawdata2_dp_topk.yaml"),
+        load_config(CONFIG_DIR / "rawdata2_ega.yaml"),
+        load_config(CONFIG_DIR / "rawdata2_fedlab_topk.yaml"),
+        load_config(CONFIG_DIR / "rawdata2_qsgd.yaml"),
+        load_config(CONFIG_DIR / "rawdata2_randomk.yaml"),
+        load_config(CONFIG_DIR / "rawdata2_secure_quantized_fedavg.yaml"),
+        load_config(CONFIG_DIR / "rawdata2_sign.yaml"),
+        load_config(CONFIG_DIR / "rawdata2_soteriafl.yaml"),
+    ]
+
+    assert fedavg.get("evaluation", {}).get("mode", "protocol") == "protocol"
+    assert fedaware.get("evaluation", {}).get("mode", "protocol") == "protocol"
+    for config in approximate:
+        assert config.get("evaluation", {}).get("mode") == "oracle_full_update"
