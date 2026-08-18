@@ -1,5 +1,6 @@
 from collections import OrderedDict
 
+import pytest
 import torch
 
 from fedlab.modeling.ega import (
@@ -97,3 +98,22 @@ def test_pretrain_ega_codec_supports_early_stopping(tmp_path):
     assert checkpoint["best_epoch"] >= 0
     assert checkpoint["completed_epochs"] < config["ega"]["pretrain"]["epochs"]
     assert checkpoint["stopped_early"] is True
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required for this regression test")
+def test_encode_state_update_moves_blocks_to_codec_device():
+    codec = EgaAutoEncoder(block_size=4, encoded_dim=4, hidden_dim=8, residual_blocks=0).to(torch.device("cuda:0"))
+    update = OrderedDict({"weight": torch.tensor([[0.2, -0.2], [0.1, -0.1]], dtype=torch.float32)})
+
+    payload = encode_state_update(
+        update,
+        codec,
+        quantization_level=8,
+        normalization=1.0,
+        block_size=4,
+        contribution_scale=1.0,
+        generator=torch.Generator(device="cpu").manual_seed(3),
+    )
+
+    assert payload.encoded_blocks.device.type == "cpu"
+    assert payload.encoded_blocks.shape[1] == codec.encoded_dim

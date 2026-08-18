@@ -125,6 +125,12 @@ class EgaAutoEncoder(nn.Module):
         return self.decode_blocks(aggregated)
 
 
+def _codec_device(codec: EgaAutoEncoder) -> torch.device:
+    """Return the device that owns one EGA codec instance."""
+
+    return next(codec.parameters()).device
+
+
 def _ega_config(config: dict[str, Any]) -> dict[str, Any]:
     """Return the EGA-specific config subtree."""
 
@@ -237,7 +243,8 @@ def encode_state_update(
         normalization=normalization,
         generator=generator,
     )
-    encoded = codec.encode_blocks(quantized).detach().cpu().to(torch.float32)
+    codec_device = _codec_device(codec)
+    encoded = codec.encode_blocks(quantized.to(codec_device)).detach().cpu().to(torch.float32)
     return EncodedStatePayload(
         names=names,
         shapes=shapes,
@@ -260,7 +267,8 @@ def decode_mean_encoded_payload(
     if not payloads:
         raise ValueError("payloads must be non-empty")
     first = payloads[0]
-    aggregated = torch.stack([payload.encoded_blocks.to(torch.float32) for payload in payloads], dim=0).mean(dim=0)
+    codec_device = _codec_device(codec)
+    aggregated = torch.stack([payload.encoded_blocks.to(torch.float32) for payload in payloads], dim=0).mean(dim=0).to(codec_device)
     decoded = codec.decode_blocks(aggregated).detach().cpu()
     flat = unpack_flat_blocks(
         dequantize_block_vector(
@@ -283,12 +291,15 @@ def decode_attack_view_from_mean_difference(
     if not payloads:
         raise ValueError("payloads must be non-empty")
     first = payloads[0]
+    codec_device = _codec_device(codec)
     encoded_stack = torch.stack([payload.encoded_blocks.to(torch.float32) for payload in payloads], dim=0)
-    zero_blocks = codec.encode_blocks(torch.zeros((encoded_stack.shape[1], first.block_size), dtype=torch.float32)).detach().cpu()
-    mean_all = encoded_stack.mean(dim=0)
+    zero_blocks = codec.encode_blocks(
+        torch.zeros((encoded_stack.shape[1], first.block_size), dtype=torch.float32, device=codec_device)
+    ).detach().cpu()
+    mean_all = encoded_stack.mean(dim=0).to(codec_device)
     modified = encoded_stack.clone()
     modified[target_index] = zero_blocks
-    mean_without_target = modified.mean(dim=0)
+    mean_without_target = modified.mean(dim=0).to(codec_device)
     decoded = codec.decode_blocks(mean_all).detach().cpu() - codec.decode_blocks(mean_without_target).detach().cpu()
     flat = unpack_flat_blocks(
         dequantize_block_vector(
