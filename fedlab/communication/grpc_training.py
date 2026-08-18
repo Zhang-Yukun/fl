@@ -45,7 +45,7 @@ from fedlab.utils.logging import setup_logging
 from fedlab.utils.artifacts import save_experiment_config, should_save_periodic_artifacts
 from fedlab.utils.serialization import state_num_bytes, state_num_parameters
 from fedlab.utils.tracking import Tracker
-from fedlab.engine.training import predict_first_batch
+from fedlab.engine.training import predict_first_batch, predict_first_batch_for_state
 
 
 def _format_num_bytes(num_bytes: int) -> str:
@@ -272,8 +272,11 @@ class GrpcFederatedCoordinator:
         )
         self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=round_index)
         try:
-            input_series, prediction, target = predict_first_batch(self.server.model, self.server.val_loader, self.server.device)
-            self.tracker.log_prediction_plot('prediction/grpc/val', input_series, prediction, target, step=round_index, title='grpc val prediction')
+            input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.global_state, self.server.val_loader, self.server.device)
+            self.tracker.log_prediction_plot('prediction/grpc/val_protocol', input_series, prediction, target, step=round_index, title='grpc val protocol prediction')
+            if self.server._uses_oracle_evaluation() and self.server.oracle_global_state is not None:
+                input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.oracle_global_state, self.server.val_loader, self.server.device)
+                self.tracker.log_prediction_plot('prediction/grpc/val_oracle', input_series, prediction, target, step=round_index, title='grpc val oracle prediction')
         except Exception as exc:
             logger.debug('Skip gRPC val prediction plot: {}', exc)
         self._run_attacks(round_index, round_base_state, results)
@@ -326,11 +329,13 @@ class GrpcFederatedCoordinator:
             oracle_test_metrics=oracle_test_metrics,
             transport='grpc',
         )
-        self.tracker.log({
+        final_log_payload = {
             **{f'test/{key}': value for key, value in test_metrics.items()},
+            **{f'active_test/{key}': value for key, value in test_metrics.items()},
             'run/rounds': len(self.server.history),
             'run/total_time_seconds': total_elapsed,
             'run/transport': 'grpc',
+            'run/evaluation_mode': self.server.evaluation_mode,
             'run/best_round': self.best_round,
             'run/best_val_mse': self.best_metrics['mse'],
             'run/best_val_mae': self.best_metrics['mae'],
@@ -340,10 +345,18 @@ class GrpcFederatedCoordinator:
             'privacy/rdp_total': summary['privacy_rdp_total'],
             'privacy/sampling_rate': summary['privacy_sampling_rate'],
             'privacy/adaptive_clip_norm': summary['adaptive_clip_norm'],
-        })
+        }
+        if protocol_test_metrics is not None:
+            final_log_payload.update({f'protocol_test/{key}': value for key, value in protocol_test_metrics.items()})
+        if oracle_test_metrics is not None:
+            final_log_payload.update({f'oracle_test/{key}': value for key, value in oracle_test_metrics.items()})
+        self.tracker.log(final_log_payload)
         try:
-            input_series, prediction, target = predict_first_batch(self.server.model, self.server.test_loader, self.server.device)
-            self.tracker.log_prediction_plot('prediction/grpc/test', input_series, prediction, target, step=self.best_round, title='grpc test prediction')
+            input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.global_state, self.server.test_loader, self.server.device)
+            self.tracker.log_prediction_plot('prediction/grpc/test_protocol', input_series, prediction, target, step=self.best_round, title='grpc test protocol prediction')
+            if self.server._uses_oracle_evaluation() and self.server.oracle_global_state is not None:
+                input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.oracle_global_state, self.server.test_loader, self.server.device)
+                self.tracker.log_prediction_plot('prediction/grpc/test_oracle', input_series, prediction, target, step=self.best_round, title='grpc test oracle prediction')
         except Exception as exc:
             logger.debug('Skip gRPC prediction plot: {}', exc)
         self.tracker.finish()
@@ -558,7 +571,7 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
             round_index,
             result.loss,
             train_time_seconds,
-            result.payload_kind,
+            result.aggregation_payload_kind,
             result.compressor,
             result.parameter_upload_bytes,
             _format_num_bytes(result.parameter_upload_bytes),

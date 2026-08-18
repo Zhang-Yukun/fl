@@ -43,7 +43,7 @@ from fedlab.utils.serialization import (
 )
 from fedlab.federated.server import EarlyStopper, FederatedServer, RoundRecord
 from fedlab.utils.tracking import Tracker
-from fedlab.engine.training import build_training_optimizer, evaluate, predict_first_batch, train_one_epoch
+from fedlab.engine.training import build_training_optimizer, evaluate, predict_first_batch, predict_first_batch_for_state, train_one_epoch
 
 
 def configure_torch_runtime(config: dict[str, Any]) -> None:
@@ -155,6 +155,10 @@ def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
     data = asdict(record)
     clients = data.pop("clients")
     payload = {f"round/{key}": value for key, value in data.items()}
+    if "round/val_mse" in payload:
+        payload["round/active_val_mse"] = payload["round/val_mse"]
+        payload["round/active_val_mae"] = payload.get("round/val_mae")
+        payload["round/active_val_mape"] = payload.get("round/val_mape")
     for client in clients:
         prefix = f"client/{client['client_id']}"
         for key, value in client.items():
@@ -176,6 +180,8 @@ def _round_history_communication_summary(history: list[RoundRecord]) -> dict[str
             "last_transport_total_bytes": 0,
             "last_transport_upload_overhead_bytes": 0,
             "last_transport_download_overhead_bytes": 0,
+            "last_parameter_upload_compression_ratio": 0.0,
+            "last_parameter_total_communication_ratio": 0.0,
             "last_transport_upload_compression_ratio": 0.0,
             "last_transport_total_communication_ratio": 0.0,
             "total_parameter_upload_bytes": 0,
@@ -197,6 +203,8 @@ def _round_history_communication_summary(history: list[RoundRecord]) -> dict[str
         "last_transport_total_bytes": last.total_transport_bytes,
         "last_transport_upload_overhead_bytes": last.total_transport_upload_overhead_bytes,
         "last_transport_download_overhead_bytes": last.total_transport_download_overhead_bytes,
+        "last_parameter_upload_compression_ratio": last.parameter_upload_compression_ratio,
+        "last_parameter_total_communication_ratio": last.parameter_total_communication_ratio,
         "last_transport_upload_compression_ratio": last.transport_upload_compression_ratio,
         "last_transport_total_communication_ratio": last.transport_total_communication_ratio,
         "total_parameter_upload_bytes": sum(record.total_parameter_upload_bytes for record in history),
@@ -230,9 +238,17 @@ def _build_federated_summary(
     last_privacy = history[-1] if history else None
     summary = {
         "test": test_metrics,
+        "active_test": test_metrics,
+        "active_test_metrics": test_metrics,
+        "active_test_scope": server.evaluation_mode,
         "evaluation_mode": server.evaluation_mode,
+        "best_val_scope": server.evaluation_mode,
+        "active_best_val_scope": server.evaluation_mode,
+        "active_best_val_metrics": best_metrics,
         "protocol_test": test_metrics if protocol_test_metrics is None else protocol_test_metrics,
+        "protocol_test_metrics": test_metrics if protocol_test_metrics is None else protocol_test_metrics,
         "oracle_test": oracle_test_metrics,
+        "oracle_test_metrics": oracle_test_metrics,
         "rounds": len(history),
         "total_time_seconds": total_elapsed,
         "best_round": best_round,
@@ -240,6 +256,8 @@ def _build_federated_summary(
         "best_val_mae": best_metrics["mae"],
         "best_val_mape": best_metrics["mape"],
         "test_checkpoint": "best_validation",
+        "last_parameter_upload_compression_ratio": history[-1].parameter_upload_compression_ratio if history else 0.0,
+        "last_parameter_total_communication_ratio": history[-1].parameter_total_communication_ratio if history else 0.0,
         "last_upload_compression_ratio": history[-1].upload_compression_ratio if history else 0.0,
         "last_total_communication_ratio": history[-1].total_communication_ratio if history else 0.0,
         "last_communication_ratio": history[-1].communication_ratio if history else 0.0,
@@ -247,6 +265,8 @@ def _build_federated_summary(
         "attack_target_type": attack_summary.get("target_type", attack_target_type),
         "attack_primary_metric": attack_summary["primary_metric"],
         "attack_primary_metric_direction": attack_summary["primary_metric_direction"],
+        "attack_overall_avg_primary_metric": attack_summary["overall_avg_primary_metric"],
+        "attack_overall_best_primary_metric": attack_summary["overall_best_primary_metric"],
         "attack_overall_avg_mse": attack_summary["overall_avg_mse"],
         "attack_success_rate": attack_summary["overall_success_rate"],
         "attack_evaluations": len(attack_records),
@@ -683,32 +703,39 @@ def _execute_attack_round_task(
     )
 
 
-def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: list[Any]) -> dict[str, float]:
+def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: list[Any]) -> dict[str, float | str]:
     """Build per-round and cumulative attack metrics for tracking/logging."""
 
     round_attacks = round_result.attacks
-    overall_avg_mse = 0.0 if not cumulative_results else sum(result.mse for result in cumulative_results) / len(cumulative_results)
-    payload: dict[str, float] = {
+    primary_metric_name = "reconstruction_mse" if not round_attacks else getattr(round_attacks[0], "metric_name", "reconstruction_mse")
+    overall_avg_primary_metric = 0.0 if not cumulative_results else sum(result.mse for result in cumulative_results) / len(cumulative_results)
+    payload: dict[str, float | str] = {
         "attack/round_index": float(round_result.round_index),
         "attack/time_seconds": round_result.time_seconds,
         "attack/evaluations_this_round": float(len(round_attacks)),
         "attack/clients_this_round": float(round_result.clients_this_round),
         "attack/samples_per_client": float(round_result.samples_per_client),
-        "attack/overall_avg_mse_so_far": overall_avg_mse,
+        "attack/primary_metric_name": primary_metric_name,
+        "attack/overall_avg_primary_metric_so_far": overall_avg_primary_metric,
+        "attack/overall_avg_mse_so_far": overall_avg_primary_metric,
         "attack/success_rate_so_far": attack_success_rate(cumulative_results),
     }
     for name in sorted({result.name for result in round_attacks}):
         subset = [result for result in round_attacks if result.name == name]
         prefix = f"attack/{name}"
-        payload[f"{prefix}/mse"] = sum(result.mse for result in subset) / len(subset)
+        payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "reconstruction_mse")
+        payload[f"{prefix}/primary_metric"] = sum(result.mse for result in subset) / len(subset)
+        payload[f"{prefix}/mse"] = payload[f"{prefix}/primary_metric"]
         payload[f"{prefix}/reconstruction_mse"] = payload[f"{prefix}/mse"]
         cumulative_subset = [result for result in cumulative_results if result.name == name]
-        payload[f"{prefix}/avg_mse_so_far"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
+        payload[f"{prefix}/avg_primary_metric_so_far"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
+        payload[f"{prefix}/avg_mse_so_far"] = payload[f"{prefix}/avg_primary_metric_so_far"]
         payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
         payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
         payload[f"{prefix}/iterations"] = float(subset[0].iterations)
         payload[f"{prefix}/time_seconds"] = sum(result.time_seconds for result in subset) / len(subset)
-        payload[f"{prefix}/gradient_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
+        payload[f"{prefix}/objective_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
+        payload[f"{prefix}/gradient_mse"] = payload[f"{prefix}/objective_mse"]
         payload[f"{prefix}/success"] = sum(float(result.success) for result in subset) / len(subset)
         payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(cumulative_results, name)
     return payload
@@ -1063,8 +1090,11 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         )
         tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(server.history)}, step=round_index)
         try:
-            input_series, prediction, target = predict_first_batch(server.model, val_loader, device)
-            tracker.log_prediction_plot("prediction/federated/val", input_series, prediction, target, step=round_index, title="federated val prediction")
+            input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, val_loader, device)
+            tracker.log_prediction_plot("prediction/federated/val_protocol", input_series, prediction, target, step=round_index, title="federated val protocol prediction")
+            if server._uses_oracle_evaluation() and server.oracle_global_state is not None:
+                input_series, prediction, target = predict_first_batch_for_state(server.model, server.oracle_global_state, val_loader, device)
+                tracker.log_prediction_plot("prediction/federated/val_oracle", input_series, prediction, target, step=round_index, title="federated val oracle prediction")
         except Exception as exc:
             logger.debug("Skip federated val prediction plot: {}", exc)
         attack_task = _build_attack_round_task(
@@ -1104,10 +1134,19 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     attack_manager.finalize()
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
-    tracker.log({**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed})
+    final_log_payload = {**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed, "run/evaluation_mode": server.evaluation_mode}
+    final_log_payload.update({f"active_test/{key}": value for key, value in test_metrics.items()})
+    if protocol_test_metrics is not None:
+        final_log_payload.update({f"protocol_test/{key}": value for key, value in protocol_test_metrics.items()})
+    if oracle_test_metrics is not None:
+        final_log_payload.update({f"oracle_test/{key}": value for key, value in oracle_test_metrics.items()})
+    tracker.log(final_log_payload)
     try:
-        input_series, prediction, target = predict_first_batch(server.model, test_loader, device)
-        tracker.log_prediction_plot("prediction/federated/test", input_series, prediction, target, step=best_round, title="federated test prediction")
+        input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, test_loader, device)
+        tracker.log_prediction_plot("prediction/federated/test_protocol", input_series, prediction, target, step=best_round, title="federated test protocol prediction")
+        if server._uses_oracle_evaluation() and server.oracle_global_state is not None:
+            input_series, prediction, target = predict_first_batch_for_state(server.model, server.oracle_global_state, test_loader, device)
+            tracker.log_prediction_plot("prediction/federated/test_oracle", input_series, prediction, target, step=best_round, title="federated test oracle prediction")
     except Exception as exc:
         logger.debug("Skip federated prediction plot: {}", exc)
     attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)

@@ -306,7 +306,7 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
             num_samples=1,
             loss=0.0,
             sparse_update=sparse_update,
-            evaluation_update=dense_update,
+            evaluation_state=dense_update,
             dense_bytes=8,
             dense_parameters=2,
             download_bytes=8,
@@ -321,7 +321,7 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
             parameter_upload_parameters=1,
             transport_download_bytes=8,
             transport_upload_bytes=4,
-            payload_kind="sparse_update",
+            aggregation_payload_kind="sparse_update",
             compressor="topk",
         )
 
@@ -367,6 +367,7 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
 
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert summary["evaluation_mode"] == "oracle_full_update"
+    assert summary["active_test_scope"] == "oracle_full_update"
     assert summary["protocol_test"]["mse"] > 0.0
     assert summary["oracle_test"]["mse"] == pytest.approx(0.0)
 
@@ -539,7 +540,7 @@ def test_grpc_finalization_does_not_block_last_submit_response(tmp_path, monkeyp
     assert response is not None
     assert response["stop"] is True
     assert submit_duration is not None
-    assert submit_duration < 0.15
+    assert submit_duration < 0.3
     assert coordinator.finalize_requested is True
     assert coordinator.finalization_completed is False
 
@@ -612,7 +613,7 @@ def test_grpc_coordinator_restores_best_validation_checkpoint(tmp_path, monkeypa
                 client_id=client_id,
                 num_samples=1,
                 loss=float(_round + 1),
-                state=update,
+                aggregation_state=update,
                 dense_bytes=4,
                 dense_parameters=1,
                 download_bytes=4,

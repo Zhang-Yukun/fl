@@ -49,7 +49,7 @@ def test_single_process_adaptive_clipped_rdp_records_privacy_summary(tmp_path):
     assert metrics[0]["privacy_accountant"] == "adaptive_clipped_rdp"
     assert metrics[0]["adaptive_clip_norm"] is not None
     assert metrics[0]["privacy_rdp_round"] is not None
-    assert all(client["payload_kind"] == "dense_update" for client in metrics[0]["clients"])
+    assert all(client["aggregation_payload_kind"] == "dense_update" for client in metrics[0]["clients"])
 
 
 def test_grpc_adaptive_clipped_rdp_records_privacy_summary(tmp_path):

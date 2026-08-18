@@ -26,9 +26,9 @@ class _QuantizedDenseMethod(FederatedMethod):
     def _dense_attack_payload(self, *, result, **_: Any):
         """Return the uploaded dense payload view exposed to the server."""
 
-        if result.state is None:
+        if result.aggregation_state is None:
             raise ValueError(f'Client {result.client_id} did not produce an attackable dense payload')
-        return result.state
+        return result.aggregation_state
 
 
 @federated_method('secure_quantized_fedavg', compressed=False, description='Dense quantized upload FedAvg')
@@ -72,14 +72,14 @@ class SecureQuantizedFedAvgMethod(_QuantizedDenseMethod):
         )
         return result_cls(
             **common,
-            state=quantized,
+            aggregation_state=quantized,
             **evaluation_kwargs,
             upload_bytes=state_num_bytes(quantized),
             upload_parameters=state_num_parameters(quantized),
             parameter_upload_bytes=state_num_bytes(quantized),
             parameter_upload_parameters=state_num_parameters(quantized),
             transport_upload_bytes=state_num_bytes(quantized),
-            payload_kind='quantized_update',
+            aggregation_payload_kind='quantized_update',
             compressor=str(client.config.get('federated', {}).get('quantization_dtype', 'float16')) + '_quantized_dense',
             privacy_clip_norm=privacy_clip_norm,
             privacy_noise_multiplier=privacy_noise_multiplier,
@@ -90,7 +90,7 @@ class SecureQuantizedFedAvgMethod(_QuantizedDenseMethod):
 
         sample_weights = [result.num_samples for result in results]
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-        dense_updates = [dequantize_state_update(result.state) for result in results]
+        dense_updates = [dequantize_state_update(result.aggregation_state) for result in results]
         averaged_update = average_states(dense_updates, sample_weights)
         quantization_dtype = str(server.config.get('federated', {}).get('quantization_dtype', 'float16'))
         compressed_base = dequantize_state_update(quantize_state_update(server.global_state, dtype=quantization_dtype))
@@ -101,9 +101,9 @@ class SecureQuantizedFedAvgMethod(_QuantizedDenseMethod):
     def extract_attack_payload(self, *, result, **kwargs: Any):
         """Expose the dequantized dense payload to the server attacker."""
 
-        if result.state is None:
+        if result.aggregation_state is None:
             raise ValueError(f'Client {result.client_id} did not produce an attackable dense payload')
-        return dequantize_state_update(result.state)
+        return dequantize_state_update(result.aggregation_state)
 
 
 @federated_method('sign_fedavg', compressed=False, description='Sign-based dense upload FedAvg')
@@ -119,14 +119,14 @@ class SignFedAvgMethod(_QuantizedDenseMethod):
         quantized = quantize_state_update(subtract_state(local_state, global_state), dtype='sign')
         return result_cls(
             **common,
-            state=quantized,
+            aggregation_state=quantized,
             **evaluation_kwargs,
             upload_bytes=state_num_bytes(quantized),
             upload_parameters=state_num_parameters(quantized),
             parameter_upload_bytes=state_num_bytes(quantized),
             parameter_upload_parameters=state_num_parameters(quantized),
             transport_upload_bytes=state_num_bytes(quantized),
-            payload_kind='sign_update',
+            aggregation_payload_kind='sign_update',
             compressor='sign_mean_abs',
         )
 
@@ -135,7 +135,7 @@ class SignFedAvgMethod(_QuantizedDenseMethod):
 
         sample_weights = [result.num_samples for result in results]
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-        dense_updates = [dequantize_state_update(result.state) for result in results]
+        dense_updates = [dequantize_state_update(result.aggregation_state) for result in results]
         averaged_update = average_states(dense_updates, sample_weights)
         server.global_state = add_update(server.global_state, averaged_update)
         server._update_oracle_evaluation_state(round_base_state, results, sample_weights)
@@ -144,9 +144,9 @@ class SignFedAvgMethod(_QuantizedDenseMethod):
     def extract_attack_payload(self, *, result, **kwargs: Any):
         """Expose the dequantized sign payload to the server attacker."""
 
-        if result.state is None:
+        if result.aggregation_state is None:
             raise ValueError(f'Client {result.client_id} did not produce an attackable dense payload')
-        return dequantize_state_update(result.state)
+        return dequantize_state_update(result.aggregation_state)
 
 
 @federated_method('qsgd_fedavg', compressed=False, description='QSGD quantized dense upload FedAvg')
@@ -178,14 +178,14 @@ class QsgdFedAvgMethod(_QuantizedDenseMethod):
         )
         return result_cls(
             **common,
-            state=quantized,
+            aggregation_state=quantized,
             **evaluation_kwargs,
             upload_bytes=state_num_bytes(quantized),
             upload_parameters=state_num_parameters(quantized),
             parameter_upload_bytes=state_num_bytes(quantized),
             parameter_upload_parameters=state_num_parameters(quantized),
             transport_upload_bytes=state_num_bytes(quantized),
-            payload_kind='qsgd_update',
+            aggregation_payload_kind='qsgd_update',
             compressor=f'qsgd_{levels}_levels',
         )
 
@@ -195,7 +195,7 @@ class QsgdFedAvgMethod(_QuantizedDenseMethod):
         sample_weights = [result.num_samples for result in results]
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         levels = int(server.config.get('federated', {}).get('qsgd_levels', 127))
-        dense_updates = [dequantize_qsgd_state_update(result.state, levels=levels) for result in results]
+        dense_updates = [dequantize_qsgd_state_update(result.aggregation_state, levels=levels) for result in results]
         averaged_update = average_states(dense_updates, sample_weights)
         server.global_state = add_update(server.global_state, averaged_update)
         server._update_oracle_evaluation_state(round_base_state, results, sample_weights)
@@ -204,7 +204,7 @@ class QsgdFedAvgMethod(_QuantizedDenseMethod):
     def extract_attack_payload(self, *, result, server=None, **kwargs: Any):
         """Expose the dequantized QSGD payload to the server attacker."""
 
-        if result.state is None:
+        if result.aggregation_state is None:
             raise ValueError(f'Client {result.client_id} did not produce an attackable dense payload')
         levels = 127 if server is None else int(server.config.get('federated', {}).get('qsgd_levels', 127))
-        return dequantize_qsgd_state_update(result.state, levels=levels)
+        return dequantize_qsgd_state_update(result.aggregation_state, levels=levels)

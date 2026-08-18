@@ -131,7 +131,7 @@ def test_standard_fedavg_uses_dense_updates(tmp_path):
     result = run_federated(config)
     assert result["last_upload_compression_ratio"] == 1.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    assert all(client["payload_kind"] == "dense_update" for client in metrics[0]["clients"])
+    assert all(client["aggregation_payload_kind"] == "dense_update" for client in metrics[0]["clients"])
     assert metrics[0]["total_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
     assert metrics[0]["total_parameter_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
     assert metrics[0]["transport_upload_compression_ratio"] == 1.0
@@ -154,7 +154,7 @@ def test_fedaware_uses_dense_updates_and_records_weights(tmp_path):
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     clients = metrics[0]["clients"]
     assert result["last_upload_compression_ratio"] == 1.0
-    assert all(client["payload_kind"] == "dense_update" for client in clients)
+    assert all(client["aggregation_payload_kind"] == "dense_update" for client in clients)
     assert abs(sum(client["aggregation_weight"] for client in clients) - 1.0) < 1e-6
     assert all(client["aggregation_weight"] >= 0.0 for client in clients)
 
@@ -212,7 +212,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"mse", "reconstruction_mse", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "exact_target_mse", "nearest_client_train_mse", "metric_name"} <= set(attack_results[0])
+    assert {"mse", "reconstruction_mse", "primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "exact_target_mse", "nearest_client_train_mse", "metric_name"} <= set(attack_results[0])
     assert result["attack_evaluations"] == 6
     assert result["attack_target_type"] == "update_payload"
     assert result["attack_primary_metric"] == "nearest_client_train_mse"
@@ -267,8 +267,8 @@ def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
         num_samples=1,
         loss=0.0,
         sparse_update=compress_topk(protocol_update, 0.5),
-        evaluation_update=oracle_update,
-        payload_kind="sparse_update",
+        evaluation_state=oracle_update,
+        aggregation_payload_kind="sparse_update",
     )
     client = SimpleNamespace(
         client_id="Nd2O3",
@@ -301,9 +301,9 @@ def test_attack_payload_merges_sparse_and_dense_buffer_updates():
         client_id="Nd2O3",
         num_samples=1,
         loss=0.0,
-        state=buffer_update,
+        aggregation_state=buffer_update,
         sparse_update=compress_topk(protocol_update, 1.0),
-        payload_kind="randomk_update",
+        aggregation_payload_kind="randomk_update",
     )
 
     payload = algorithms_module._extract_attack_payload(config, result, [result])
@@ -328,17 +328,17 @@ def test_sparse_aggregation_merges_dense_buffer_updates(tmp_path):
             client_id="c1",
             num_samples=1,
             loss=0.0,
-            state=OrderedDict([("running_var", torch.tensor([0.5, -0.25]))]),
+            aggregation_state=OrderedDict([("running_var", torch.tensor([0.5, -0.25]))]),
             sparse_update=compress_topk(OrderedDict([("weight", torch.tensor([1.0, 0.0]))]), 1.0),
-            payload_kind="randomk_update",
+            aggregation_payload_kind="randomk_update",
         ),
         client_module.ClientResult(
             client_id="c2",
             num_samples=3,
             loss=0.0,
-            state=OrderedDict([("running_var", torch.tensor([0.25, 0.75]))]),
+            aggregation_state=OrderedDict([("running_var", torch.tensor([0.25, 0.75]))]),
             sparse_update=compress_topk(OrderedDict([("weight", torch.tensor([0.0, 2.0]))]), 1.0),
-            payload_kind="randomk_update",
+            aggregation_payload_kind="randomk_update",
         ),
     ]
 
@@ -365,7 +365,7 @@ def test_randomk_fedavg_uses_unbiased_sparse_payloads(tmp_path):
     clients = metrics[0]["clients"]
 
     assert result["last_upload_compression_ratio"] > 1.0
-    assert all(client["payload_kind"] == "randomk_update" for client in clients)
+    assert all(client["aggregation_payload_kind"] == "randomk_update" for client in clients)
     assert all(client["compressor"] == "randomk_unbiased" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
 
@@ -385,7 +385,7 @@ def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
     result = run_federated(config)
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     assert result["last_upload_compression_ratio"] >= 6.0
-    assert all(client["payload_kind"] == "soteriafl_randomk_dp_update" for client in metrics[0]["clients"])
+    assert all(client["aggregation_payload_kind"] == "soteriafl_randomk_dp_update" for client in metrics[0]["clients"])
     assert all(client["compressor"] == "randomk_unbiased" for client in metrics[0]["clients"])
     assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])
 
@@ -406,7 +406,7 @@ def test_sign_fedavg_uses_sign_quantized_dense_updates(tmp_path):
     clients = metrics[0]["clients"]
 
     assert result["last_upload_compression_ratio"] > 2.0
-    assert all(client["payload_kind"] == "sign_update" for client in clients)
+    assert all(client["aggregation_payload_kind"] == "sign_update" for client in clients)
     assert all(client["compressor"] == "sign_mean_abs" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
 
@@ -430,7 +430,7 @@ def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
 
     assert result["last_upload_compression_ratio"] > 1.5
     assert result["last_total_communication_ratio"] > 1.9
-    assert all(client["payload_kind"] == "quantized_update" for client in clients)
+    assert all(client["aggregation_payload_kind"] == "quantized_update" for client in clients)
     assert all(client["compressor"] == "float16_quantized_dense" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
     assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
@@ -455,7 +455,7 @@ def test_qsgd_fedavg_uses_stochastic_multilevel_quantization(tmp_path):
     clients = metrics[0]["clients"]
 
     assert result["last_upload_compression_ratio"] > 1.5
-    assert all(client["payload_kind"] == "qsgd_update" for client in clients)
+    assert all(client["aggregation_payload_kind"] == "qsgd_update" for client in clients)
     assert all(client["compressor"] == "qsgd_31_levels" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
 
@@ -499,7 +499,7 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
     assert (tmp_path / "ega_codec.pt").exists()
     assert result["last_upload_compression_ratio"] > 1.0
     assert result["best_val_mse"] == result["best_val_mse"]
-    assert all(client["payload_kind"] == "ega_encoded_update" for client in clients)
+    assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
 
 
@@ -579,7 +579,7 @@ def test_oracle_evaluation_separates_protocol_metrics_from_dense_reference_updat
             num_samples=1,
             loss=0.0,
             sparse_update=compress_topk(dense_update, 0.5),
-            evaluation_update=dense_update,
+            evaluation_state=dense_update,
             dense_bytes=8,
             dense_parameters=2,
             download_bytes=8,
@@ -594,7 +594,7 @@ def test_oracle_evaluation_separates_protocol_metrics_from_dense_reference_updat
             parameter_upload_parameters=1,
             transport_download_bytes=8,
             transport_upload_bytes=4,
-            payload_kind="sparse_update",
+            aggregation_payload_kind="sparse_update",
             compressor="topk",
         )
 
@@ -613,7 +613,10 @@ def test_oracle_evaluation_separates_protocol_metrics_from_dense_reference_updat
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
 
     assert summary["evaluation_mode"] == "oracle_full_update"
+    assert summary["active_test_scope"] == "oracle_full_update"
+    assert summary["best_val_scope"] == "oracle_full_update"
     assert summary["test"]["mse"] == pytest.approx(0.0)
+    assert summary["active_test"]["mse"] == pytest.approx(0.0)
     assert summary["protocol_test"]["mse"] > 0.0
     assert summary["oracle_test"]["mse"] == pytest.approx(0.0)
     assert metrics[0]["protocol_val_mse"] > 0.0
@@ -636,7 +639,7 @@ def test_dp_topk_uses_sparse_dp_topk_payloads(tmp_path):
     result = run_federated(config)
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     assert result["last_upload_compression_ratio"] >= 6.0
-    assert all(client["payload_kind"] == "dp_topk_dp_update" for client in metrics[0]["clients"])
+    assert all(client["aggregation_payload_kind"] == "dp_topk_dp_update" for client in metrics[0]["clients"])
     assert all(client["compressor"] == "topk_dp" for client in metrics[0]["clients"])
     assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])
 
@@ -977,7 +980,7 @@ def test_federated_run_restores_best_validation_checkpoint(tmp_path, monkeypatch
             client_id=self.client_id,
             num_samples=len(self.train_loader.dataset),
             loss=float(round_index + 1),
-            state=update,
+            aggregation_state=update,
             dense_bytes=4,
             dense_parameters=1,
             download_bytes=4,

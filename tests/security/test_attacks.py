@@ -69,7 +69,7 @@ def test_gradient_attacks_run_on_vendored_patchtst():
         assert result.success_threshold == 0.01
         record = result.to_record()
         assert record["mse"] == record["reconstruction_mse"]
-        assert {"psnr", "ssim", "iterations", "time_seconds", "gradient_mse", "objective_mse", "target_type"} <= set(record)
+        assert {"psnr", "ssim", "iterations", "time_seconds", "gradient_mse", "objective_mse", "primary_metric_name", "primary_metric_value", "target_type"} <= set(record)
 
     summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
     assert set(summary["methods"]) == {"DLG", "iDLG"}

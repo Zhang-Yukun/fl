@@ -95,7 +95,7 @@ class EGAFedAvgMethod(FederatedMethod):
         buffer_parameters = state_num_parameters(buffer_update)
         return result_cls(
             **common,
-            state=buffer_update,
+            aggregation_state=buffer_update,
             ega_payload=payload,
             **evaluation_kwargs,
             upload_bytes=payload.nbytes + buffer_bytes,
@@ -103,7 +103,7 @@ class EGAFedAvgMethod(FederatedMethod):
             parameter_upload_bytes=payload.nbytes + buffer_bytes,
             parameter_upload_parameters=payload.num_parameters + buffer_parameters,
             transport_upload_bytes=payload.nbytes + buffer_bytes,
-            payload_kind='ega_encoded_update',
+            aggregation_payload_kind='ega_encoded_update',
             compressor=f'ega_b{payload.block_size}_h{payload.encoded_dim}_s{payload.quantization_level}',
         )
 
@@ -118,11 +118,11 @@ class EGAFedAvgMethod(FederatedMethod):
         if any(payload is None for payload in payloads):
             raise ValueError('EGA aggregation requires ega_payload from every client')
         averaged_update = decode_mean_encoded_payload(payloads, server.ega_codec)
-        if any(result.state is not None for result in results):
+        if any(result.aggregation_state is not None for result in results):
             for result, weight in zip(results, weights):
-                if result.state is None:
+                if result.aggregation_state is None:
                     continue
-                for name, tensor in result.state.items():
+                for name, tensor in result.aggregation_state.items():
                     averaged_update[name] = averaged_update.get(name, torch.zeros_like(tensor)) + tensor * weight
         server.global_state = add_update(server.global_state, averaged_update)
         server._update_oracle_evaluation_state(round_base_state, results, sample_weights)
@@ -145,6 +145,6 @@ class EGAFedAvgMethod(FederatedMethod):
         target_index = next(index for index, item in enumerate(results) if item.client_id == result.client_id)
         attack_view = decode_attack_view_from_mean_difference(payloads, target_index, server.ega_codec)
         target_result = results[target_index]
-        if target_result.state is not None:
-            attack_view.update(target_result.state)
+        if target_result.aggregation_state is not None:
+            attack_view.update(target_result.aggregation_state)
         return attack_view

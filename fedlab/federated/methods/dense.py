@@ -32,22 +32,22 @@ class _DenseFedAvgMethod(FederatedMethod):
         dense_parameters = state_num_parameters(local_state)
         return result_cls(
             **common,
-            state=dense_update,
+            aggregation_state=dense_update,
             **evaluation_kwargs,
             upload_bytes=dense_bytes,
             upload_parameters=dense_parameters,
             parameter_upload_bytes=dense_bytes,
             parameter_upload_parameters=dense_parameters,
             transport_upload_bytes=dense_bytes,
-            payload_kind='dense_update',
+            aggregation_payload_kind='dense_update',
         )
 
     def extract_attack_payload(self, *, result, clone_state, **_: Any):
         """Expose the dense uploaded client update to the server attacker."""
 
-        if result.state is None:
+        if result.aggregation_state is None:
             raise ValueError(f'Client {result.client_id} did not produce an attackable dense payload')
-        return clone_state(result.state)
+        return clone_state(result.aggregation_state)
 
 
 @federated_method('fedavg', compressed=False, description='Standard dense FedAvg baseline')
@@ -62,7 +62,7 @@ class FedAvgMethod(_DenseFedAvgMethod):
 
         sample_weights = [result.num_samples for result in results]
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-        averaged_update = average_states([result.state for result in results], sample_weights)
+        averaged_update = average_states([result.aggregation_state for result in results], sample_weights)
         server.global_state = add_update(server.global_state, averaged_update)
         server._update_oracle_evaluation_state(round_base_state, results, sample_weights)
         return weights
@@ -80,7 +80,7 @@ class FedAwareMethod(_DenseFedAvgMethod):
 
         aware_cfg = server.config.get('fedaware', {})
         sample_weights = [result.num_samples for result in results]
-        updates = [result.state for result in results]
+        updates = [result.aggregation_state for result in results]
         weights = fedaware_weights(
             updates,
             sample_weights,

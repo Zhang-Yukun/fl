@@ -30,7 +30,7 @@ class ClientResult:
     client_id: str
     num_samples: int
     loss: float
-    state: StateDict | None = None
+    aggregation_state: StateDict | None = None
     sparse_update: SparseUpdate | None = None
     ega_payload: EncodedStatePayload | None = None
     dense_bytes: int = 0
@@ -49,11 +49,11 @@ class ClientResult:
     transport_upload_bytes: int = 0
     transport_download_overhead_bytes: int = 0
     transport_upload_overhead_bytes: int = 0
-    payload_kind: str = "dense_update"
+    aggregation_payload_kind: str = "dense_update"
     compressor: str = "none"
     privacy_clip_norm: float = 0.0
     privacy_noise_multiplier: float = 0.0
-    evaluation_update: StateDict | None = None
+    evaluation_state: StateDict | None = None
     evaluation_payload_kind: str = "none"
 
     @property
@@ -61,6 +61,42 @@ class ClientResult:
         """Backward-compatible alias for upload bytes."""
 
         return self.upload_bytes
+
+    @property
+    def state(self) -> StateDict | None:
+        """Backward-compatible alias for the aggregation-visible dense payload."""
+
+        return self.aggregation_state
+
+    @state.setter
+    def state(self, value: StateDict | None) -> None:
+        """Keep legacy callers functional while the codebase uses explicit names."""
+
+        self.aggregation_state = value
+
+    @property
+    def payload_kind(self) -> str:
+        """Backward-compatible alias for the aggregation payload semantic label."""
+
+        return self.aggregation_payload_kind
+
+    @payload_kind.setter
+    def payload_kind(self, value: str) -> None:
+        """Keep legacy callers functional while the codebase uses explicit names."""
+
+        self.aggregation_payload_kind = value
+
+    @property
+    def evaluation_update(self) -> StateDict | None:
+        """Backward-compatible alias for the oracle-only evaluation state."""
+
+        return self.evaluation_state
+
+    @evaluation_update.setter
+    def evaluation_update(self, value: StateDict | None) -> None:
+        """Keep legacy callers functional while the codebase uses explicit names."""
+
+        self.evaluation_state = value
 
 
 class FederatedClient:
@@ -127,7 +163,7 @@ class FederatedClient:
         if evaluation_mode != "oracle_full_update":
             return {}
         return {
-            "evaluation_update": subtract_state(local_state, global_state),
+            "evaluation_state": subtract_state(local_state, global_state),
             "evaluation_payload_kind": "dense_full_update",
         }
 

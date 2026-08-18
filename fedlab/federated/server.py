@@ -56,7 +56,8 @@ class ClientCommunicationRecord:
     client_id: str
     num_samples: int
     loss: float
-    payload_kind: str
+    aggregation_payload_kind: str
+    evaluation_payload_kind: str
     download_bytes: int
     download_parameters: int
     parameter_download_bytes: int
@@ -114,6 +115,8 @@ class RoundRecord:
     fedavg_reference_upload_bytes: int
     fedavg_reference_upload_parameters: int
     fedavg_reference_total_bytes: int
+    parameter_upload_compression_ratio: float
+    parameter_total_communication_ratio: float
     upload_compression_ratio: float
     total_communication_ratio: float
     communication_ratio: float
@@ -132,6 +135,10 @@ class RoundRecord:
     adaptive_reference_clip_norm: float | None = None
     adaptive_noise_std: float | None = None
     evaluation_mode: str = "protocol"
+    active_val_scope: str = "protocol"
+    active_val_mse: float | None = None
+    active_val_mae: float | None = None
+    active_val_mape: float | None = None
     protocol_val_mse: float | None = None
     protocol_val_mae: float | None = None
     protocol_val_mape: float | None = None
@@ -231,11 +238,11 @@ class FederatedServer:
         if not self._uses_oracle_evaluation():
             self.oracle_global_state = _clone_state_dict(self.global_state)
             return
-        evaluation_updates = [result.evaluation_update for result in results]
-        if any(update is None for update in evaluation_updates):
+        evaluation_states = [result.evaluation_state for result in results]
+        if any(update is None for update in evaluation_states):
             self.oracle_global_state = _clone_state_dict(self.global_state)
             return
-        averaged_update = average_states(evaluation_updates, sample_weights)
+        averaged_update = average_states(evaluation_states, sample_weights)
         self.oracle_global_state = add_update(round_base_state, averaged_update)
 
     def _adaptive_noise_generator(self, round_index: int) -> torch.Generator | None:
@@ -256,7 +263,7 @@ class FederatedServer:
         adaptive_cfg = self.config.get("adaptive_clipped_rdp", {})
         sample_weights = [result.num_samples for result in results]
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-        raw_updates = [result.state for result in results]
+        raw_updates = [result.aggregation_state for result in results]
         update_norms = [state_l2_norm(update) for update in raw_updates]
         median_norm, raw_clip, clip_norm = adaptive_clip_threshold(
             update_norms,
@@ -399,7 +406,8 @@ class FederatedServer:
                 client_id=result.client_id,
                 num_samples=result.num_samples,
                 loss=result.loss,
-                payload_kind=result.payload_kind,
+                aggregation_payload_kind=result.aggregation_payload_kind,
+                evaluation_payload_kind=result.evaluation_payload_kind,
                 download_bytes=result.parameter_download_bytes,
                 download_parameters=result.parameter_download_parameters,
                 parameter_download_bytes=result.parameter_download_bytes,
@@ -452,6 +460,8 @@ class FederatedServer:
             fedavg_reference_upload_bytes=fedavg_reference_upload_bytes,
             fedavg_reference_upload_parameters=fedavg_reference_upload_parameters,
             fedavg_reference_total_bytes=fedavg_reference_total_bytes,
+            parameter_upload_compression_ratio=upload_ratio,
+            parameter_total_communication_ratio=total_ratio,
             upload_compression_ratio=upload_ratio,
             total_communication_ratio=total_ratio,
             communication_ratio=upload_ratio,
@@ -470,6 +480,10 @@ class FederatedServer:
             adaptive_reference_clip_norm=None if self.last_privacy_step is None else self.last_privacy_step.reference_clip_norm,
             adaptive_noise_std=None if self.last_privacy_step is None else self.last_privacy_step.noise_std,
             evaluation_mode=self.evaluation_mode,
+            active_val_scope=self.evaluation_mode,
+            active_val_mse=metrics["mse"],
+            active_val_mae=metrics["mae"],
+            active_val_mape=metrics["mape"],
             protocol_val_mse=protocol_metrics.get("mse"),
             protocol_val_mae=protocol_metrics.get("mae"),
             protocol_val_mape=protocol_metrics.get("mape"),
@@ -533,7 +547,7 @@ class FederatedServer:
                     round_index,
                     client.client_id,
                     client.num_samples,
-                    client.payload_kind,
+                    client.aggregation_payload_kind,
                     client.compressor,
                     client.privacy_clip_norm,
                     client.privacy_noise_multiplier,

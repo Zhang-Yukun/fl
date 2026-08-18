@@ -206,7 +206,8 @@ Federated `metrics.json` is a list of round records. Each item corresponds to on
 | `client_id` | string | Client name, e.g. `Nd2O3` |
 | `num_samples` | int | Number of local training windows used to weight aggregation |
 | `loss` | float | Mean local training loss returned by this client |
-| `payload_kind` | string | Semantic type of transmitted payload |
+| `aggregation_payload_kind` | string | Semantic type of the payload that actually participates in server aggregation |
+| `evaluation_payload_kind` | string | Semantic type of the extra oracle-only evaluation state; usually `none` |
 | `download_bytes` | int | Parameter download bytes attributed to this client; equal to `parameter_download_bytes` |
 | `download_parameters` | int | Downloaded parameter count attributed to this client |
 | `parameter_download_bytes` | int | Pure model-parameter download bytes |
@@ -228,7 +229,7 @@ Federated `metrics.json` is a list of round records. Each item corresponds to on
 | `privacy_noise_multiplier` | float | DP noise multiplier applied before transmission; `0.0` means not used |
 | `aggregation_weight` | float | Client weight used during server aggregation |
 
-### Common `payload_kind` Values
+### Common `aggregation_payload_kind` Values
 
 | Value | Meaning |
 | --- | --- |
@@ -237,7 +238,7 @@ Federated `metrics.json` is a list of round records. Each item corresponds to on
 | `sparse_update` | Top-k sparse update |
 | `dp_topk_dp_update` | Top-k sparse update after clipping/noise |
 | `soteriafl_randomk_dp_update` | Random-k sparse DP update |
-| `fedpetuning_trainable_state` | Only trainable PEFT parameters are transmitted |
+| `ega_encoded_update` | EGA-encoded trainable update plus required buffer update |
 
 ### Common `compressor` Values
 
@@ -258,7 +259,8 @@ Federated `metrics.json` is a list of round records. Each item corresponds to on
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `name` | string | Attack method name, usually `DLG` or `iDLG` |
-| `mse` | float or null | Primary privacy metric value used for this record |
+| `primary_metric_value` | float or null | Primary privacy metric value for this record; preferred field name |
+| `mse` | float or null | Backward-compatible alias of `primary_metric_value` |
 | `psnr` | float or null | Peak signal-to-noise ratio of the reconstruction |
 | `ssim` | float or null | Structural similarity score |
 | `iterations` | int | Number of optimizer steps used in the attack loop |
@@ -271,7 +273,8 @@ Federated `metrics.json` is a list of round records. Each item corresponds to on
 | `exact_target_mse` | float or null | MSE to the exact attacked batch/window |
 | `nearest_client_train_mse` | float or null | MSE to the nearest sample in the attacked client's full training set |
 | `nearest_client_train_indices` | list[int] or null | Indices of the nearest training windows used for scoring |
-| `metric_name` | string | Metric used as the primary privacy indicator for this record |
+| `primary_metric_name` | string | Metric used as the primary privacy indicator for this record; preferred field name |
+| `metric_name` | string | Backward-compatible alias of `primary_metric_name` |
 
 ### Meaning of `metric_name`
 

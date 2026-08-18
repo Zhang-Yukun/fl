@@ -43,7 +43,7 @@ class _SparseFedAvgMethod(FederatedMethod):
         common: dict[str, Any],
         evaluation_kwargs: dict[str, Any],
         result_cls,
-        payload_kind: str,
+        aggregation_payload_kind: str,
         compressor: str,
         privacy_clip_norm: float = 0.0,
         privacy_noise_multiplier: float = 0.0,
@@ -54,7 +54,7 @@ class _SparseFedAvgMethod(FederatedMethod):
         dense_buffer_parameters = state_num_parameters(buffer_update)
         return result_cls(
             **common,
-            state=buffer_update,
+            aggregation_state=buffer_update,
             sparse_update=sparse_update,
             **evaluation_kwargs,
             upload_bytes=sparse_update.nbytes + dense_buffer_bytes,
@@ -62,7 +62,7 @@ class _SparseFedAvgMethod(FederatedMethod):
             parameter_upload_bytes=sparse_update.nbytes + dense_buffer_bytes,
             parameter_upload_parameters=sparse_update.values.numel() + dense_buffer_parameters,
             transport_upload_bytes=sparse_update.nbytes + dense_buffer_bytes,
-            payload_kind=payload_kind,
+            aggregation_payload_kind=aggregation_payload_kind,
             compressor=compressor,
             privacy_clip_norm=privacy_clip_norm,
             privacy_noise_multiplier=privacy_noise_multiplier,
@@ -76,8 +76,8 @@ class _SparseFedAvgMethod(FederatedMethod):
         update = None
         for result, weight in zip(results, weights):
             dense = decompress_topk(result.sparse_update)
-            if result.state is not None:
-                dense.update(result.state)
+            if result.aggregation_state is not None:
+                dense.update(result.aggregation_state)
             scaled = {name: tensor * (weight / total) for name, tensor in dense.items()}
             update = scaled if update is None else {name: update[name] + scaled[name] for name in scaled}
         server.global_state = add_update(server.global_state, update)
@@ -88,8 +88,8 @@ class _SparseFedAvgMethod(FederatedMethod):
         """Expose the decompressed sparse update plus dense buffers to the attacker."""
 
         payload = decompress_topk(result.sparse_update)
-        if result.state is not None:
-            payload.update(clone_state(result.state))
+        if result.aggregation_state is not None:
+            payload.update(clone_state(result.aggregation_state))
         return payload
 
 
@@ -112,7 +112,7 @@ class CompressedFedAvgMethod(_SparseFedAvgMethod):
             common=common,
             evaluation_kwargs=evaluation_kwargs,
             result_cls=result_cls,
-            payload_kind='sparse_update',
+            aggregation_payload_kind='sparse_update',
             compressor='topk',
         )
 
@@ -136,7 +136,7 @@ class SparseFedAvgMethod(_SparseFedAvgMethod):
             common=common,
             evaluation_kwargs=evaluation_kwargs,
             result_cls=result_cls,
-            payload_kind='sparse_update',
+            aggregation_payload_kind='sparse_update',
             compressor='topk',
         )
 
@@ -164,7 +164,7 @@ class DpTopkFedAvgMethod(_SparseFedAvgMethod):
             common=common,
             evaluation_kwargs=evaluation_kwargs,
             result_cls=result_cls,
-            payload_kind='dp_topk_dp_update',
+            aggregation_payload_kind='dp_topk_dp_update',
             compressor='topk_dp',
             privacy_clip_norm=privacy_clip_norm,
             privacy_noise_multiplier=privacy_noise_multiplier,
@@ -190,7 +190,7 @@ class RandomkFedAvgMethod(_SparseFedAvgMethod):
             common=common,
             evaluation_kwargs=evaluation_kwargs,
             result_cls=result_cls,
-            payload_kind='randomk_update',
+            aggregation_payload_kind='randomk_update',
             compressor='randomk_unbiased',
         )
 
@@ -218,7 +218,7 @@ class SoteriaFLMethod(_SparseFedAvgMethod):
             common=common,
             evaluation_kwargs=evaluation_kwargs,
             result_cls=result_cls,
-            payload_kind='soteriafl_randomk_dp_update',
+            aggregation_payload_kind='soteriafl_randomk_dp_update',
             compressor='randomk_unbiased',
             privacy_clip_norm=privacy_clip_norm,
             privacy_noise_multiplier=privacy_noise_multiplier,
