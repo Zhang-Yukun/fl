@@ -887,7 +887,7 @@ def test_centralized_run_restores_best_validation_checkpoint(tmp_path, monkeypat
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            "training.epochs=2",
+            "centralized.epochs=2",
             "training.patience=10",
             "tracking.enabled=false",
             "runtime.device=cpu",

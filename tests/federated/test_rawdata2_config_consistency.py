@@ -20,7 +20,6 @@ def test_rawdata2_training_lengths_are_consistent():
     qsgd = load_config(CONFIG_DIR / "rawdata2_qsgd.yaml")
     ega = load_config(CONFIG_DIR / "rawdata2_ega.yaml")
 
-    assert base["training"]["epochs"] == 500
     assert base["training"]["patience"] == 301
     for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl, randomk, sign, qsgd, ega):
         assert config["federated"]["rounds"] == 300
@@ -66,3 +65,13 @@ def test_oracle_evaluation_enabled_only_for_approximate_methods():
     assert fedaware.get("evaluation", {}).get("mode", "protocol") == "protocol"
     for config in approximate:
         assert config.get("evaluation", {}).get("mode") == "oracle_full_update"
+
+
+def test_centralized_epochs_are_not_shared_with_federated_configs():
+    centralized = load_config(CONFIG_DIR / "rawdata2_centralized.yaml")
+    fedavg = load_config(CONFIG_DIR / "rawdata2_fedavg.yaml")
+
+    assert centralized.get("centralized", {}).get("epochs") == 500
+    assert "epochs" not in centralized.get("training", {})
+    assert fedavg.get("centralized", {}).get("epochs") is None
+    assert fedavg["federated"]["rounds"] == 300

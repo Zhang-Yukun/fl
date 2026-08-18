@@ -120,7 +120,7 @@ run_centralized() {
   while IFS= read -r line; do
     cmd+=("${line}")
   done < <(tracking_args "${short_name}")
-  cmd+=(--override "runtime.seed=2026" --override "runtime.deterministic=true" --override "runtime.num_threads=1" --override "runtime.num_interop_threads=1" --override "runtime.device=${RUNTIME_DEVICE}" --override "training.optimizer=sgd" --override "training.lr=${TRAIN_LR}" --override "training.momentum=0.0" --override "training.weight_decay=0.0" --override "training.epochs=${ROUNDS}" --override "training.patience=${PATIENCE}" --override "training.min_delta=0.0")
+  cmd+=(--override "runtime.seed=2026" --override "runtime.deterministic=true" --override "runtime.num_threads=1" --override "runtime.num_interop_threads=1" --override "runtime.device=${RUNTIME_DEVICE}" --override "training.optimizer=sgd" --override "training.lr=${TRAIN_LR}" --override "training.momentum=0.0" --override "training.weight_decay=0.0" --override "centralized.epochs=${ROUNDS}" --override "training.patience=${PATIENCE}" --override "training.min_delta=0.0")
   cmd+=("$@")
   CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${cmd[@]}"
   log "finished ${name}"

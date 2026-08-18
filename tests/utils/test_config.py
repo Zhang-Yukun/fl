@@ -9,3 +9,10 @@ def test_nested_yaml_and_override():
     assert config["data"]["seq_len"] == 21
     assert config["tracking"]["enabled"] is False
 
+
+
+
+def test_default_centralized_epochs_are_mode_specific():
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["centralized.epochs=3", "tracking.enabled=false"])
+    assert config["centralized"]["epochs"] == 3
+    assert config["federated"]["rounds"] == 1

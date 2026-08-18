@@ -101,6 +101,39 @@ def configure_random_seed(config: dict[str, Any]) -> None:
     setup_seed(int(seed), deterministic=bool(runtime_cfg.get("deterministic", True)))
 
 
+def _resolve_centralized_epochs(config: dict[str, Any]) -> int:
+    """Resolve centralized training epochs from the dedicated config block.
+
+    The preferred location is ``centralized.epochs``. ``training.epochs`` remains
+    as a temporary backward-compatible fallback.
+    """
+
+    centralized_cfg = config.get("centralized", {})
+    if centralized_cfg.get("epochs") is not None:
+        return int(centralized_cfg.get("epochs"))
+    legacy = config.get("training", {}).get("epochs")
+    if legacy is not None:
+        logger.warning("Using deprecated training.epochs={} for centralized mode; prefer centralized.epochs", legacy)
+        return int(legacy)
+    return 10
+
+
+def _log_mode_specific_schedule(config: dict[str, Any], mode: str) -> None:
+    """Log when a mode is carrying schedule keys that do not apply to it."""
+
+    if mode == "centralized":
+        rounds = config.get("federated", {}).get("rounds")
+        if rounds is not None:
+            logger.info("Centralized mode ignores federated.rounds={} and uses centralized.epochs", rounds)
+    elif mode == "federated":
+        central_epochs = config.get("centralized", {}).get("epochs")
+        if central_epochs is not None:
+            logger.info("Federated mode ignores centralized.epochs={} and uses federated.rounds", central_epochs)
+        legacy = config.get("training", {}).get("epochs")
+        if legacy is not None:
+            logger.info("Federated mode ignores deprecated training.epochs={} and uses federated.rounds", legacy)
+
+
 def resolve_device(config: dict[str, Any]) -> torch.device:
     """Resolve the configured torch device with a CPU fallback."""
 
@@ -871,6 +904,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     logger.info("Saved startup config artifacts: {}", [str(path) for path in saved_configs])
     configure_torch_runtime(config)
     configure_random_seed(config)
+    _log_mode_specific_schedule(config, "centralized")
     tracker = Tracker(config)
     start_time = time.perf_counter()
     device = resolve_device(config)
@@ -893,7 +927,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     best_state = serialize_model(model)
     best_metrics = {"mse": float("inf"), "mae": float("inf"), "mape": float("inf")}
     best_epoch = -1
-    for epoch in range(int(config["training"].get("epochs", 10))):
+    for epoch in range(_resolve_centralized_epochs(config)):
         epoch_start = time.perf_counter()
         loss = sum(train_one_epoch(model, loader, optimizer, device) for loader in train_loaders.values()) / len(train_loaders)
         metrics = evaluate(model, val_loader, device)
@@ -1007,6 +1041,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     logger.info("Saved startup config artifacts: {}", [str(path) for path in saved_configs])
     configure_torch_runtime(config)
     configure_random_seed(config)
+    _log_mode_specific_schedule(config, "federated")
     tracker = Tracker(config)
     start_time = time.perf_counter()
     device = resolve_device(config)
