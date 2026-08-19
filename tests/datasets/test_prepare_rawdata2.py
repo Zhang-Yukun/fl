@@ -16,6 +16,7 @@ def _load_prepare_rawdata2_module():
 prepare_rawdata2_module = _load_prepare_rawdata2_module()
 _build_interpolated_merged_frame = prepare_rawdata2_module._build_interpolated_merged_frame
 _split_merged_frame_by_client = prepare_rawdata2_module._split_merged_frame_by_client
+reset_output_dir = prepare_rawdata2_module.reset_output_dir
 
 
 def test_build_interpolated_merged_frame_fills_missing_days_and_values():
@@ -64,3 +65,23 @@ def test_split_merged_frame_by_client_uses_interpolated_dense_series():
     assert ce_train["value"].tolist() == [10.0, 11.0]
     assert ce_val["value"].tolist() == [12.0]
     assert ce_test["value"].tolist() == [13.0]
+
+
+def test_reset_output_dir_removes_stale_generated_artifacts(tmp_path):
+    """Rebuilding rawdata2 output should remove stale split artifacts first."""
+
+    clients_dir = tmp_path / "clients" / "Nd2O3"
+    server_dir = tmp_path / "server"
+    clients_dir.mkdir(parents=True)
+    server_dir.mkdir(parents=True)
+    (clients_dir / "test1.csv").write_text("stale", encoding="utf-8")
+    (server_dir / "test9.csv").write_text("stale", encoding="utf-8")
+    (tmp_path / "test_wide.csv").write_text("stale", encoding="utf-8")
+    (tmp_path / "summary.json").write_text("{}", encoding="utf-8")
+
+    reset_output_dir(tmp_path)
+
+    assert not (tmp_path / "clients").exists()
+    assert not (tmp_path / "server").exists()
+    assert not (tmp_path / "test_wide.csv").exists()
+    assert not (tmp_path / "summary.json").exists()

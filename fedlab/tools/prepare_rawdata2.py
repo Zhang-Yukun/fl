@@ -5,12 +5,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 import pandas as pd
 
 
 CLIENT_NAME_BY_CHINESE = {"氧化钕": "Nd2O3", "氧化铈": "CeO2", "氧化镧": "La2O3"}
+
+
+def reset_output_dir(output_dir: Path) -> None:
+    """Remove stale generated artifacts before rebuilding the rawdata2 dataset."""
+
+    for child in [output_dir / "clients", output_dir / "server"]:
+        if child.exists():
+            shutil.rmtree(child)
+    for pattern in ("*.csv", "*.json"):
+        for artifact in output_dir.glob(pattern):
+            if artifact.is_file():
+                artifact.unlink()
+
 
 
 def _read_daily_series(path: Path) -> tuple[str, pd.DataFrame]:
@@ -103,9 +117,11 @@ def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int
     """
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    reset_output_dir(output_dir)
     (output_dir / "clients").mkdir(parents=True, exist_ok=True)
     (output_dir / "server").mkdir(parents=True, exist_ok=True)
     summary = {}
+    server_train = []
     server_val = []
     server_test = []
     series_by_client: dict[str, pd.DataFrame] = {}
@@ -120,8 +136,10 @@ def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int
         client_dir.mkdir(parents=True, exist_ok=True)
         for name, split in {"train": train, "val": val, "test": test}.items():
             split.to_csv(client_dir / f"{name}.csv", index=False)
-        for split in (val, test):
-            if split is val:
+        for split_name, split in {"train": train, "val": val, "test": test}.items():
+            if split_name == "train":
+                target = server_train
+            elif split_name == "val":
                 target = server_val
             else:
                 target = server_test
@@ -129,11 +147,18 @@ def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int
             combined.insert(1, "client", client_id)
             target.append(combined)
         summary[client_id] = {"total": len(train) + len(val) + len(test), "train": len(train), "val": len(val), "test": len(test)}
+    pd.concat(server_train, ignore_index=True).to_csv(output_dir / "server" / "train.csv", index=False)
     pd.concat(server_val, ignore_index=True).to_csv(output_dir / "server" / "val.csv", index=False)
     pd.concat(server_test, ignore_index=True).to_csv(output_dir / "server" / "test.csv", index=False)
     merged_frame.to_csv(output_dir / "merged_wide.csv", index=False)
-    (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    return summary
+    summary_payload = {
+        "source": "raw_data",
+        "input_dir": str(raw_dir),
+        "split_strategy": "chronological_8_1_1",
+        "rows": summary,
+    }
+    (output_dir / "summary.json").write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summary_payload
 
 
 def main() -> None:
