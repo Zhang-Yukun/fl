@@ -4,8 +4,8 @@
 Example:
     python -m fedlab.tools.plot_dataset_splits         ../data/rare_earth_rawdata2/server         --output ../data/rare_earth_rawdata2/server/split_series.png
 
-The script searches the target directory for ``train*.csv``, ``val*.csv``, and
-``test*.csv`` files. By default it renders one long figure with per-client
+The script searches the target directory only for ``train.csv``, ``val.csv``, and
+``test.csv`` files. By default it renders one long figure with per-client
 subplots and colored train/validation/test segments. With ``--separate-splits``
 it writes three figures instead, one for each split, still grouped by client.
 """
@@ -21,10 +21,10 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 
-SPLIT_PATTERNS = {
-    'train': 'train*.csv',
-    'val': 'val*.csv',
-    'test': 'test*.csv',
+SPLIT_FILES = {
+    'train': 'train.csv',
+    'val': 'val.csv',
+    'test': 'test.csv',
 }
 SPLITS = ('train', 'val', 'test')
 SPLIT_COLORS = {
@@ -39,8 +39,8 @@ CLIENT_PANEL_HEIGHT = 3.8
 def find_split_files(data_dir: Path, split: str) -> list[Path]:
     """Return all CSV files for one split under the target directory."""
 
-    pattern = SPLIT_PATTERNS[split]
-    return sorted(path for path in data_dir.glob(pattern) if path.is_file())
+    path = data_dir / SPLIT_FILES[split]
+    return [path] if path.is_file() else []
 
 
 
@@ -193,7 +193,7 @@ def build_argparser() -> argparse.ArgumentParser:
     """Build the CLI parser for the split plotting helper."""
 
     parser = argparse.ArgumentParser(description='Plot train/val/test CSV series from one directory.')
-    parser.add_argument('data_dir', type=Path, help='Directory containing train*.csv, val*.csv, and test*.csv files')
+    parser.add_argument('data_dir', type=Path, help='Directory containing train.csv, val.csv, and test.csv files')
     parser.add_argument('--output', type=Path, default=None, help='Output image path. Defaults to <data_dir>/split_series.png')
     parser.add_argument('--title', type=str, default=None, help='Optional chart title')
     parser.add_argument('--separate-splits', action='store_true', help='Write one figure per split instead of one combined figure')

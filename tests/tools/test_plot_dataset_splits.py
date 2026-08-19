@@ -57,3 +57,19 @@ def test_plot_dataset_splits_script_exists_and_is_executable():
     content = SCRIPT_PATH.read_text(encoding='utf-8')
     assert content.startswith('#!/usr/bin/env python3')
     assert '--separate-splits' in content
+
+
+def test_plot_dataset_splits_ignores_auxiliary_test_windows(tmp_path):
+    """The split plotting helper should ignore test1.csv style auxiliary files."""
+
+    data_dir = tmp_path / 'dataset'
+    data_dir.mkdir()
+    pd.DataFrame([{'date': '2024-01-01', 'client': 'A', 'value': 1.0}]).to_csv(data_dir / 'train.csv', index=False)
+    pd.DataFrame([{'date': '2024-01-02', 'client': 'A', 'value': 2.0}]).to_csv(data_dir / 'val.csv', index=False)
+    pd.DataFrame([{'date': '2024-01-03', 'client': 'A', 'value': 3.0}]).to_csv(data_dir / 'test.csv', index=False)
+    pd.DataFrame([{'date': '2025-01-01', 'client': 'A', 'value': 999.0}]).to_csv(data_dir / 'test1.csv', index=False)
+
+    frame = module.load_all_splits(data_dir)
+
+    assert len(frame[frame['split'] == 'test']) == 1
+    assert float(frame[frame['split'] == 'test']['value'].iloc[0]) == 3.0
