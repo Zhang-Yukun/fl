@@ -557,13 +557,14 @@ def test_oracle_evaluation_separates_protocol_metrics_from_dense_reference_updat
 
     class _StaticLoader:
         def __init__(self):
-            self.dataset = [(torch.zeros(1, 2, 1), torch.zeros(1, 1, 1))]
+            self.dataset = [(torch.zeros(1, 2), torch.zeros(1, 1))]
 
         def __iter__(self):
             return iter(self.dataset)
 
     monkeypatch.setattr(algorithms_module, "build_model", _build_linear)
     monkeypatch.setattr(server_module, "build_model", _build_linear)
+    monkeypatch.setattr(client_module, "build_model", _build_linear)
     monkeypatch.setattr(
         algorithms_module,
         "build_federated_loaders",
@@ -616,12 +617,67 @@ def test_oracle_evaluation_separates_protocol_metrics_from_dense_reference_updat
     assert summary["active_test_scope"] == "oracle_full_update"
     assert summary["best_val_scope"] == "oracle_full_update"
     assert summary["test"]["mse"] == pytest.approx(0.0)
-    assert summary["active_test"]["mse"] == pytest.approx(0.0)
     assert summary["protocol_test"]["mse"] > 0.0
     assert summary["oracle_test"]["mse"] == pytest.approx(0.0)
     assert metrics[0]["protocol_val_mse"] > 0.0
     assert metrics[0]["oracle_val_mse"] == pytest.approx(0.0)
     assert (tmp_path / "oracle_model.pt").exists()
+
+
+def test_protocol_mode_populates_oracle_metrics_with_protocol_values(tmp_path, monkeypatch):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    val_loader = object()
+    test_loader = object()
+
+    def _build_linear(_config):
+        model = torch.nn.Linear(2, 1, bias=False)
+        with torch.no_grad():
+            model.weight.zero_()
+        return model
+
+    class _StaticLoader:
+        def __init__(self):
+            self.dataset = [(torch.zeros(1, 2), torch.zeros(1, 1))]
+
+        def __iter__(self):
+            return iter(self.dataset)
+
+    def fake_evaluate(model, loader, device):
+        weight = model.weight.detach().cpu().clone()
+        mse = float(weight.square().sum().item())
+        mae = float(weight.abs().sum().item())
+        return {"mse": mse, "mae": mae, "mape": mse}
+
+    monkeypatch.setattr(algorithms_module, "build_model", _build_linear)
+    monkeypatch.setattr(server_module, "build_model", _build_linear)
+    monkeypatch.setattr(client_module, "build_model", _build_linear)
+    monkeypatch.setattr(
+        algorithms_module,
+        "build_federated_loaders",
+        lambda _config: ({"Nd2O3": _StaticLoader(), "CeO2": _StaticLoader(), "La2O3": _StaticLoader()}, val_loader, test_loader),
+    )
+    monkeypatch.setattr(algorithms_module, "evaluate", fake_evaluate)
+    monkeypatch.setattr(server_module, "evaluate", fake_evaluate)
+
+    summary = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+
+    assert summary["evaluation_mode"] == "protocol"
+    assert summary["test"] == summary["protocol_test"]
+    assert summary["oracle_test"] == summary["protocol_test"]
+    assert metrics[0]["oracle_val_mse"] == pytest.approx(metrics[0]["protocol_val_mse"])
+    assert metrics[0]["oracle_val_mae"] == pytest.approx(metrics[0]["protocol_val_mae"])
+    assert metrics[0]["oracle_val_mape"] == pytest.approx(metrics[0]["protocol_val_mape"])
 
 
 def test_dp_topk_uses_sparse_dp_topk_payloads(tmp_path):

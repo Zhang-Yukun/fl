@@ -9,6 +9,7 @@ import pytest
 import torch
 
 import fedlab.federated.server as server_module
+import fedlab.federated.client as client_module
 import fedlab.communication.grpc_training as grpc_training_module
 import fedlab.security.attacks as attacks_module
 from fedlab.communication.grpc_training import GrpcFederatedCoordinator, _apply_transport_metrics, run_client, serve
@@ -283,7 +284,7 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
 
     class _StaticLoader:
         def __init__(self):
-            self.dataset = [(torch.zeros(1, 2, 1), torch.zeros(1, 1, 1))]
+            self.dataset = [(torch.zeros(1, 2), torch.zeros(1, 1))]
 
         def __iter__(self):
             return iter(self.dataset)
@@ -370,6 +371,64 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
     assert summary["active_test_scope"] == "oracle_full_update"
     assert summary["protocol_test"]["mse"] > 0.0
     assert summary["oracle_test"]["mse"] == pytest.approx(0.0)
+
+
+def test_grpc_protocol_mode_populates_oracle_metrics_with_protocol_values(tmp_path, monkeypatch):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+
+    def _build_linear(_config):
+        model = torch.nn.Linear(2, 1, bias=False)
+        with torch.no_grad():
+            model.weight.zero_()
+        return model
+
+    class _StaticLoader:
+        def __init__(self):
+            self.dataset = [(torch.zeros(1, 2), torch.zeros(1, 1))]
+
+        def __iter__(self):
+            return iter(self.dataset)
+
+    client_loaders = {"Nd2O3": _StaticLoader(), "CeO2": _StaticLoader(), "La2O3": _StaticLoader()}
+
+    def fake_evaluate(model, loader, device):
+        weight = model.weight.detach().cpu().clone()
+        mse = float(weight.square().sum().item())
+        mae = float(weight.abs().sum().item())
+        return {"mse": mse, "mae": mae, "mape": mse}
+
+    monkeypatch.setattr(grpc_training_module, "build_federated_loaders", lambda _config: (client_loaders, _StaticLoader(), _StaticLoader()))
+    monkeypatch.setattr(server_module, "build_model", _build_linear)
+    monkeypatch.setattr(client_module, "build_model", _build_linear)
+    monkeypatch.setattr(server_module, "evaluate", fake_evaluate)
+
+    coordinator = GrpcFederatedCoordinator(config)
+    device = resolve_device(config)
+    global_payload = coordinator.get_global()
+    for client_id, loader in client_loaders.items():
+        client = FederatedClient(client_id, loader, config, device)
+        result = client.train(global_payload["state"], compressed=global_payload["compressed"], round_index=global_payload["round"])
+        response = coordinator.submit_update({"round": global_payload["round"], "result": result})
+    assert response["stop"] is True
+    while coordinator.finalize_requested and not coordinator.finalization_completed:
+        coordinator.finalize_if_requested()
+        if not coordinator.finalization_completed:
+            time.sleep(0.01)
+
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert summary["evaluation_mode"] == "protocol"
+    assert summary["test"] == summary["protocol_test"]
+    assert summary["oracle_test"] == summary["protocol_test"]
 
 
 def test_grpc_matches_single_process_fedavg_when_randomness_disabled(tmp_path):

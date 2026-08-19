@@ -259,19 +259,15 @@ def _build_federated_summary(
 
     history = server.history
     last_privacy = history[-1] if history else None
+    protocol_test = test_metrics if protocol_test_metrics is None else protocol_test_metrics
+    oracle_test = protocol_test if oracle_test_metrics is None else oracle_test_metrics
     summary = {
         "test": test_metrics,
-        "active_test": test_metrics,
-        "active_test_metrics": test_metrics,
         "active_test_scope": server.evaluation_mode,
         "evaluation_mode": server.evaluation_mode,
         "best_val_scope": server.evaluation_mode,
-        "active_best_val_scope": server.evaluation_mode,
-        "active_best_val_metrics": best_metrics,
-        "protocol_test": test_metrics if protocol_test_metrics is None else protocol_test_metrics,
-        "protocol_test_metrics": test_metrics if protocol_test_metrics is None else protocol_test_metrics,
-        "oracle_test": oracle_test_metrics,
-        "oracle_test_metrics": oracle_test_metrics,
+        "protocol_test": protocol_test,
+        "oracle_test": oracle_test,
         "rounds": len(history),
         "total_time_seconds": total_elapsed,
         "best_round": best_round,
@@ -354,8 +350,7 @@ def _save_periodic_federated_snapshot(
     if not should_save_periodic_artifacts(config, round_index + 1):
         return
     test_metrics = server.test_global()
-    protocol_test_metrics = server.test_protocol() if server._uses_oracle_evaluation() else test_metrics
-    oracle_test_metrics = server.test_oracle() if server._uses_oracle_evaluation() else None
+    protocol_test_metrics, oracle_test_metrics = _resolve_test_metric_views(server, test_metrics)
     attack_records = [result.to_record() for result in attack_results]
     attack_summary = summarize_attack_results(
         attack_results,
@@ -400,6 +395,14 @@ def _wandb_cumulative_communication_payload(history: list[RoundRecord]) -> dict[
 
     summary = _round_history_communication_summary(history)
     return {f"cumulative/{key}": value for key, value in summary.items()}
+
+
+def _resolve_test_metric_views(server, active_test_metrics):
+    """Return protocol/oracle test metrics, defaulting oracle to protocol when not configured."""
+
+    protocol_test_metrics = server.test_protocol() if server._uses_oracle_evaluation() else active_test_metrics
+    oracle_test_metrics = server.test_oracle() if server._uses_oracle_evaluation() else protocol_test_metrics
+    return protocol_test_metrics, oracle_test_metrics
 
 
 def _protect_attack_gradients(
@@ -1099,7 +1102,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             aggregation_weights = server.aggregate_dense(results, round_index=round_index, round_base_state=round_base_state)
         metrics = server.evaluate_global()
         protocol_metrics = server.evaluate_protocol() if server._uses_oracle_evaluation() else metrics
-        oracle_metrics = server.evaluate_oracle() if server._uses_oracle_evaluation() else None
+        oracle_metrics = server.evaluate_oracle() if server._uses_oracle_evaluation() else protocol_metrics
         best_global_state, best_metrics, best_round, improved = _update_best_checkpoint(
             best_state=best_global_state,
             best_metrics=best_metrics,
@@ -1125,9 +1128,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         try:
             input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, val_loader, device)
             tracker.log_prediction_plot("prediction/federated/val_protocol", input_series, prediction, target, step=round_index, title="federated val protocol prediction")
-            if server._uses_oracle_evaluation() and server.oracle_global_state is not None:
-                input_series, prediction, target = predict_first_batch_for_state(server.model, server.oracle_global_state, val_loader, device)
-                tracker.log_prediction_plot("prediction/federated/val_oracle", input_series, prediction, target, step=round_index, title="federated val oracle prediction")
+            oracle_state = server.oracle_global_state if server.oracle_global_state is not None else server.global_state
+            input_series, prediction, target = predict_first_batch_for_state(server.model, oracle_state, val_loader, device)
+            tracker.log_prediction_plot("prediction/federated/val_oracle", input_series, prediction, target, step=round_index, title="federated val oracle prediction")
         except Exception as exc:
             logger.debug("Skip federated val prediction plot: {}", exc)
         attack_task = _build_attack_round_task(
@@ -1162,14 +1165,12 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         server.oracle_global_state = _clone_state(best_oracle_state)
     logger.info("Restored best federated checkpoint from round {} for final test", best_round)
     test_metrics = server.test_global()
-    protocol_test_metrics = server.test_protocol() if server._uses_oracle_evaluation() else test_metrics
-    oracle_test_metrics = server.test_oracle() if server._uses_oracle_evaluation() else None
+    protocol_test_metrics, oracle_test_metrics = _resolve_test_metric_views(server, test_metrics)
     final_test_step = max(len(server.history), best_round + 1)
     attack_manager.finalize()
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
     final_log_payload = {**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed, "run/evaluation_mode": server.evaluation_mode}
-    final_log_payload.update({f"active_test/{key}": value for key, value in test_metrics.items()})
     if protocol_test_metrics is not None:
         final_log_payload.update({f"protocol_test/{key}": value for key, value in protocol_test_metrics.items()})
     if oracle_test_metrics is not None:
@@ -1178,9 +1179,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     try:
         input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, test_loader, device)
         tracker.log_prediction_plot("prediction/federated/test_protocol", input_series, prediction, target, step=final_test_step, title="federated test protocol prediction")
-        if server._uses_oracle_evaluation() and server.oracle_global_state is not None:
-            input_series, prediction, target = predict_first_batch_for_state(server.model, server.oracle_global_state, test_loader, device)
-            tracker.log_prediction_plot("prediction/federated/test_oracle", input_series, prediction, target, step=final_test_step, title="federated test oracle prediction")
+        oracle_state = server.oracle_global_state if server.oracle_global_state is not None else server.global_state
+        input_series, prediction, target = predict_first_batch_for_state(server.model, oracle_state, test_loader, device)
+        tracker.log_prediction_plot("prediction/federated/test_oracle", input_series, prediction, target, step=final_test_step, title="federated test oracle prediction")
     except Exception as exc:
         logger.debug("Skip federated prediction plot: {}", exc)
     attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)

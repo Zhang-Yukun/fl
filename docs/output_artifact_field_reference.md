@@ -50,6 +50,8 @@ Centralized `summary.json` contains:
 
 Federated `summary.json` is the main artifact for final comparison.
 
+It always records both `protocol_test` and `oracle_test`. When no separate oracle evaluation state exists, `oracle_test` falls back to the same values as `protocol_test`.
+
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `test` | object | Final test metrics after the last global model is produced |

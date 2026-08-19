@@ -26,6 +26,7 @@ from fedlab.federated.algorithms import (
     _attack_target_type,
     _build_federated_resume_state,
     _build_federated_summary,
+    _resolve_test_metric_views,
     _build_attack_round_task,
     _clone_state,
     _round_history_communication_summary,
@@ -247,7 +248,7 @@ class GrpcFederatedCoordinator:
 
         metrics = self.server.evaluate_global()
         protocol_metrics = self.server.evaluate_protocol() if self.server._uses_oracle_evaluation() else metrics
-        oracle_metrics = self.server.evaluate_oracle() if self.server._uses_oracle_evaluation() else None
+        oracle_metrics = self.server.evaluate_oracle() if self.server._uses_oracle_evaluation() else protocol_metrics
         self.best_global_state, self.best_metrics, self.best_round, improved = _update_best_checkpoint(
             best_state=self.best_global_state,
             best_metrics=self.best_metrics,
@@ -274,9 +275,9 @@ class GrpcFederatedCoordinator:
         try:
             input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.global_state, self.server.val_loader, self.server.device)
             self.tracker.log_prediction_plot('prediction/grpc/val_protocol', input_series, prediction, target, step=round_index, title='grpc val protocol prediction')
-            if self.server._uses_oracle_evaluation() and self.server.oracle_global_state is not None:
-                input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.oracle_global_state, self.server.val_loader, self.server.device)
-                self.tracker.log_prediction_plot('prediction/grpc/val_oracle', input_series, prediction, target, step=round_index, title='grpc val oracle prediction')
+            oracle_state = self.server.oracle_global_state if self.server.oracle_global_state is not None else self.server.global_state
+            input_series, prediction, target = predict_first_batch_for_state(self.server.model, oracle_state, self.server.val_loader, self.server.device)
+            self.tracker.log_prediction_plot('prediction/grpc/val_oracle', input_series, prediction, target, step=round_index, title='grpc val oracle prediction')
         except Exception as exc:
             logger.debug('Skip gRPC val prediction plot: {}', exc)
         self._run_attacks(round_index, round_base_state, results)
@@ -304,8 +305,7 @@ class GrpcFederatedCoordinator:
             self.server.oracle_global_state = _clone_state(self.best_oracle_state)
         logger.info('Restored best gRPC federated checkpoint from round {} for final test', self.best_round)
         test_metrics = self.server.test_global()
-        protocol_test_metrics = self.server.test_protocol() if self.server._uses_oracle_evaluation() else test_metrics
-        oracle_test_metrics = self.server.test_oracle() if self.server._uses_oracle_evaluation() else None
+        protocol_test_metrics, oracle_test_metrics = _resolve_test_metric_views(self.server, test_metrics)
         self.server.save(self.output_dir, self.config)
         final_test_step = max(len(self.server.history), self.best_round + 1)
         self.attack_manager.finalize()
@@ -332,7 +332,6 @@ class GrpcFederatedCoordinator:
         )
         final_log_payload = {
             **{f'test/{key}': value for key, value in test_metrics.items()},
-            **{f'active_test/{key}': value for key, value in test_metrics.items()},
             'run/rounds': len(self.server.history),
             'run/total_time_seconds': total_elapsed,
             'run/transport': 'grpc',
@@ -355,9 +354,9 @@ class GrpcFederatedCoordinator:
         try:
             input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.global_state, self.server.test_loader, self.server.device)
             self.tracker.log_prediction_plot('prediction/grpc/test_protocol', input_series, prediction, target, step=final_test_step, title='grpc test protocol prediction')
-            if self.server._uses_oracle_evaluation() and self.server.oracle_global_state is not None:
-                input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.oracle_global_state, self.server.test_loader, self.server.device)
-                self.tracker.log_prediction_plot('prediction/grpc/test_oracle', input_series, prediction, target, step=final_test_step, title='grpc test oracle prediction')
+            oracle_state = self.server.oracle_global_state if self.server.oracle_global_state is not None else self.server.global_state
+            input_series, prediction, target = predict_first_batch_for_state(self.server.model, oracle_state, self.server.test_loader, self.server.device)
+            self.tracker.log_prediction_plot('prediction/grpc/test_oracle', input_series, prediction, target, step=final_test_step, title='grpc test oracle prediction')
         except Exception as exc:
             logger.debug('Skip gRPC prediction plot: {}', exc)
         self.tracker.finish()
