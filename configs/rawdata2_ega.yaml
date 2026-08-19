@@ -15,24 +15,34 @@ evaluation:
   mode: oracle_full_update
 
 ega:
-  artifact_path: artifacts/ega/rawdata2_ega.pt
+  artifact_path: artifacts/ega/rawdata2_ega_h240_v1.pt
   block_size: 256
-  encoded_dim: 128
-  hidden_dim: 512
+  encoded_dim: 240
+  hidden_dim: 1024
   residual_blocks: 2
-  quantization_level: 64
+  quantization_level: 127
   encode_buffers: false
-  normalization: 1.0
-  initial_normalization: 1.0
-  min_normalization: 0.001
-  normalization_strategy: previous_round_max_abs
+  normalization: 0.00025
+  initial_normalization: 0.00025
+  min_normalization: 0.000001
+  normalization_strategy: ema_reported_client_max_abs
+  normalization_ema: 0.9
+  encoded_dtype: int8
+  encoded_stochastic_rounding: false
+  encoded_noise_std: 0.0
+  download_dtype: int8
+  download_method: dense
+  download_stochastic_rounding: false
+  download_trainable_only: true
+  download_encoded_dtype: int8
+  error_feedback: true
   pretrain:
     device: cuda:0
-    epochs: 30
-    patience: 10
-    min_delta: 0.5
-    batch_size: 64
-    lr: 0.001
-    train_groups: 10000
-    val_groups: 5000
+    epochs: 100
+    patience: 20
+    min_delta: 0.0
+    batch_size: 128
+    lr: 0.0005
+    train_groups: 30000
+    val_groups: 15000
     seed: 2026

@@ -12,6 +12,7 @@ import fedlab.federated.server as server_module
 from fedlab.datasets.rare_earth import build_federated_loaders
 from fedlab.engine.training import train_n_steps
 from fedlab.federated.client import FederatedClient
+from fedlab.federated.methods.encoded import EGAFedAvgMethod
 from fedlab.modeling.forecasting import build_model
 from fedlab.utils.serialization import compress_topk, serialize_model
 
@@ -478,10 +479,13 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
         "hidden_dim": 16,
         "residual_blocks": 1,
         "quantization_level": 16,
-        "normalization": 1.0,
-        "initial_normalization": 1.0,
-        "min_normalization": 1e-4,
-        "normalization_strategy": "fixed",
+        "normalization": 2e-4,
+        "initial_normalization": 2e-4,
+        "min_normalization": 1e-6,
+        "normalization_strategy": "reported_client_max_abs",
+        "encoded_dtype": "int8",
+        "download_dtype": "int8",
+        "error_feedback": True,
         "pretrain": {
             "device": "cpu",
             "epochs": 2,
@@ -498,9 +502,43 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
 
     assert (tmp_path / "ega_codec.pt").exists()
     assert result["last_upload_compression_ratio"] > 1.0
+    assert result["last_total_communication_ratio"] > 1.0
     assert result["best_val_mse"] == result["best_val_mse"]
     assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
+    assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
+
+
+def test_ega_protocol_aggregation_uses_client_visible_base(monkeypatch):
+    method = EGAFedAvgMethod()
+    server = SimpleNamespace(
+        ega_codec=object(),
+        ega_trainable_keys=("weight",),
+        config={"ega": {}},
+        global_state=OrderedDict([("weight", torch.tensor([10.0]))]),
+        ega_normalization=1.0,
+        _update_oracle_evaluation_state=lambda *args, **kwargs: None,
+    )
+    protocol_base = OrderedDict([("weight", torch.tensor([6.5]))])
+    decoded_update = OrderedDict([("weight", torch.tensor([1.0]))])
+    results = [
+        client_module.ClientResult(client_id="c1", num_samples=1, loss=0.0, ega_payload=object()),
+        client_module.ClientResult(client_id="c2", num_samples=3, loss=0.0, ega_payload=object()),
+    ]
+
+    monkeypatch.setattr(
+        "fedlab.federated.methods.encoded.decode_mean_encoded_payload",
+        lambda payloads, codec: decoded_update,
+    )
+    monkeypatch.setattr(
+        method,
+        "_protocol_base_state",
+        lambda **kwargs: protocol_base,
+    )
+
+    method.aggregate(server=server, results=results, round_base_state=OrderedDict([("weight", torch.tensor([10.0]))]), round_index=3)
+
+    assert torch.allclose(server.global_state["weight"], torch.tensor([7.5]))
 
 
 

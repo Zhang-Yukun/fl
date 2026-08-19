@@ -26,8 +26,9 @@ from fedlab.utils.serialization import StateDict
 class EncodedStatePayload:
     """Encoded model update payload uploaded by one client in EGA.
 
-    The payload stores encoded block vectors and the scalar normalization used by
-    stochastic integer quantization.
+    The payload stores encoded block vectors, optional transmission-side
+    quantization metadata, and the scalar normalization used by stochastic
+    integer quantization.
     """
 
     names: list[str]
@@ -39,18 +40,22 @@ class EncodedStatePayload:
     quantization_level: int
     normalization: float
     contribution_scale: float
+    encoded_scale: float | None = None
+    encoded_dtype: str = "float32"
+    observed_update_absmax: float = 0.0
 
     @property
     def nbytes(self) -> int:
         """Return the numeric payload size in bytes."""
 
-        return self.encoded_blocks.numel() * self.encoded_blocks.element_size()
+        scale_bytes = 4 if self.encoded_scale is not None else 0
+        return self.encoded_blocks.numel() * self.encoded_blocks.element_size() + scale_bytes
 
     @property
     def num_parameters(self) -> int:
         """Return the number of transmitted scalar values."""
 
-        return int(self.encoded_blocks.numel())
+        return int(self.encoded_blocks.numel()) + (1 if self.encoded_scale is not None else 0)
 
 
 class ResidualMLPBlock(nn.Module):
@@ -198,7 +203,11 @@ def stochastic_quantize_block_vector(
         raise ValueError("quantization_level must be positive")
     if normalization <= 0:
         raise ValueError("normalization must be positive")
-    scaled = torch.clamp(vector.to(torch.float32) * (float(quantization_level) / float(normalization)), -float(quantization_level), float(quantization_level))
+    scaled = torch.clamp(
+        vector.to(torch.float32) * (float(quantization_level) / float(normalization)),
+        -float(quantization_level),
+        float(quantization_level),
+    )
     lower = torch.floor(scaled)
     probability = scaled - lower
     if generator is None:
@@ -222,6 +231,50 @@ def dequantize_block_vector(
     return quantized.to(torch.float32) * (float(normalization) / float(quantization_level))
 
 
+def quantize_encoded_blocks(
+    encoded_blocks: torch.Tensor,
+    *,
+    dtype: str = "float32",
+    stochastic_rounding: bool = False,
+    generator: torch.Generator | None = None,
+) -> tuple[torch.Tensor, float | None, str]:
+    """Quantize encoded blocks before transmission."""
+
+    normalized_dtype = str(dtype).lower()
+    if normalized_dtype in {"float32", "fp32"}:
+        return encoded_blocks.detach().cpu().to(torch.float32), None, "float32"
+    if normalized_dtype in {"float16", "fp16"}:
+        return encoded_blocks.detach().cpu().to(torch.float16), None, "float16"
+    if normalized_dtype in {"bfloat16", "bf16"}:
+        return encoded_blocks.detach().cpu().to(torch.bfloat16), None, "bfloat16"
+    if normalized_dtype not in {"int8", "qint8", "absmax_int8", "scaled_int8"}:
+        raise ValueError(f"Unsupported EGA encoded dtype: {dtype}")
+    base = encoded_blocks.detach().cpu().to(torch.float32)
+    max_abs = float(base.abs().max().item())
+    scale = max(max_abs / 127.0, 1e-12)
+    normalized = torch.clamp(base / scale, -127.0, 127.0)
+    if stochastic_rounding:
+        lower = torch.floor(normalized)
+        probability = normalized - lower
+        if generator is None:
+            random = torch.rand(normalized.shape, dtype=torch.float32)
+        else:
+            random = torch.rand(normalized.shape, generator=generator, dtype=torch.float32)
+        rounded = lower + (random < probability).to(torch.float32)
+    else:
+        rounded = torch.round(normalized)
+    quantized = torch.clamp(rounded, -127.0, 127.0).to(torch.int8)
+    return quantized, scale, "int8"
+
+
+def dequantize_encoded_blocks(payload: EncodedStatePayload) -> torch.Tensor:
+    """Restore one transmitted encoded payload to float32 blocks."""
+
+    if payload.encoded_scale is None:
+        return payload.encoded_blocks.detach().cpu().to(torch.float32)
+    return payload.encoded_blocks.detach().cpu().to(torch.float32) * float(payload.encoded_scale)
+
+
 def encode_state_update(
     update: StateDict,
     codec: EgaAutoEncoder,
@@ -231,6 +284,9 @@ def encode_state_update(
     block_size: int,
     contribution_scale: float,
     generator: torch.Generator | None = None,
+    encoded_dtype: str = "float32",
+    encoded_stochastic_rounding: bool = False,
+    encoded_noise_std: float = 0.0,
 ) -> EncodedStatePayload:
     """Encode one dense state update into the EGA upload domain."""
 
@@ -245,16 +301,31 @@ def encode_state_update(
     )
     codec_device = _codec_device(codec)
     encoded = codec.encode_blocks(quantized.to(codec_device)).detach().cpu().to(torch.float32)
+    if encoded_noise_std > 0:
+        if generator is None:
+            noise = torch.randn(encoded.shape, dtype=torch.float32) * float(encoded_noise_std)
+        else:
+            noise = torch.randn(encoded.shape, generator=generator, dtype=torch.float32) * float(encoded_noise_std)
+        encoded = encoded + noise
+    transmitted_encoded, encoded_scale, resolved_encoded_dtype = quantize_encoded_blocks(
+        encoded,
+        dtype=encoded_dtype,
+        stochastic_rounding=encoded_stochastic_rounding,
+        generator=generator,
+    )
     return EncodedStatePayload(
         names=names,
         shapes=shapes,
-        encoded_blocks=encoded,
+        encoded_blocks=transmitted_encoded,
         original_numel=flat.numel(),
         block_size=int(block_size),
         encoded_dim=int(codec.encoded_dim),
         quantization_level=int(quantization_level),
         normalization=float(normalization),
         contribution_scale=float(contribution_scale),
+        encoded_scale=encoded_scale,
+        encoded_dtype=resolved_encoded_dtype,
+        observed_update_absmax=float(scaled.abs().max().item()) if scaled.numel() else 0.0,
     )
 
 
@@ -268,7 +339,7 @@ def decode_mean_encoded_payload(
         raise ValueError("payloads must be non-empty")
     first = payloads[0]
     codec_device = _codec_device(codec)
-    aggregated = torch.stack([payload.encoded_blocks.to(torch.float32) for payload in payloads], dim=0).mean(dim=0).to(codec_device)
+    aggregated = torch.stack([dequantize_encoded_blocks(payload) for payload in payloads], dim=0).mean(dim=0).to(codec_device)
     decoded = codec.decode_blocks(aggregated).detach().cpu()
     flat = unpack_flat_blocks(
         dequantize_block_vector(
@@ -292,7 +363,7 @@ def decode_attack_view_from_mean_difference(
         raise ValueError("payloads must be non-empty")
     first = payloads[0]
     codec_device = _codec_device(codec)
-    encoded_stack = torch.stack([payload.encoded_blocks.to(torch.float32) for payload in payloads], dim=0)
+    encoded_stack = torch.stack([dequantize_encoded_blocks(payload) for payload in payloads], dim=0)
     zero_blocks = codec.encode_blocks(
         torch.zeros((encoded_stack.shape[1], first.block_size), dtype=torch.float32, device=codec_device)
     ).detach().cpu()
@@ -491,11 +562,23 @@ def load_ega_codec(
     """Load a pretrained EGA codec, optionally creating it on demand."""
 
     path = resolve_ega_artifact_path(config, num_clients)
+    ega_cfg = _ega_config(config)
+    block_size = int(ega_cfg.get("block_size", 256))
+    encoded_dim = int(ega_cfg.get("encoded_dim", block_size))
+    hidden_dim = int(ega_cfg.get("hidden_dim", max(block_size, encoded_dim) * 2))
+    expected_spec = {
+        "block_size": block_size,
+        "encoded_dim": encoded_dim,
+        "hidden_dim": hidden_dim,
+        "residual_blocks": int(ega_cfg.get("residual_blocks", 2)),
+        "quantization_level": int(ega_cfg.get("quantization_level", 64)),
+        "num_clients": int(num_clients),
+    }
     if not path.exists():
         if not allow_pretrain:
             raise FileNotFoundError(f"EGA codec artifact not found: {path}")
         logger.info("EGA codec artifact missing at {}; start synthetic pretraining", path)
-        requested_device = _ega_config(config).get("pretrain", {}).get(
+        requested_device = ega_cfg.get("pretrain", {}).get(
             "device",
             config.get("runtime", {}).get("device", str(device)),
         )
@@ -505,6 +588,21 @@ def load_ega_codec(
             pretrain_device = torch.device("cpu")
         pretrain_ega_codec(config, num_clients=num_clients, device=pretrain_device, output_path=path)
     checkpoint = torch.load(path, map_location="cpu")
+    checkpoint_spec = checkpoint.get("config", {})
+    if any(checkpoint_spec.get(key) != value for key, value in expected_spec.items()):
+        if not allow_pretrain:
+            raise RuntimeError(f"EGA codec artifact at {path} does not match current config")
+        logger.info("EGA codec artifact at {} does not match current config; retraining", path)
+        requested_device = ega_cfg.get("pretrain", {}).get(
+            "device",
+            config.get("runtime", {}).get("device", str(device)),
+        )
+        pretrain_device = torch.device(str(requested_device))
+        if pretrain_device.type == "cuda" and not torch.cuda.is_available():
+            logger.warning("Requested EGA pretrain device {} is unavailable; falling back to cpu", pretrain_device)
+            pretrain_device = torch.device("cpu")
+        pretrain_ega_codec(config, num_clients=num_clients, device=pretrain_device, output_path=path)
+        checkpoint = torch.load(path, map_location="cpu")
     codec = build_ega_model(config)
     codec.load_state_dict(checkpoint["state_dict"])
     codec.to(device)

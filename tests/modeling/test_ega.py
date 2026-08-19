@@ -7,6 +7,7 @@ from fedlab.modeling.ega import (
     EgaAutoEncoder,
     decode_mean_encoded_payload,
     dequantize_block_vector,
+    dequantize_encoded_blocks,
     encode_state_update,
     pack_flat_blocks,
     pretrain_ega_codec,
@@ -50,10 +51,14 @@ def test_encode_decode_mean_payload_restores_state_shape():
         block_size=4,
         contribution_scale=1.0,
         generator=torch.Generator(device="cpu").manual_seed(3),
+        encoded_dtype="int8",
     )
 
     decoded = decode_mean_encoded_payload([payload], codec)
 
+    assert payload.encoded_blocks.dtype == torch.int8
+    assert payload.encoded_scale is not None
+    assert dequantize_encoded_blocks(payload).shape[1] == codec.encoded_dim
     assert list(decoded.keys()) == ["weight", "bias"]
     assert decoded["weight"].shape == update["weight"].shape
     assert decoded["bias"].shape == update["bias"].shape
@@ -113,7 +118,9 @@ def test_encode_state_update_moves_blocks_to_codec_device():
         block_size=4,
         contribution_scale=1.0,
         generator=torch.Generator(device="cpu").manual_seed(3),
+        encoded_dtype="int8",
     )
 
     assert payload.encoded_blocks.device.type == "cpu"
     assert payload.encoded_blocks.shape[1] == codec.encoded_dim
+    assert payload.encoded_blocks.dtype == torch.int8
