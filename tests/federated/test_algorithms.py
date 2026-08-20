@@ -173,6 +173,183 @@ def test_fedavg_upload_model_mode_preserves_dense_aggregation_metrics(tmp_path):
     assert all(client["aggregation_payload_kind"] == "dense_model" for round_ in model_metrics for client in round_["clients"])
 
 
+class _TransportToyModel(torch.nn.Module):
+    """Small deterministic model with parameters and floating buffers for transport tests."""
+
+    def __init__(self):
+        super().__init__()
+        self.bn = torch.nn.BatchNorm1d(2)
+        self.linear = torch.nn.Linear(2, 2, bias=True)
+        self.norm = torch.nn.LayerNorm(2)
+        with torch.no_grad():
+            for parameter in self.parameters():
+                parameter.zero_()
+            for buffer in self.buffers():
+                buffer.zero_()
+
+    def forward(self, x):
+        return self.norm(self.linear(self.bn(x)))
+
+
+class _ToyLoader:
+    """Minimal loader carrying a dataset length for client sample accounting."""
+
+    def __init__(self, length: int = 4):
+        self.dataset = [(torch.zeros(2), torch.zeros(2)) for _ in range(length)]
+
+    def __iter__(self):
+        return iter(self.dataset)
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+def _clone_state_dict(state):
+    return OrderedDict((name, tensor.detach().cpu().clone()) for name, tensor in state.items())
+
+
+def _assert_state_float_value(state, expected: float) -> None:
+    for name, tensor in state.items():
+        if name.endswith("num_batches_tracked"):
+            continue
+        if tensor.dtype.is_floating_point:
+            assert torch.allclose(tensor, torch.full_like(tensor, expected)), name
+
+
+def _transport_test_config(tmp_path, upload_mode: str, download_mode: str) -> dict:
+    return load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            f"experiment.output_dir={tmp_path}",
+            "federated.algorithm=fedavg",
+            "federated.rounds=3",
+            "federated.local_epochs=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+            "runtime.seed=2026",
+            "runtime.deterministic=true",
+            "data.shuffle_train=false",
+            "training.optimizer=sgd",
+            "training.lr=0.1",
+            "training.patience=999",
+            f"transport.upload_mode={upload_mode}",
+            f"transport.download_mode={download_mode}",
+        ],
+    )
+
+
+def _run_manual_transport_rounds(config: dict, monkeypatch):
+    def _build_toy_model(_config):
+        return _TransportToyModel()
+
+    def _fake_train_one_epoch(model, loader, optimizer, device):
+        del loader, optimizer, device
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.add_(1.0)
+            for buffer in model.buffers():
+                if buffer.dtype.is_floating_point:
+                    buffer.add_(1.0)
+        return 0.0
+
+    monkeypatch.setattr(client_module, "build_model", _build_toy_model)
+    monkeypatch.setattr(server_module, "build_model", _build_toy_model)
+    monkeypatch.setattr(client_module, "train_one_epoch", _fake_train_one_epoch)
+
+    train_loaders = {"c1": _ToyLoader(), "c2": _ToyLoader()}
+    val_loader = _ToyLoader(length=1)
+    test_loader = _ToyLoader(length=1)
+    device = torch.device("cpu")
+    server = server_module.FederatedServer(config, val_loader, test_loader, device)
+    total_train_samples = sum(len(loader.dataset) for loader in train_loaders.values())
+    clients = [
+        FederatedClient(
+            client_id,
+            loader,
+            config,
+            device,
+            total_train_samples=total_train_samples,
+            total_clients=len(train_loaders),
+            allow_ega_pretrain=False,
+        )
+        for client_id, loader in train_loaders.items()
+    ]
+
+    rounds = []
+    for round_index in range(3):
+        round_base_state = _clone_state_dict(server.global_state)
+        round_context = server.build_round_context()
+        prepared_states = []
+        results = []
+        for client in clients:
+            prepared = client.prepare_round_state(round_base_state, round_index=round_index, round_context=round_context)
+            prepared_states.append((client.client_id, _clone_state_dict(prepared.download_state)))
+            result = client.train(
+                round_base_state,
+                round_index=round_index,
+                round_context=round_context,
+                prepared_state=prepared,
+            )
+            results.append(result)
+        aggregation_weights = server.aggregate_dense(
+            results,
+            round_index=round_index,
+            round_base_state=round_base_state,
+            round_context=round_context,
+        )
+        rounds.append({
+            "round_index": round_index,
+            "download_states": prepared_states,
+            "results": results,
+            "aggregation_weights": aggregation_weights,
+            "global_state": _clone_state_dict(server.global_state),
+        })
+    return rounds
+
+
+@pytest.mark.parametrize(
+    ("upload_mode", "download_mode"),
+    [
+        ("update", "model"),
+        ("model", "model"),
+        ("update", "update"),
+        ("model", "update"),
+    ],
+)
+def test_single_node_transport_modes_follow_expected_dense_payload_semantics(tmp_path, monkeypatch, upload_mode, download_mode):
+    config = _transport_test_config(tmp_path / f"{upload_mode}_{download_mode}", upload_mode, download_mode)
+
+    rounds = _run_manual_transport_rounds(config, monkeypatch)
+
+    expected_download_values = [0.0, 1.0, 1.0] if download_mode == "update" else [0.0, 1.0, 2.0]
+    expected_upload_values = [1.0, 1.0, 1.0] if upload_mode == "update" else [1.0, 2.0, 3.0]
+    expected_payload_kind = "dense_update" if upload_mode == "update" else "dense_model"
+
+    for round_result, expected_download, expected_upload in zip(rounds, expected_download_values, expected_upload_values):
+        for _, download_state in round_result["download_states"]:
+            _assert_state_float_value(download_state, expected_download)
+        for result in round_result["results"]:
+            assert result.upload_mode == upload_mode
+            assert result.aggregation_payload_kind == expected_payload_kind
+            assert result.parameter_download_bytes == result.download_bytes
+            assert result.parameter_upload_bytes == result.upload_bytes
+            assert result.transport_download_bytes == result.download_bytes
+            assert result.transport_upload_bytes == result.upload_bytes
+            assert result.parameter_download_parameters == result.download_parameters
+            assert result.parameter_upload_parameters == result.upload_parameters
+            _assert_state_float_value(result.aggregation_state, expected_upload)
+        _assert_state_float_value(round_result["global_state"], float(round_result["round_index"] + 1))
+        assert round_result["aggregation_weights"] == [0.5, 0.5]
+
+    final_state = rounds[-1]["global_state"]
+    assert "bn.running_mean" in final_state
+    assert "bn.running_var" in final_state
+    assert "linear.weight" in final_state
+    assert "norm.weight" in final_state
+    _assert_state_float_value(final_state, 3.0)
+
+
 def test_fedaware_uses_dense_updates_and_records_weights(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
