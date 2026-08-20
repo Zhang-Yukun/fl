@@ -10,6 +10,7 @@ import torch
 
 from fedlab.modeling.ega import EncodedStatePayload, encode_state_update
 from fedlab.federated.methods import build_method
+from fedlab.federated.protocol import build_download_payload_state, reconstruct_model_from_download_payload, resolve_download_mode
 from fedlab.modeling import build_model
 from fedlab.utils.serialization import (
     SparseUpdate,
@@ -21,6 +22,14 @@ from fedlab.utils.serialization import (
     subtract_state,
 )
 from fedlab.engine.training import build_training_optimizer, first_batch_gradient, first_batch_sample, train_n_steps, train_one_epoch
+
+
+@dataclass
+class PreparedClientState:
+    """Per-round download payload and reconstructed client-visible model."""
+
+    download_state: StateDict
+    received_global_state: StateDict
 
 
 @dataclass
@@ -55,6 +64,7 @@ class ClientResult:
     privacy_noise_multiplier: float = 0.0
     evaluation_state: StateDict | None = None
     evaluation_payload_kind: str = "none"
+    upload_mode: str = "update"
 
     @property
     def sent_bytes(self) -> int:
@@ -123,6 +133,7 @@ class FederatedClient:
         self.method = build_method(str(config.get("federated", {}).get("algorithm", "fedavg")))
         self.allow_ega_pretrain = allow_ega_pretrain
         self.ega_codec = None
+        self.cached_received_global_state = None
         self.method.configure_client(self)
 
     @staticmethod
@@ -167,12 +178,42 @@ class FederatedClient:
             "evaluation_payload_kind": "dense_full_update",
         }
 
+    def prepare_round_state(
+        self,
+        global_state: StateDict,
+        round_index: int = 0,
+        round_context: dict[str, Any] | None = None,
+    ) -> PreparedClientState:
+        """Return the download payload and client-visible model for one round."""
+
+        method_download_state, target_received_global_state = self.method.prepare_client_state(
+            client=self,
+            global_state=global_state,
+            round_index=round_index,
+            round_context=round_context or {},
+        )
+        download_mode = resolve_download_mode(self.config)
+        if self.method.uses_custom_download_transport():
+            if download_mode != "model":
+                raise ValueError(
+                    f"Algorithm {self.method.name} manages its own download payload and only supports transport.download_mode=model"
+                )
+            download_state = method_download_state
+            received_global_state = target_received_global_state
+        else:
+            download_base_state = self.cached_received_global_state if self.cached_received_global_state is not None else global_state
+            download_state = build_download_payload_state(target_received_global_state, download_base_state, download_mode)
+            received_global_state = reconstruct_model_from_download_payload(download_state, download_base_state, download_mode)
+        self.cached_received_global_state = received_global_state
+        return PreparedClientState(download_state=download_state, received_global_state=received_global_state)
+
     def train(
         self,
         global_state: StateDict,
         compressed: bool = False,
         round_index: int = 0,
         round_context: dict[str, Any] | None = None,
+        prepared_state: PreparedClientState | None = None,
     ) -> ClientResult:
         """Train locally from global weights and return the transmitted payload.
 
@@ -182,12 +223,10 @@ class FederatedClient:
         """
 
         algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
-        download_state, received_global_state = self.method.prepare_client_state(
-            client=self,
-            global_state=global_state,
-            round_index=round_index,
-            round_context=round_context or {},
-        )
+        if prepared_state is None:
+            prepared_state = self.prepare_round_state(global_state, round_index=round_index, round_context=round_context)
+        download_state = prepared_state.download_state
+        received_global_state = prepared_state.received_global_state
 
         model = build_model(self.config).to(self.device)
         load_serialized(model, received_global_state, self.device)

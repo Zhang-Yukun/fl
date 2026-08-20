@@ -42,6 +42,7 @@ from fedlab.utils.serialization import (
     state_num_parameters,
 )
 from fedlab.federated.server import EarlyStopper, FederatedServer, RoundRecord
+from fedlab.federated.protocol import validate_transport_modes
 from fedlab.utils.tracking import Tracker
 from fedlab.engine.training import build_training_optimizer, evaluate, predict_first_batch, predict_first_batch_for_state, train_one_epoch
 
@@ -551,12 +552,28 @@ def _attack_target_type(config: dict[str, Any]) -> str:
     return str(config.get("attack", {}).get("target_type", "update_payload")).lower()
 
 
-def _extract_attack_payload(config: dict[str, Any], result, results, server: FederatedServer | None = None) -> StateDict:
+def _extract_attack_payload(
+    config: dict[str, Any],
+    result,
+    results,
+    server: FederatedServer | None = None,
+    round_base_state: StateDict | None = None,
+    round_index: int = 0,
+    round_context: dict[str, Any] | None = None,
+) -> StateDict:
     """Return the actual transmitted client payload as a dense state update."""
 
     algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
     method = build_method(algorithm)
-    return method.extract_attack_payload(result=result, results=results, server=server, clone_state=_clone_state)
+    return method.extract_attack_payload(
+        result=result,
+        results=results,
+        server=server,
+        clone_state=_clone_state,
+        round_base_state=round_base_state,
+        round_index=round_index,
+        round_context=round_context or {},
+    )
 
 
 @dataclass
@@ -625,6 +642,7 @@ def _build_attack_round_task(
     round_base_state: StateDict,
     attack_target_type: str,
     server: FederatedServer | None = None,
+    round_context: dict[str, Any] | None = None,
 ) -> AttackRoundTask | None:
     """Capture one round of attack inputs as immutable CPU snapshots."""
 
@@ -634,6 +652,7 @@ def _build_attack_round_task(
     max_samples = int(attack_cfg.get("max_samples", 1))
     sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
     selected_clients = _select_attack_clients(clients, config, round_index)
+    round_context = round_context or {}
     results_by_client = {result.client_id: result for result in results}
     samples: list[AttackSampleTask] = []
     for client_index, client in enumerate(selected_clients):
@@ -655,7 +674,15 @@ def _build_attack_round_task(
                 )
             else:
                 real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
-                target = _extract_attack_payload(config, result, results, server=server)
+                target = _extract_attack_payload(
+                    config,
+                    result,
+                    results,
+                    server=server,
+                    round_base_state=round_base_state,
+                    round_index=round_index,
+                    round_context=round_context,
+                )
                 reference_inputs = client.train_reference_inputs()
             samples.append(
                 AttackSampleTask(
@@ -1041,6 +1068,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     logger.info("Saved startup config artifacts: {}", [str(path) for path in saved_configs])
     configure_torch_runtime(config)
     configure_random_seed(config)
+    validate_transport_modes(config)
     _log_mode_specific_schedule(config, "federated")
     tracker = Tracker(config)
     start_time = time.perf_counter()
@@ -1097,9 +1125,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         else:
             results = [client.train(round_base_state, compressed=compressed, round_index=round_index) for client in clients]
         if compressed:
-            aggregation_weights = server.aggregate_sparse(results, round_base_state=round_base_state)
+            aggregation_weights = server.aggregate_sparse(results, round_base_state=round_base_state, round_index=round_index, round_context=round_context)
         else:
-            aggregation_weights = server.aggregate_dense(results, round_index=round_index, round_base_state=round_base_state)
+            aggregation_weights = server.aggregate_dense(results, round_index=round_index, round_base_state=round_base_state, round_context=round_context)
         metrics = server.evaluate_global()
         protocol_metrics = server.evaluate_protocol() if server._uses_oracle_evaluation() else metrics
         oracle_metrics = server.evaluate_oracle() if server._uses_oracle_evaluation() else protocol_metrics
@@ -1142,6 +1170,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             round_base_state,
             attack_target_type,
             server=server,
+            round_context=round_context,
         )
         attack_manager.submit(attack_task)
         _save_periodic_federated_snapshot(

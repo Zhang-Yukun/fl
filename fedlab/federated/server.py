@@ -13,6 +13,7 @@ from loguru import logger
 from fedlab.utils.artifacts import save_experiment_config
 from fedlab.federated.methods import build_method
 from fedlab.modeling import build_model
+from fedlab.federated.protocol import derive_update_from_upload_payload, weighted_protocol_base_state
 from fedlab.modeling.ega import EncodedStatePayload, decode_attack_view_from_mean_difference, decode_mean_encoded_payload
 from fedlab.utils.serialization import (
     StateDict,
@@ -257,13 +258,27 @@ class FederatedServer:
         generator.manual_seed(int(seed) + int(round_index) * 1009)
         return generator
 
-    def _aggregate_adaptive_clipped_rdp(self, results, round_index: int, round_base_state: StateDict) -> list[float]:
+    def _aggregate_adaptive_clipped_rdp(self, results, round_index: int, round_base_state: StateDict, round_context: dict[str, Any] | None = None) -> list[float]:
         """Aggregate raw client updates with adaptive server-side clipping and RDP accounting."""
 
         adaptive_cfg = self.config.get("adaptive_clipped_rdp", {})
+        round_context = round_context or {}
         sample_weights = [result.num_samples for result in results]
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
-        raw_updates = [result.aggregation_state for result in results]
+        raw_updates = [
+            derive_update_from_upload_payload(
+                result.aggregation_state,
+                self.method.reconstruct_received_global_state(
+                    server=self,
+                    global_state=round_base_state,
+                    client_id=result.client_id,
+                    round_index=round_index,
+                    round_context=round_context,
+                ),
+                result.upload_mode,
+            )
+            for result in results
+        ]
         update_norms = [state_l2_norm(update) for update in raw_updates]
         median_norm, raw_clip, clip_norm = adaptive_clip_threshold(
             update_norms,
@@ -281,7 +296,8 @@ class FederatedServer:
             noise_std=noise_std,
             generator=self._adaptive_noise_generator(round_index),
         )
-        self.global_state = add_update(self.global_state, noisy_update)
+        protocol_base_state = weighted_protocol_base_state(self, results, round_base_state, round_index, round_context)
+        self.global_state = add_update(protocol_base_state, noisy_update)
         self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
         total_clients = int(adaptive_cfg.get("total_clients", len(results)))
         sampling_rate = float(len(results)) / float(max(total_clients, 1))
@@ -296,7 +312,7 @@ class FederatedServer:
             )
         return weights
 
-    def aggregate_dense(self, results, round_index: int = 0, round_base_state: StateDict | None = None) -> list[float]:
+    def aggregate_dense(self, results, round_index: int = 0, round_base_state: StateDict | None = None, round_context: dict[str, Any] | None = None) -> list[float]:
         """Aggregate dense client payloads through the active method implementation."""
 
         if round_base_state is None:
@@ -306,9 +322,10 @@ class FederatedServer:
             results=results,
             round_index=round_index,
             round_base_state=round_base_state,
+            round_context=round_context or {},
         )
 
-    def aggregate_sparse(self, results, round_base_state: StateDict | None = None) -> list[float]:
+    def aggregate_sparse(self, results, round_base_state: StateDict | None = None, round_index: int = 0, round_context: dict[str, Any] | None = None) -> list[float]:
         """Aggregate sparse client payloads through the active method implementation."""
 
         if round_base_state is None:
@@ -316,7 +333,9 @@ class FederatedServer:
         return self.method.aggregate(
             server=self,
             results=results,
+            round_index=round_index,
             round_base_state=round_base_state,
+            round_context=round_context or {},
         )
 
     def evaluate_protocol(self) -> dict[str, float]:

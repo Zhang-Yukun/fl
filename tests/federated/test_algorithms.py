@@ -11,7 +11,8 @@ import fedlab.federated.client as client_module
 import fedlab.federated.server as server_module
 from fedlab.datasets.rare_earth import build_federated_loaders
 from fedlab.engine.training import train_n_steps
-from fedlab.federated.client import FederatedClient
+from fedlab.federated.client import FederatedClient, ClientResult
+from fedlab.federated.methods import build_method
 from fedlab.federated.methods.encoded import EGAFedAvgMethod
 from fedlab.modeling.forecasting import build_model
 from fedlab.utils.serialization import compress_topk, serialize_model
@@ -136,6 +137,40 @@ def test_standard_fedavg_uses_dense_updates(tmp_path):
     assert metrics[0]["total_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
     assert metrics[0]["total_parameter_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
     assert metrics[0]["transport_upload_compression_ratio"] == 1.0
+
+
+def test_fedavg_upload_model_mode_preserves_dense_aggregation_metrics(tmp_path):
+    base_overrides = [
+        "federated.algorithm=fedavg",
+        "federated.rounds=2",
+        "attack.enabled=false",
+        "tracking.enabled=false",
+        "runtime.device=cpu",
+        "runtime.seed=2026",
+        "data.shuffle_train=false",
+        "model.dropout=0.0",
+    ]
+    update_dir = tmp_path / "update_mode"
+    model_dir = tmp_path / "model_mode"
+    update_config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [*base_overrides, f"experiment.output_dir={update_dir}", "transport.upload_mode=update"],
+    )
+    model_config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [*base_overrides, f"experiment.output_dir={model_dir}", "transport.upload_mode=model"],
+    )
+
+    update_result = run_federated(update_config)
+    model_result = run_federated(model_config)
+
+    update_metrics = json.loads((update_dir / "metrics.json").read_text(encoding="utf-8"))
+    model_metrics = json.loads((model_dir / "metrics.json").read_text(encoding="utf-8"))
+
+    assert update_result["test"] == model_result["test"]
+    assert update_result["best_val_mse"] == model_result["best_val_mse"]
+    assert [round_["val_mse"] for round_ in update_metrics] == [round_["val_mse"] for round_ in model_metrics]
+    assert all(client["aggregation_payload_kind"] == "dense_model" for round_ in model_metrics for client in round_["clients"])
 
 
 def test_fedaware_uses_dense_updates_and_records_weights(tmp_path):
@@ -292,6 +327,33 @@ def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
     assert isinstance(target, dict)
     assert torch.equal(target["weight"], torch.tensor([[0.0, 2.0]]))
     assert not torch.equal(target["weight"], oracle_update["weight"])
+
+
+def test_model_upload_attack_payload_is_derived_from_uploaded_model():
+    config = {"federated": {"algorithm": "fedavg"}}
+    round_base_state = OrderedDict([("weight", torch.tensor([[0.5, -1.0]]))])
+    uploaded_model_state = OrderedDict([("weight", torch.tensor([[1.5, 2.0]]))])
+    result = ClientResult(
+        client_id="Nd2O3",
+        num_samples=1,
+        loss=0.0,
+        aggregation_state=uploaded_model_state,
+        aggregation_payload_kind="dense_model",
+        upload_mode="model",
+    )
+    server = SimpleNamespace(method=build_method("fedavg"))
+
+    payload = algorithms_module._extract_attack_payload(
+        config,
+        result,
+        [result],
+        server=server,
+        round_base_state=round_base_state,
+        round_index=0,
+        round_context={},
+    )
+
+    assert torch.equal(payload["weight"], torch.tensor([[1.0, 3.0]]))
 
 
 def test_attack_payload_merges_sparse_and_dense_buffer_updates():

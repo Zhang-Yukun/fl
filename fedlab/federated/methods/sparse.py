@@ -6,6 +6,7 @@ from typing import Any
 
 from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
 from fedlab.federated.methods.registry import federated_method
+from fedlab.federated.protocol import resolve_upload_mode, weighted_protocol_base_state
 from fedlab.utils.serialization import (
     add_update,
     compress_randomk,
@@ -23,13 +24,13 @@ from fedlab.utils.serialization import (
 class _SparseFedAvgMethod(FederatedMethod):
     """Shared sparse-upload behavior for Top-k and Random-k FedAvg variants."""
 
-    def _split_updates(self, *, model, global_state):
+    def _split_updates(self, *, model, base_state):
         """Return trainable sparse candidates plus dense buffer updates."""
 
         trainable_state = serialize_trainable_model(model)
         untrainable_state = serialize_untrainable_model(model)
-        global_trainable_state = type(global_state)((name, global_state[name]) for name in trainable_state.keys())
-        global_untrainable_state = type(global_state)((name, global_state[name]) for name in untrainable_state.keys())
+        global_trainable_state = type(base_state)((name, base_state[name]) for name in trainable_state.keys())
+        global_untrainable_state = type(base_state)((name, base_state[name]) for name in untrainable_state.keys())
         return (
             subtract_state(trainable_state, global_trainable_state),
             subtract_state(untrainable_state, global_untrainable_state),
@@ -68,7 +69,7 @@ class _SparseFedAvgMethod(FederatedMethod):
             privacy_noise_multiplier=privacy_noise_multiplier,
         )
 
-    def aggregate(self, *, server, results, round_base_state=None, **_: Any) -> list[float]:
+    def aggregate(self, *, server, results, round_base_state=None, round_index: int = 0, round_context=None, **_: Any) -> list[float]:
         """Aggregate sparse client updates for compressed FedAvg variants."""
 
         weights = [result.num_samples for result in results]
@@ -80,7 +81,8 @@ class _SparseFedAvgMethod(FederatedMethod):
                 dense.update(result.aggregation_state)
             scaled = {name: tensor * (weight / total) for name, tensor in dense.items()}
             update = scaled if update is None else {name: update[name] + scaled[name] for name in scaled}
-        server.global_state = add_update(server.global_state, update)
+        protocol_base_state = weighted_protocol_base_state(server, results, round_base_state, round_index, round_context or {})
+        server.global_state = add_update(protocol_base_state, update)
         server._update_oracle_evaluation_state(round_base_state, results, weights)
         return [weight / total for weight in weights]
 
@@ -100,10 +102,14 @@ class CompressedFedAvgMethod(_SparseFedAvgMethod):
     name = 'compressed_fedavg'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Legacy top-k sparse FedAvg alias')
 
-    def client_update(self, *, model, global_state, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client=None, **_: Any):
+    def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client=None, **_: Any):
         """Return a Top-k sparse payload from one local model state."""
 
-        update, buffer_update = self._split_updates(model=model, global_state=global_state)
+        upload_mode = resolve_upload_mode((client.config if client is not None else {}))
+        if upload_mode != 'update':
+            raise ValueError('Sparse upload methods only support transport.upload_mode=update')
+        base_state = received_global_state if received_global_state is not None else global_state
+        update, buffer_update = self._split_updates(model=model, base_state=base_state)
         fraction = float((client.config if client is not None else {}).get('federated', {}).get('topk_fraction', 0.05))
         sparse = compress_topk(update, fraction)
         return self._build_sparse_result(
@@ -124,10 +130,14 @@ class SparseFedAvgMethod(_SparseFedAvgMethod):
     name = 'sparse_fedavg'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Top-k sparse FedAvg baseline')
 
-    def client_update(self, *, model, global_state, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client=None, **_: Any):
+    def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client=None, **_: Any):
         """Return a Top-k sparse payload from one local model state."""
 
-        update, buffer_update = self._split_updates(model=model, global_state=global_state)
+        upload_mode = resolve_upload_mode((client.config if client is not None else {}))
+        if upload_mode != 'update':
+            raise ValueError('Sparse upload methods only support transport.upload_mode=update')
+        base_state = received_global_state if received_global_state is not None else global_state
+        update, buffer_update = self._split_updates(model=model, base_state=base_state)
         fraction = float((client.config if client is not None else {}).get('federated', {}).get('topk_fraction', 0.05))
         sparse = compress_topk(update, fraction)
         return self._build_sparse_result(
@@ -148,10 +158,14 @@ class DpTopkFedAvgMethod(_SparseFedAvgMethod):
     name = 'dp_topk_fedavg'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Top-k sparse FedAvg with DP preprocessing')
 
-    def client_update(self, *, model, global_state, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, **_: Any):
+    def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, **_: Any):
         """Return a DP-processed Top-k sparse payload from one local model state."""
 
-        update, buffer_update = self._split_updates(model=model, global_state=global_state)
+        upload_mode = resolve_upload_mode(client.config)
+        if upload_mode != 'update':
+            raise ValueError('Sparse upload methods only support transport.upload_mode=update')
+        base_state = received_global_state if received_global_state is not None else global_state
+        update, buffer_update = self._split_updates(model=model, base_state=base_state)
         fraction = float(client.config.get('federated', {}).get('topk_fraction', 0.05))
         privacy_cfg = client.config.get('privacy', {})
         privacy_clip_norm = float(privacy_cfg.get('clip_norm', 1.0))
@@ -178,10 +192,14 @@ class RandomkFedAvgMethod(_SparseFedAvgMethod):
     name = 'randomk_fedavg'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Random-k sparse FedAvg baseline')
 
-    def client_update(self, *, model, global_state, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, round_index: int, **_: Any):
+    def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, round_index: int, **_: Any):
         """Return a Random-k sparse payload from one local model state."""
 
-        update, buffer_update = self._split_updates(model=model, global_state=global_state)
+        upload_mode = resolve_upload_mode(client.config)
+        if upload_mode != 'update':
+            raise ValueError('Sparse upload methods only support transport.upload_mode=update')
+        base_state = received_global_state if received_global_state is not None else global_state
+        update, buffer_update = self._split_updates(model=model, base_state=base_state)
         fraction = float(client.config.get('federated', {}).get('topk_fraction', 0.05))
         sparse = compress_randomk(update, fraction, generator=client._randomk_generator(round_index))
         return self._build_sparse_result(
@@ -202,10 +220,14 @@ class SoteriaFLMethod(_SparseFedAvgMethod):
     name = 'soteriafl'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Private random-k sparse upload baseline')
 
-    def client_update(self, *, model, global_state, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, round_index: int, **_: Any):
+    def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, round_index: int, **_: Any):
         """Return a DP-processed Random-k sparse payload from one local model state."""
 
-        update, buffer_update = self._split_updates(model=model, global_state=global_state)
+        upload_mode = resolve_upload_mode(client.config)
+        if upload_mode != 'update':
+            raise ValueError('Sparse upload methods only support transport.upload_mode=update')
+        base_state = received_global_state if received_global_state is not None else global_state
+        update, buffer_update = self._split_updates(model=model, base_state=base_state)
         fraction = float(client.config.get('federated', {}).get('topk_fraction', 0.05))
         privacy_cfg = client.config.get('privacy', {})
         privacy_clip_norm = float(privacy_cfg.get('clip_norm', 1.0))

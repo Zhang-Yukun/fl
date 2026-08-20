@@ -42,6 +42,11 @@ class FederatedMethod(ABC):
 
         return {}
 
+    def uses_custom_download_transport(self) -> bool:
+        """Return whether the method owns download-payload construction itself."""
+
+        return False
+
     def prepare_client_state(
         self,
         *,
@@ -53,6 +58,19 @@ class FederatedMethod(ABC):
         """Return the transmitted download state and the state loaded for local training."""
 
         return global_state, global_state
+
+    def reconstruct_received_global_state(
+        self,
+        *,
+        server: Any,
+        global_state: Any,
+        client_id: str,
+        round_index: int,
+        round_context: dict[str, Any],
+    ) -> Any:
+        """Return the model state a client effectively trains from this round."""
+
+        return global_state
 
     @abstractmethod
     def client_update(self, **kwargs: Any) -> Any:

@@ -121,6 +121,12 @@ class EGAFedAvgMethod(FederatedMethod):
     """Concrete EGA FedAvg implementation on the method API."""
 
     name = "ega_fedavg"
+
+    def uses_custom_download_transport(self) -> bool:
+        """EGA manages its own encoded download payload."""
+
+        return True
+
     capabilities = MethodCapabilities(compressed=False, implemented=True, description="Encoded gradient aggregation FedAvg variant")
 
     def configure_client(self, client: Any) -> None:

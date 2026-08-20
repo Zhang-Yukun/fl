@@ -41,6 +41,7 @@ from fedlab.federated.algorithms import (
 )
 from fedlab.federated.client import ClientResult, FederatedClient
 from fedlab.federated.server import EarlyStopper, FederatedServer
+from fedlab.federated.protocol import validate_transport_modes
 from fedlab.security.attacks import save_attack_artifacts, summarize_attack_results
 from fedlab.utils.logging import setup_logging
 from fedlab.utils.artifacts import save_experiment_config, should_save_periodic_artifacts
@@ -122,6 +123,7 @@ class GrpcFederatedCoordinator:
         logger.info('Saved startup config artifacts: {}', [str(path) for path in saved_configs])
         configure_torch_runtime(config)
         configure_random_seed(config)
+        validate_transport_modes(config, transport_backend='grpc')
         self.tracker = Tracker(config)
         self.device = resolve_device(config)
         train_loaders, val_loader, test_loader = build_federated_loaders(config)
@@ -228,7 +230,7 @@ class GrpcFederatedCoordinator:
                 'stop': self.stopped,
             }
 
-    def _run_attacks(self, round_index: int, round_base_state: dict[str, Any], results) -> None:
+    def _run_attacks(self, round_index: int, round_base_state: dict[str, Any], results, round_context: dict[str, Any] | None = None) -> None:
         """Queue server-side attack evaluation without blocking aggregation or validation."""
 
         task = _build_attack_round_task(
@@ -240,10 +242,11 @@ class GrpcFederatedCoordinator:
             round_base_state,
             self.attack_target_type,
             server=self.server,
+            round_context=round_context,
         )
         self.attack_manager.submit(task)
 
-    def _finish_final_round_bookkeeping(self, round_index: int, results, aggregation_weights, round_base_state) -> None:
+    def _finish_final_round_bookkeeping(self, round_index: int, results, aggregation_weights, round_base_state, round_context: dict[str, Any] | None = None) -> None:
         """Complete final-round validation and artifact bookkeeping off the submit hot path."""
 
         metrics = self.server.evaluate_global()
@@ -280,7 +283,7 @@ class GrpcFederatedCoordinator:
             self.tracker.log_prediction_plot('prediction/grpc/val_oracle', input_series, prediction, target, step=round_index, title='grpc val oracle prediction')
         except Exception as exc:
             logger.debug('Skip gRPC val prediction plot: {}', exc)
-        self._run_attacks(round_index, round_base_state, results)
+        self._run_attacks(round_index, round_base_state, results, round_context)
         if should_save_periodic_artifacts(self.config, round_index + 1):
             _save_periodic_federated_snapshot(
                 output_dir=self.output_dir,
@@ -378,10 +381,11 @@ class GrpcFederatedCoordinator:
             if set(self.expected_clients).issubset(self.pending.keys()):
                 results = [self.pending[client_id] for client_id in self.expected_clients]
                 round_base_state = _clone_state(self.server.global_state)
+                round_context = self.server.build_round_context()
                 if self.compressed:
-                    aggregation_weights = self.server.aggregate_sparse(results, round_base_state=round_base_state)
+                    aggregation_weights = self.server.aggregate_sparse(results, round_base_state=round_base_state, round_index=self.round_index, round_context=round_context)
                 else:
-                    aggregation_weights = self.server.aggregate_dense(results, round_index=self.round_index, round_base_state=round_base_state)
+                    aggregation_weights = self.server.aggregate_dense(results, round_index=self.round_index, round_base_state=round_base_state, round_context=round_context)
                 next_round_index = self.round_index + 1
                 if next_round_index >= self.max_rounds:
                     current_round_index = self.round_index
@@ -393,7 +397,7 @@ class GrpcFederatedCoordinator:
                     self.finalize_requested = True
                     self.pending_final_round_thread = threading.Thread(
                         target=self._finish_final_round_bookkeeping,
-                        args=(current_round_index, results, aggregation_weights, round_base_state),
+                        args=(current_round_index, results, aggregation_weights, round_base_state, round_context),
                         name='grpc-final-round',
                         daemon=True,
                     )
@@ -427,7 +431,7 @@ class GrpcFederatedCoordinator:
                     )
                     if not will_stop:
                         self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=self.round_index)
-                    self._run_attacks(self.round_index, round_base_state, results)
+                    self._run_attacks(self.round_index, round_base_state, results, round_context)
                     if (not will_stop) or should_save_periodic_artifacts(self.config, self.round_index + 1):
                         _save_periodic_federated_snapshot(
                             output_dir=self.output_dir,
@@ -508,6 +512,7 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
     setup_logging(Path(config['experiment']['output_dir']) / f'client_{client_id}', config.get('runtime', {}).get('log_level', 'INFO'))
     configure_torch_runtime(config)
     configure_random_seed(config)
+    validate_transport_modes(config, transport_backend='grpc')
     device = resolve_device(config)
     train_loaders, _, _ = build_federated_loaders(config)
     if client_id not in train_loaders:

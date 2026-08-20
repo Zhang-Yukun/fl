@@ -38,6 +38,11 @@ class SecureQuantizedFedAvgMethod(_QuantizedDenseMethod):
     name = 'secure_quantized_fedavg'
     capabilities = MethodCapabilities(compressed=False, implemented=True, description='Dense quantized upload FedAvg')
 
+    def uses_custom_download_transport(self) -> bool:
+        """Secure quantized FedAvg manages its own quantized download payload."""
+
+        return True
+
     def prepare_client_state(self, *, global_state, client, round_index: int, round_context: dict[str, Any]):
         """Quantize the download payload before the client loads it for training."""
 
