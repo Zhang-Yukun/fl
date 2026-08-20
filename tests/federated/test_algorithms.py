@@ -218,6 +218,13 @@ def _assert_state_float_value(state, expected: float) -> None:
             assert torch.allclose(tensor, torch.full_like(tensor, expected)), name
 
 
+def _assert_full_state_equal(left, right):
+    assert set(left.keys()) == set(right.keys())
+    for name in left.keys():
+        assert torch.equal(left[name], right[name]), name
+
+
+
 def _transport_test_config(tmp_path, upload_mode: str, download_mode: str) -> dict:
     return load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
@@ -2115,3 +2122,180 @@ def test_single_node_sync_update_update_simulation_matches_expected_state_progre
             _assert_state_float_value(update, 1.0)
         _assert_state_float_value(round_result["global_state"], expected_global)
         assert round_result["aggregation_weights"] == [0.5, 0.5]
+
+
+def _run_single_node_update_update_rounds_with_server(config: dict, monkeypatch):
+    def _build_toy_model(_config):
+        return _ScalarTransportToyModel()
+
+    def _fake_train_one_epoch(model, loader, optimizer, device):
+        del loader, optimizer, device
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.add_(1.0)
+            for buffer in model.buffers():
+                if buffer.dtype.is_floating_point:
+                    buffer.add_(1.0)
+        return 0.0
+
+    def _fake_load_ega_codec(config, device, num_clients, allow_pretrain):
+        del device, num_clients, allow_pretrain
+        block_size = int(config.get("ega", {}).get("block_size", 7))
+        return _IdentityEgaCodec(block_size=block_size)
+
+    monkeypatch.setattr(client_module, "build_model", _build_toy_model)
+    monkeypatch.setattr(server_module, "build_model", _build_toy_model)
+    monkeypatch.setattr(client_module, "train_one_epoch", _fake_train_one_epoch)
+    if str(config.get("federated", {}).get("algorithm", "")).lower() == "ega_fedavg":
+        monkeypatch.setattr(encoded_methods, "build_model", _build_toy_model)
+        monkeypatch.setattr(encoded_methods, "load_ega_codec", _fake_load_ega_codec)
+
+    train_loaders = {"c1": _ToyLoader(), "c2": _ToyLoader()}
+    val_loader = _ToyLoader(length=1)
+    test_loader = _ToyLoader(length=1)
+    device = torch.device("cpu")
+    server = server_module.FederatedServer(config, val_loader, test_loader, device)
+    total_train_samples = sum(len(loader.dataset) for loader in train_loaders.values())
+    clients = [
+        FederatedClient(
+            client_id,
+            loader,
+            config,
+            device,
+            total_train_samples=total_train_samples,
+            total_clients=len(train_loaders),
+            allow_ega_pretrain=False,
+        )
+        for client_id, loader in train_loaders.items()
+    ]
+
+    rounds = []
+    for round_index in range(3):
+        round_base_state = _clone_state_dict(server.global_state)
+        round_context = server.build_round_context()
+        prepared_states = []
+        results = []
+        for client in clients:
+            prepared = client.prepare_round_state(round_base_state, round_index=round_index, round_context=round_context)
+            prepared_states.append(
+                (
+                    client.client_id,
+                    _clone_state_dict(prepared.download_state),
+                    _clone_state_dict(prepared.received_global_state),
+                )
+            )
+            result = client.train(
+                round_base_state,
+                round_index=round_index,
+                round_context=round_context,
+                prepared_state=prepared,
+            )
+            results.append(result)
+        aggregation_weights = server.aggregate_dense(
+            results,
+            round_index=round_index,
+            round_base_state=round_base_state,
+            round_context=round_context,
+        )
+        rounds.append(
+            {
+                "round_index": round_index,
+                "prepared_states": prepared_states,
+                "results": results,
+                "aggregation_weights": aggregation_weights,
+                "global_state": _clone_state_dict(server.global_state),
+                "oracle_global_state": _clone_state_dict(server.oracle_global_state),
+                "canonical_updates": [_canonical_update_from_result(result, server) for result in results],
+            }
+        )
+    return server, rounds
+
+
+def test_single_node_sync_update_update_evaluation_states_match_for_exact_fedavg(tmp_path, monkeypatch):
+    config = _single_node_update_update_config(
+        tmp_path,
+        "fedavg",
+        ["evaluation.mode=oracle_full_update"],
+    )
+    server, rounds = _run_single_node_update_update_rounds_with_server(config, monkeypatch)
+
+    for round_result, expected_value in zip(rounds, [1.0, 2.0, 3.0]):
+        _assert_state_float_value(round_result["global_state"], expected_value)
+        _assert_state_float_value(round_result["oracle_global_state"], expected_value)
+
+    captured = []
+
+    def _capture_evaluate(model, loader, device):
+        del loader, device
+        state = serialize_model(model)
+        captured.append(_clone_state_dict(state))
+        total = sum(float(tensor.sum().item()) for name, tensor in state.items() if tensor.dtype.is_floating_point and not name.endswith("num_batches_tracked"))
+        return {"mse": total, "mae": total, "mape": total}
+
+    monkeypatch.setattr(server_module, "evaluate", _capture_evaluate)
+
+    server.evaluate_protocol()
+    server.evaluate_oracle()
+    server.test_protocol()
+    server.test_oracle()
+
+    assert len(captured) == 4
+    for state in captured:
+        _assert_state_float_value(state, 3.0)
+
+
+def test_single_node_sync_update_update_evaluation_states_split_protocol_from_oracle_for_sparse_compression(tmp_path, monkeypatch):
+    config = _single_node_update_update_config(
+        tmp_path,
+        "compressed_fedavg",
+        [
+            "federated.topk_fraction=0.5",
+            "evaluation.mode=oracle_full_update",
+        ],
+    )
+    server, rounds = _run_single_node_update_update_rounds_with_server(config, monkeypatch)
+
+    last_round = rounds[-1]
+    protocol_state = last_round["global_state"]
+    oracle_state = last_round["oracle_global_state"]
+
+    protocol_values = {
+        name: float(tensor.reshape(-1)[0].item())
+        for name, tensor in protocol_state.items()
+        if tensor.dtype.is_floating_point and not name.endswith("num_batches_tracked")
+    }
+    oracle_values = {
+        name: float(tensor.reshape(-1)[0].item())
+        for name, tensor in oracle_state.items()
+        if tensor.dtype.is_floating_point and not name.endswith("num_batches_tracked")
+    }
+
+    assert protocol_state != oracle_state
+    assert any(value < 3.0 for value in protocol_values.values())
+    assert any(value < 3.0 for value in oracle_values.values())
+    assert any(oracle_values[name] > protocol_values[name] for name in protocol_values.keys())
+    assert all(oracle_values[name] >= protocol_values[name] for name in protocol_values.keys())
+
+    captured = []
+
+    def _capture_evaluate(model, loader, device):
+        del loader, device
+        state = serialize_model(model)
+        captured.append(_clone_state_dict(state))
+        total = sum(float(tensor.sum().item()) for name, tensor in state.items() if tensor.dtype.is_floating_point and not name.endswith("num_batches_tracked"))
+        return {"mse": total, "mae": total, "mape": total}
+
+    monkeypatch.setattr(server_module, "evaluate", _capture_evaluate)
+
+    server.evaluate_protocol()
+    server.evaluate_oracle()
+    server.test_protocol()
+    server.test_oracle()
+
+    assert len(captured) == 4
+    protocol_eval_state, oracle_eval_state, protocol_test_state, oracle_test_state = captured
+
+    _assert_full_state_equal(protocol_eval_state, protocol_state)
+    _assert_full_state_equal(oracle_eval_state, oracle_state)
+    _assert_full_state_equal(protocol_test_state, protocol_state)
+    _assert_full_state_equal(oracle_test_state, oracle_state)
