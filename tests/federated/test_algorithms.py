@@ -17,7 +17,7 @@ from fedlab.federated.methods import build_method
 from fedlab.federated.protocol import validate_transport_modes
 from fedlab.federated.methods.encoded import EGAFedAvgMethod
 from fedlab.modeling.forecasting import build_model
-from fedlab.utils.serialization import compress_topk, decompress_topk, dequantize_state_update, serialize_model
+from fedlab.utils.serialization import compress_topk, decompress_topk, dequantize_qsgd_state_update, dequantize_state_update, serialize_model
 
 from fedlab.federated.algorithms import (
     AsyncAttackManager,
@@ -1920,4 +1920,198 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
                 "linear.weight": torch.full((2, 2), expected_global),
             },
         )
+        assert round_result["aggregation_weights"] == [0.5, 0.5]
+
+
+class _ScalarTransportToyModel(torch.nn.Module):
+    """Single-scalar-per-tensor model for exact update/update transport checks."""
+
+    def __init__(self):
+        super().__init__()
+        self.bn = torch.nn.BatchNorm1d(1)
+        self.linear = torch.nn.Linear(1, 1, bias=True)
+        self.norm = torch.nn.LayerNorm(1)
+        with torch.no_grad():
+            for parameter in self.parameters():
+                parameter.zero_()
+            for buffer in self.buffers():
+                if buffer.dtype.is_floating_point:
+                    buffer.zero_()
+                else:
+                    buffer.zero_()
+
+    def forward(self, x):
+        return self.norm(self.linear(self.bn(x)))
+
+
+def _single_node_update_update_config(tmp_path, algorithm: str, extra_overrides: list[str] | None = None) -> dict:
+    overrides = [
+        f"experiment.output_dir={tmp_path / algorithm}",
+        f"federated.algorithm={algorithm}",
+        "federated.rounds=3",
+        "federated.local_epochs=1",
+        "attack.enabled=false",
+        "tracking.enabled=false",
+        "runtime.device=cpu",
+        "runtime.seed=2026",
+        "runtime.deterministic=true",
+        "data.shuffle_train=false",
+        "training.optimizer=sgd",
+        "training.lr=0.1",
+        "training.momentum=0.0",
+        "training.weight_decay=0.0",
+        "transport.upload_mode=update",
+        "transport.download_mode=update",
+    ]
+    if extra_overrides:
+        overrides.extend(extra_overrides)
+    return load_config(Path(__file__).parents[2] / "configs" / "test.yaml", overrides)
+
+
+def _canonical_update_from_result(result, server):
+    if result.sparse_update is not None:
+        update = decompress_topk(result.sparse_update)
+        if result.aggregation_state is not None:
+            update.update(result.aggregation_state)
+        return update
+    if result.ega_payload is not None:
+        update = encoded_methods.decode_mean_encoded_payload([result.ega_payload], server.ega_codec)
+        if result.aggregation_state is not None:
+            update.update(result.aggregation_state)
+        return update
+    if result.aggregation_state is None:
+        raise AssertionError(f"Client {result.client_id} produced no aggregation payload")
+    if result.aggregation_payload_kind in {"quantized_update", "sign_update"}:
+        return dequantize_state_update(result.aggregation_state)
+    if result.aggregation_payload_kind == "qsgd_update":
+        levels = int(server.config.get("federated", {}).get("qsgd_levels", 127))
+        return dequantize_qsgd_state_update(result.aggregation_state, levels=levels)
+    return _clone_state_dict(result.aggregation_state)
+
+
+def _run_single_node_update_update_rounds(config: dict, monkeypatch):
+    def _build_toy_model(_config):
+        return _ScalarTransportToyModel()
+
+    def _fake_train_one_epoch(model, loader, optimizer, device):
+        del loader, optimizer, device
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.add_(1.0)
+            for buffer in model.buffers():
+                if buffer.dtype.is_floating_point:
+                    buffer.add_(1.0)
+        return 0.0
+
+    def _fake_load_ega_codec(config, device, num_clients, allow_pretrain):
+        del device, num_clients, allow_pretrain
+        block_size = int(config.get("ega", {}).get("block_size", 7))
+        return _IdentityEgaCodec(block_size=block_size)
+
+    monkeypatch.setattr(client_module, "build_model", _build_toy_model)
+    monkeypatch.setattr(server_module, "build_model", _build_toy_model)
+    monkeypatch.setattr(client_module, "train_one_epoch", _fake_train_one_epoch)
+    if str(config.get("federated", {}).get("algorithm", "")).lower() == "ega_fedavg":
+        monkeypatch.setattr(encoded_methods, "build_model", _build_toy_model)
+        monkeypatch.setattr(encoded_methods, "load_ega_codec", _fake_load_ega_codec)
+
+    train_loaders = {"c1": _ToyLoader(), "c2": _ToyLoader()}
+    val_loader = _ToyLoader(length=1)
+    test_loader = _ToyLoader(length=1)
+    device = torch.device("cpu")
+    server = server_module.FederatedServer(config, val_loader, test_loader, device)
+    total_train_samples = sum(len(loader.dataset) for loader in train_loaders.values())
+    clients = [
+        FederatedClient(
+            client_id,
+            loader,
+            config,
+            device,
+            total_train_samples=total_train_samples,
+            total_clients=len(train_loaders),
+            allow_ega_pretrain=False,
+        )
+        for client_id, loader in train_loaders.items()
+    ]
+
+    rounds = []
+    for round_index in range(3):
+        round_base_state = _clone_state_dict(server.global_state)
+        round_context = server.build_round_context()
+        prepared_states = []
+        results = []
+        for client in clients:
+            prepared = client.prepare_round_state(round_base_state, round_index=round_index, round_context=round_context)
+            prepared_states.append(
+                (
+                    client.client_id,
+                    _clone_state_dict(prepared.download_state),
+                    _clone_state_dict(prepared.received_global_state),
+                )
+            )
+            result = client.train(
+                round_base_state,
+                round_index=round_index,
+                round_context=round_context,
+                prepared_state=prepared,
+            )
+            results.append(result)
+        aggregation_weights = server.aggregate_dense(
+            results,
+            round_index=round_index,
+            round_base_state=round_base_state,
+            round_context=round_context,
+        )
+        rounds.append(
+            {
+                "round_index": round_index,
+                "prepared_states": prepared_states,
+                "results": results,
+                "aggregation_weights": aggregation_weights,
+                "global_state": _clone_state_dict(server.global_state),
+                "canonical_updates": [_canonical_update_from_result(result, server) for result in results],
+            }
+        )
+    return rounds
+
+
+@pytest.mark.parametrize(
+    ("algorithm", "extra_overrides"),
+    [
+        ("fedavg", []),
+        ("fedaware", ["fedaware.alpha=1.0", "fedaware.steps=1", "fedaware.lr=0.1"]),
+        ("adaptive_clipped_rdp_fedavg", ["adaptive_clipped_rdp.clip_factor=1.0", "adaptive_clipped_rdp.min_clip_norm=100.0", "adaptive_clipped_rdp.max_clip_norm=100.0", "adaptive_clipped_rdp.reference_clip_norm=100.0", "adaptive_clipped_rdp.noise_multiplier=0.0"]),
+        ("compressed_fedavg", ["federated.topk_fraction=1.0"]),
+        ("sparse_fedavg", ["federated.topk_fraction=1.0"]),
+        ("dp_topk_fedavg", ["federated.topk_fraction=1.0", "privacy.clip_norm=100.0", "privacy.noise_multiplier=0.0"]),
+        ("randomk_fedavg", ["federated.topk_fraction=1.0", "federated.randomk_seed=2026"]),
+        ("soteriafl", ["federated.topk_fraction=1.0", "federated.randomk_seed=2026", "privacy.clip_norm=100.0", "privacy.noise_multiplier=0.0"]),
+        ("secure_quantized_fedavg", ["federated.quantization_dtype=float16", "privacy.clip_norm=0.0", "privacy.noise_multiplier=0.0"]),
+        ("sign_fedavg", []),
+        ("qsgd_fedavg", ["federated.qsgd_levels=127", "federated.quantization_seed=2026"]),
+        ("ega_fedavg", ["ega.block_size=7", "ega.encoded_dim=7", "ega.hidden_dim=7", "ega.residual_blocks=0", "ega.quantization_level=64", "ega.encoded_dtype=float32", "ega.download_method=ega", "ega.download_dtype=float32", "ega.error_feedback=false", "ega.min_normalization=1e-6"]),
+    ],
+)
+def test_single_node_sync_update_update_simulation_matches_expected_state_progression(tmp_path, monkeypatch, algorithm, extra_overrides):
+    config = _single_node_update_update_config(tmp_path, algorithm, extra_overrides)
+
+    rounds = _run_single_node_update_update_rounds(config, monkeypatch)
+
+    expected_download_payload_values = [0.0, 1.0, 1.0]
+    expected_received_values = [0.0, 1.0, 2.0]
+    expected_global_values = [1.0, 2.0, 3.0]
+
+    for round_result, expected_payload, expected_received, expected_global in zip(
+        rounds,
+        expected_download_payload_values,
+        expected_received_values,
+        expected_global_values,
+    ):
+        for _, download_state, received_state in round_result["prepared_states"]:
+            if algorithm in {"fedavg", "fedaware", "adaptive_clipped_rdp_fedavg"}:
+                _assert_state_float_value(download_state, expected_payload)
+            _assert_state_float_value(received_state, expected_received)
+        for update in round_result["canonical_updates"]:
+            _assert_state_float_value(update, 1.0)
+        _assert_state_float_value(round_result["global_state"], expected_global)
         assert round_result["aggregation_weights"] == [0.5, 0.5]
