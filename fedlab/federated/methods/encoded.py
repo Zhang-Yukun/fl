@@ -9,6 +9,7 @@ import torch
 
 from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
 from fedlab.federated.methods.registry import federated_method
+from fedlab.federated.protocol import resolve_download_mode, weighted_protocol_base_state
 from fedlab.modeling import build_model
 from fedlab.modeling.ega import decode_attack_view_from_mean_difference, decode_mean_encoded_payload, encode_state_update, load_ega_codec
 from fedlab.utils.serialization import add_update, average_states, dequantize_state_update, quantize_state_update, serialize_trainable_model, serialize_untrainable_model, state_num_bytes, state_num_parameters, subtract_state
@@ -68,24 +69,33 @@ def _prepare_received_global_state(
     trainable_keys: tuple[str, ...],
     round_index: int,
     client_id: str,
+    download_mode: str = "model",
+    base_state=None,
 ):
     """Return the transmitted download payload and the client-visible received global state."""
 
     ega_cfg = config.get("ega", {})
     download_dtype = str(ega_cfg.get("download_dtype", "float32")).lower()
-    if download_dtype in {"none", "float32", "fp32", "disabled"}:
-        return global_state, global_state
+    if download_dtype in {"none", "disabled"}:
+        download_dtype = "float32"
     trainable_only = bool(ega_cfg.get("download_trainable_only", False))
     payload_source = global_state
     if trainable_only:
         payload_source = type(global_state)((name, global_state[name]) for name in trainable_keys)
+    base_payload_source = payload_source
+    if download_mode == "update":
+        reference_base_state = base_state if base_state is not None else global_state
+        base_payload_source = reference_base_state
+        if trainable_only:
+            base_payload_source = type(reference_base_state)((name, reference_base_state[name]) for name in trainable_keys)
     download_method = str(ega_cfg.get("download_method", "dense")).lower()
     generator = _quantization_generator(config, round_index, client_id)
     if download_method in {"ega", "encoded", "ega_encoded"}:
         if codec is None:
             raise RuntimeError("EGA codec is required for encoded download reconstruction")
+        semantic_source = subtract_state(payload_source, base_payload_source) if download_mode == "update" else payload_source
         payload = encode_state_update(
-            payload_source,
+            semantic_source,
             codec,
             quantization_level=int(ega_cfg.get("quantization_level", 64)),
             normalization=max(
@@ -100,17 +110,20 @@ def _prepare_received_global_state(
             encoded_stochastic_rounding=bool(ega_cfg.get("download_encoded_stochastic_rounding", False)),
             encoded_noise_std=0.0,
         )
-        received_state = decode_mean_encoded_payload([payload], codec)
+        reconstructed_payload = decode_mean_encoded_payload([payload], codec)
+        received_state = add_update(base_payload_source, reconstructed_payload) if download_mode == "update" else reconstructed_payload
         if trainable_only:
             received_state = _merge_state(global_state, received_state)
         return _payload_accounting_state(payload), received_state
+    semantic_source = subtract_state(payload_source, base_payload_source) if download_mode == "update" else payload_source
     download_state = quantize_state_update(
-        payload_source,
+        semantic_source,
         dtype=download_dtype,
         stochastic_rounding=bool(ega_cfg.get("download_stochastic_rounding", False)),
         generator=generator,
     )
-    received_state = dequantize_state_update(download_state)
+    reconstructed_payload = dequantize_state_update(download_state)
+    received_state = add_update(base_payload_source, reconstructed_payload) if download_mode == "update" else reconstructed_payload
     if trainable_only:
         received_state = _merge_state(global_state, received_state)
     return download_state, received_state
@@ -167,6 +180,8 @@ class EGAFedAvgMethod(FederatedMethod):
     def prepare_client_state(self, *, global_state, client, round_index: int, round_context: dict[str, Any]):
         """Compress the downloaded global state before local training."""
 
+        download_mode = resolve_download_mode(client.config)
+        download_base_state = client.cached_received_global_state if client.cached_received_global_state is not None else global_state
         return _prepare_received_global_state(
             config=client.config,
             global_state=global_state,
@@ -174,7 +189,31 @@ class EGAFedAvgMethod(FederatedMethod):
             trainable_keys=client.ega_trainable_keys,
             round_index=round_index,
             client_id=client.client_id,
+            download_mode=download_mode,
+            base_state=download_base_state,
         )
+
+    def reconstruct_received_global_state(
+        self,
+        *,
+        server: Any,
+        global_state,
+        client_id: str,
+        round_index: int,
+        round_context: dict[str, Any],
+    ):
+        """Return the client-visible EGA-compressed global state used as this round's base."""
+
+        return _prepare_received_global_state(
+            config=server.config,
+            global_state=global_state,
+            codec=server.ega_codec,
+            trainable_keys=server.ega_trainable_keys,
+            round_index=round_index,
+            client_id=client_id,
+            download_mode=resolve_download_mode(server.config),
+            base_state=global_state,
+        )[1]
 
     def client_update(
         self,
@@ -259,19 +298,7 @@ class EGAFedAvgMethod(FederatedMethod):
 
         if round_base_state is None:
             return server.global_state
-        received_states = [
-            _prepare_received_global_state(
-                config=server.config,
-                global_state=round_base_state,
-                codec=server.ega_codec,
-                trainable_keys=server.ega_trainable_keys,
-                round_index=round_index,
-                client_id=result.client_id,
-            )[1]
-            for result in results
-        ]
-        sample_weights = [result.num_samples for result in results]
-        return average_states(received_states, sample_weights)
+        return weighted_protocol_base_state(server, results, round_base_state, round_index, {})
 
     def aggregate(self, *, server, results, round_base_state=None, round_index: int = 0, **_: Any) -> list[float]:
         """Aggregate encoded client updates with the server-side EGA codec."""

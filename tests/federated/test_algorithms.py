@@ -9,6 +9,7 @@ import torch
 import fedlab.federated.algorithms as algorithms_module
 import fedlab.federated.client as client_module
 import fedlab.federated.server as server_module
+import fedlab.federated.methods.encoded as encoded_methods
 from fedlab.datasets.rare_earth import build_federated_loaders
 from fedlab.engine.training import train_n_steps
 from fedlab.federated.client import FederatedClient, ClientResult
@@ -559,11 +560,12 @@ def _run_manual_quantized_rounds(config: dict, monkeypatch):
     return rounds
 
 
-def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp_path, monkeypatch):
+@pytest.mark.parametrize("download_mode", ["model", "update"])
+def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp_path, monkeypatch, download_mode):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            f"experiment.output_dir={tmp_path}",
+            f"experiment.output_dir={tmp_path / download_mode}",
             "federated.algorithm=secure_quantized_fedavg",
             "federated.rounds=3",
             "federated.local_epochs=1",
@@ -578,14 +580,14 @@ def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp
             "training.optimizer=sgd",
             "training.lr=0.1",
             "transport.upload_mode=update",
-            "transport.download_mode=model",
+            f"transport.download_mode={download_mode}",
         ],
     )
 
     rounds = _run_manual_quantized_rounds(config, monkeypatch)
+    expected_download_value = [0.0, 1.0, 1.0] if download_mode == "update" else [0.0, 1.0, 2.0]
 
-    for round_result in rounds:
-        expected_value = float(round_result["round_index"])
+    for round_result, expected_value in zip(rounds, expected_download_value):
         for _, download_state in round_result["download_states"]:
             assert all(tensor.dtype == torch.float16 for tensor in download_state.values())
             _assert_selected_values(
@@ -623,7 +625,7 @@ def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp
         assert round_result["aggregation_weights"] == [0.5, 0.5]
 
 
-def test_validate_transport_modes_rejects_unsupported_compressed_combinations(tmp_path):
+def test_validate_transport_modes_rejects_only_remaining_unsupported_combinations(tmp_path):
     sparse_model_upload = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
@@ -632,10 +634,10 @@ def test_validate_transport_modes_rejects_unsupported_compressed_combinations(tm
             "transport.upload_mode=model",
         ],
     )
-    quantized_update_download = load_config(
+    grpc_update_download = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            f"experiment.output_dir={tmp_path / 'quantized_invalid'}",
+            f"experiment.output_dir={tmp_path / 'grpc_invalid'}",
             "federated.algorithm=secure_quantized_fedavg",
             "transport.download_mode=update",
         ],
@@ -643,8 +645,8 @@ def test_validate_transport_modes_rejects_unsupported_compressed_combinations(tm
 
     with pytest.raises(ValueError, match="does not support transport.upload_mode=model"):
         validate_transport_modes(sparse_model_upload)
-    with pytest.raises(ValueError, match="does not support transport.download_mode=update"):
-        validate_transport_modes(quantized_update_download)
+    with pytest.raises(ValueError, match="gRPC transport does not yet support transport.download_mode=update"):
+        validate_transport_modes(grpc_update_download, transport_backend="grpc")
 
 
 def test_fedaware_uses_dense_updates_and_records_weights(tmp_path):
@@ -1734,3 +1736,188 @@ def test_centralized_run_with_sgd_optimizer(tmp_path):
     assert "mse" in result
     assert "mae" in result
     assert "mape" in result
+
+
+@pytest.mark.parametrize(
+    "algorithm",
+    [
+        "fedavg",
+        "fedaware",
+        "adaptive_clipped_rdp_fedavg",
+        "compressed_fedavg",
+        "sparse_fedavg",
+        "dp_topk_fedavg",
+        "randomk_fedavg",
+        "soteriafl",
+        "secure_quantized_fedavg",
+        "sign_fedavg",
+        "qsgd_fedavg",
+        "ega_fedavg",
+    ],
+)
+def test_validate_transport_modes_accepts_update_update_for_all_local_algorithms(tmp_path, algorithm):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            f"experiment.output_dir={tmp_path / algorithm}",
+            f"federated.algorithm={algorithm}",
+            "transport.upload_mode=update",
+            "transport.download_mode=update",
+        ],
+    )
+
+    validate_transport_modes(config)
+
+
+class _IdentityEgaCodec(torch.nn.Module):
+    """Minimal codec used to make EGA transport semantics deterministic in tests."""
+
+    def __init__(self, block_size: int):
+        super().__init__()
+        self.block_size = int(block_size)
+        self.encoded_dim = int(block_size)
+        self.anchor = torch.nn.Parameter(torch.zeros(1), requires_grad=False)
+
+    def encode_blocks(self, blocks: torch.Tensor) -> torch.Tensor:
+        return blocks.to(torch.float32)
+
+    def decode_blocks(self, encoded_blocks: torch.Tensor) -> torch.Tensor:
+        return encoded_blocks.to(torch.float32)
+
+
+def _run_manual_ega_rounds(config: dict, monkeypatch):
+    def _build_toy_model(_config):
+        return _TransportToyModel()
+
+    def _fake_train_one_epoch(model, loader, optimizer, device):
+        del loader, optimizer, device
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.add_(1.0)
+            for buffer in model.buffers():
+                if buffer.dtype.is_floating_point:
+                    buffer.add_(1.0)
+        return 0.0
+
+    def _fake_load_ega_codec(config, device, num_clients, allow_pretrain):
+        del device, num_clients, allow_pretrain
+        block_size = int(config.get("ega", {}).get("block_size", 19))
+        return _IdentityEgaCodec(block_size=block_size)
+
+    monkeypatch.setattr(client_module, "build_model", _build_toy_model)
+    monkeypatch.setattr(server_module, "build_model", _build_toy_model)
+    monkeypatch.setattr(encoded_methods, "build_model", _build_toy_model)
+    monkeypatch.setattr(client_module, "train_one_epoch", _fake_train_one_epoch)
+    monkeypatch.setattr(encoded_methods, "load_ega_codec", _fake_load_ega_codec)
+
+    train_loaders = {"c1": _ToyLoader(), "c2": _ToyLoader()}
+    val_loader = _ToyLoader(length=1)
+    test_loader = _ToyLoader(length=1)
+    device = torch.device("cpu")
+    server = server_module.FederatedServer(config, val_loader, test_loader, device)
+    total_train_samples = sum(len(loader.dataset) for loader in train_loaders.values())
+    clients = [
+        FederatedClient(
+            client_id,
+            loader,
+            config,
+            device,
+            total_train_samples=total_train_samples,
+            total_clients=len(train_loaders),
+            allow_ega_pretrain=False,
+        )
+        for client_id, loader in train_loaders.items()
+    ]
+
+    rounds = []
+    for round_index in range(3):
+        round_base_state = _clone_state_dict(server.global_state)
+        round_context = server.build_round_context()
+        prepared_states = []
+        results = []
+        for client in clients:
+            prepared = client.prepare_round_state(round_base_state, round_index=round_index, round_context=round_context)
+            prepared_states.append((client.client_id, _clone_state_dict(prepared.download_state), _clone_state_dict(prepared.received_global_state)))
+            result = client.train(
+                round_base_state,
+                round_index=round_index,
+                round_context=round_context,
+                prepared_state=prepared,
+            )
+            results.append(result)
+        aggregation_weights = server.aggregate_dense(
+            results,
+            round_index=round_index,
+            round_base_state=round_base_state,
+            round_context=round_context,
+        )
+        rounds.append({
+            "round_index": round_index,
+            "prepared_states": prepared_states,
+            "results": results,
+            "aggregation_weights": aggregation_weights,
+            "global_state": _clone_state_dict(server.global_state),
+        })
+    return rounds
+
+
+@pytest.mark.parametrize("download_mode", ["model", "update"])
+def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path, monkeypatch, download_mode):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            f"experiment.output_dir={tmp_path / download_mode}",
+            "federated.algorithm=ega_fedavg",
+            "federated.rounds=3",
+            "federated.local_epochs=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+            "runtime.seed=2026",
+            "data.shuffle_train=false",
+            "training.optimizer=sgd",
+            "training.lr=0.1",
+            "transport.upload_mode=update",
+            f"transport.download_mode={download_mode}",
+            "ega.block_size=19",
+            "ega.encoded_dim=19",
+            "ega.hidden_dim=19",
+            "ega.residual_blocks=0",
+            "ega.quantization_level=64",
+            "ega.encoded_dtype=float32",
+            "ega.download_method=ega",
+            "ega.download_dtype=float32",
+            "ega.error_feedback=false",
+            "ega.min_normalization=1e-6",
+        ],
+    )
+
+    rounds = _run_manual_ega_rounds(config, monkeypatch)
+
+    for round_result in rounds:
+        expected_received = float(round_result["round_index"])
+        for _, download_state, received_state in round_result["prepared_states"]:
+            assert "__ega_blocks__" in download_state
+            _assert_selected_values(
+                received_state,
+                {
+                    "bn.weight": torch.tensor([expected_received, expected_received]),
+                    "bn.running_mean": torch.tensor([expected_received, expected_received]),
+                    "linear.weight": torch.full((2, 2), expected_received),
+                },
+            )
+        for result in round_result["results"]:
+            assert result.upload_mode == "update"
+            assert result.aggregation_payload_kind == "ega_encoded_update"
+            assert result.ega_payload is not None
+            assert result.parameter_upload_bytes > 0
+        expected_global = float(round_result["round_index"] + 1)
+        _assert_selected_values(
+            round_result["global_state"],
+            {
+                "bn.weight": torch.tensor([expected_global, expected_global]),
+                "bn.running_mean": torch.tensor([expected_global, expected_global]),
+                "linear.weight": torch.full((2, 2), expected_global),
+            },
+        )
+        assert round_result["aggregation_weights"] == [0.5, 0.5]

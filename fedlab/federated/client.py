@@ -194,10 +194,6 @@ class FederatedClient:
         )
         download_mode = resolve_download_mode(self.config)
         if self.method.uses_custom_download_transport():
-            if download_mode != "model":
-                raise ValueError(
-                    f"Algorithm {self.method.name} manages its own download payload and only supports transport.download_mode=model"
-                )
             download_state = method_download_state
             received_global_state = target_received_global_state
         else:

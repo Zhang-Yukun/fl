@@ -6,6 +6,7 @@ from typing import Any
 
 from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
 from fedlab.federated.methods.registry import federated_method
+from fedlab.federated.protocol import build_download_payload_state, reconstruct_model_from_download_payload, resolve_download_mode, weighted_protocol_base_state
 from fedlab.utils.serialization import (
     add_update,
     average_states,
@@ -46,9 +47,31 @@ class SecureQuantizedFedAvgMethod(_QuantizedDenseMethod):
     def prepare_client_state(self, *, global_state, client, round_index: int, round_context: dict[str, Any]):
         """Quantize the download payload before the client loads it for training."""
 
+        del round_index, round_context
         quantization_dtype = str(client.config.get('federated', {}).get('quantization_dtype', 'float16'))
-        download_state = quantize_state_update(global_state, dtype=quantization_dtype)
-        return download_state, dequantize_state_update(download_state)
+        download_mode = resolve_download_mode(client.config)
+        download_base_state = client.cached_received_global_state if client.cached_received_global_state is not None else global_state
+        target_received_state = dequantize_state_update(quantize_state_update(global_state, dtype=quantization_dtype))
+        semantic_payload = build_download_payload_state(target_received_state, download_base_state, download_mode)
+        download_state = quantize_state_update(semantic_payload, dtype=quantization_dtype)
+        reconstructed_payload = dequantize_state_update(download_state)
+        received_state = reconstruct_model_from_download_payload(reconstructed_payload, download_base_state, download_mode)
+        return download_state, received_state
+
+    def reconstruct_received_global_state(
+        self,
+        *,
+        server,
+        global_state,
+        client_id: str,
+        round_index: int,
+        round_context: dict[str, Any],
+    ):
+        """Return the client-visible quantized global state used as this round's base."""
+
+        del client_id, round_index, round_context
+        quantization_dtype = str(server.config.get('federated', {}).get('quantization_dtype', 'float16'))
+        return dequantize_state_update(quantize_state_update(global_state, dtype=quantization_dtype))
 
     def client_update(
         self,
@@ -90,16 +113,15 @@ class SecureQuantizedFedAvgMethod(_QuantizedDenseMethod):
             privacy_noise_multiplier=privacy_noise_multiplier,
         )
 
-    def aggregate(self, *, server, results, round_base_state=None, **_: Any) -> list[float]:
+    def aggregate(self, *, server, results, round_base_state=None, round_index: int = 0, round_context=None, **_: Any) -> list[float]:
         """Aggregate dequantized client updates and reapply the download quantization view."""
 
         sample_weights = [result.num_samples for result in results]
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         dense_updates = [dequantize_state_update(result.aggregation_state) for result in results]
         averaged_update = average_states(dense_updates, sample_weights)
-        quantization_dtype = str(server.config.get('federated', {}).get('quantization_dtype', 'float16'))
-        compressed_base = dequantize_state_update(quantize_state_update(server.global_state, dtype=quantization_dtype))
-        server.global_state = add_update(compressed_base, averaged_update)
+        protocol_base_state = weighted_protocol_base_state(server, results, round_base_state, round_index, round_context or {})
+        server.global_state = add_update(protocol_base_state, averaged_update)
         server._update_oracle_evaluation_state(round_base_state, results, sample_weights)
         return weights
 
@@ -135,7 +157,7 @@ class SignFedAvgMethod(_QuantizedDenseMethod):
             compressor='sign_mean_abs',
         )
 
-    def aggregate(self, *, server, results, round_base_state=None, **_: Any) -> list[float]:
+    def aggregate(self, *, server, results, round_base_state=None, round_index: int = 0, round_context=None, **_: Any) -> list[float]:
         """Aggregate dequantized sign uploads with standard FedAvg weighting."""
 
         sample_weights = [result.num_samples for result in results]
@@ -194,7 +216,7 @@ class QsgdFedAvgMethod(_QuantizedDenseMethod):
             compressor=f'qsgd_{levels}_levels',
         )
 
-    def aggregate(self, *, server, results, round_base_state=None, **_: Any) -> list[float]:
+    def aggregate(self, *, server, results, round_base_state=None, round_index: int = 0, round_context=None, **_: Any) -> list[float]:
         """Aggregate dequantized QSGD uploads with standard FedAvg weighting."""
 
         sample_weights = [result.num_samples for result in results]
