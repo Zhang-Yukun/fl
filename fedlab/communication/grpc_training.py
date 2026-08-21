@@ -11,7 +11,6 @@ Example:
 from __future__ import annotations
 
 import json
-import pickle
 import threading
 import time
 from pathlib import Path
@@ -46,6 +45,7 @@ from fedlab.security.attacks import save_attack_artifacts, summarize_attack_resu
 from fedlab.utils.logging import setup_logging
 from fedlab.utils.artifacts import save_experiment_config, should_save_periodic_artifacts
 from fedlab.utils.serialization import state_num_bytes, state_num_parameters
+from fedlab.utils.transport import estimate_upload_transport_bytes
 from fedlab.utils.tracking import Tracker
 from fedlab.engine.training import predict_first_batch, predict_first_batch_for_state
 
@@ -90,21 +90,10 @@ def _apply_transport_metrics(
     result.transport_download_bytes = max(0, int(transport_delta.get('received_bytes', 0)))
     result.transport_download_overhead_bytes = max(0, result.transport_download_bytes - result.parameter_download_bytes)
     base_upload_bytes = max(0, int(transport_delta.get('sent_bytes', 0)))
-    estimated_upload_bytes = base_upload_bytes
     if round_index is not None:
-        payload = {'round': round_index, 'result': result}
-        for _ in range(3):
-            payload_bytes = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
-            estimated_upload_bytes = base_upload_bytes + len(payload_bytes)
-            if estimated_upload_bytes == result.transport_upload_bytes:
-                break
-            result.transport_upload_bytes = estimated_upload_bytes
-            result.transport_upload_overhead_bytes = max(0, result.transport_upload_bytes - result.parameter_upload_bytes)
+        estimate_upload_transport_bytes(result, round_index=round_index, base_bytes=base_upload_bytes)
     else:
         result.transport_upload_bytes = base_upload_bytes
-        result.transport_upload_overhead_bytes = max(0, result.transport_upload_bytes - result.parameter_upload_bytes)
-    if round_index is not None:
-        result.transport_upload_bytes = estimated_upload_bytes
         result.transport_upload_overhead_bytes = max(0, result.transport_upload_bytes - result.parameter_upload_bytes)
     return result
 

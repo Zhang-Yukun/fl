@@ -18,6 +18,7 @@ from fedlab.federated.protocol import validate_transport_modes
 from fedlab.federated.methods.encoded import EGAFedAvgMethod
 from fedlab.modeling.forecasting import build_model
 from fedlab.utils.serialization import compress_topk, decompress_topk, dequantize_qsgd_state_update, dequantize_state_update, serialize_model
+from fedlab.utils.transport import estimate_download_transport_bytes
 
 from fedlab.federated.algorithms import (
     AsyncAttackManager,
@@ -343,8 +344,10 @@ def test_single_node_transport_modes_follow_expected_dense_payload_semantics(tmp
             assert result.aggregation_payload_kind == expected_payload_kind
             assert result.parameter_download_bytes == result.download_bytes
             assert result.parameter_upload_bytes == result.upload_bytes
-            assert result.transport_download_bytes == result.download_bytes
-            assert result.transport_upload_bytes == result.upload_bytes
+            assert result.transport_download_bytes >= result.download_bytes
+            assert result.transport_upload_bytes >= result.upload_bytes
+            assert result.transport_download_overhead_bytes == result.transport_download_bytes - result.parameter_download_bytes
+            assert result.transport_upload_overhead_bytes == result.transport_upload_bytes - result.parameter_upload_bytes
             assert result.parameter_download_parameters == result.download_parameters
             assert result.parameter_upload_parameters == result.upload_parameters
             _assert_state_float_value(result.aggregation_state, expected_upload)
@@ -2089,6 +2092,57 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
             },
         )
         assert round_result["aggregation_weights"] == [0.5, 0.5]
+
+
+def test_single_node_transport_envelope_bytes_exceed_parameter_payload_for_dense_rounds(tmp_path, monkeypatch):
+    config = _transport_test_config(tmp_path / "transport_dense", "update", "model")
+    rounds = _run_manual_transport_rounds(config, monkeypatch)
+
+    for round_result in rounds:
+        for result in round_result["results"]:
+            assert result.transport_download_bytes > result.parameter_download_bytes
+            assert result.transport_upload_bytes > result.parameter_upload_bytes
+            assert result.transport_download_overhead_bytes > 0
+            assert result.transport_upload_overhead_bytes > 0
+
+
+def test_single_node_ega_transport_counts_round_context_bytes(tmp_path, monkeypatch):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path / "ega_round_context"),
+            "federated.algorithm=ega_fedavg",
+            "federated.rounds=1",
+            "federated.local_epochs=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+            "runtime.seed=2026",
+            "data.shuffle_train=false",
+            "training.optimizer=sgd",
+            "training.lr=0.1",
+            "transport.upload_mode=update",
+            "transport.download_mode=model",
+            "ega.block_size=19",
+            "ega.encoded_dim=19",
+            "ega.hidden_dim=19",
+            "ega.residual_blocks=0",
+            "ega.quantization_level=64",
+            "ega.encoded_dtype=float32",
+            "ega.download_method=ega",
+            "ega.download_dtype=float32",
+            "ega.error_feedback=false",
+            "ega.min_normalization=1e-6",
+        ],
+    )
+
+    rounds = _run_manual_ega_rounds(config, monkeypatch)
+    _, download_state, _ = rounds[0]["prepared_states"][0]
+    first_result = rounds[0]["results"][0]
+    without_context = estimate_download_transport_bytes(download_state, round_index=0, compressed=False, round_context={})
+
+    assert first_result.transport_download_bytes > without_context
+    assert first_result.transport_download_overhead_bytes == first_result.transport_download_bytes - first_result.parameter_download_bytes
 
 
 class _ScalarTransportToyModel(torch.nn.Module):

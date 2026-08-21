@@ -21,6 +21,7 @@ from fedlab.utils.serialization import (
     state_num_parameters,
     subtract_state,
 )
+from fedlab.utils.transport import estimate_download_transport_bytes, estimate_upload_transport_bytes
 from fedlab.engine.training import build_training_optimizer, first_batch_gradient, first_batch_sample, train_n_steps, train_one_epoch
 
 
@@ -249,11 +250,18 @@ class FederatedClient:
             download_parameters=state_num_parameters(download_state),
             parameter_download_bytes=state_num_bytes(download_state),
             parameter_download_parameters=state_num_parameters(download_state),
-            transport_download_bytes=state_num_bytes(download_state),
+            transport_download_bytes=estimate_download_transport_bytes(
+                download_state,
+                round_index=round_index,
+                compressed=compressed,
+                round_context=round_context or {},
+            ),
+            transport_download_overhead_bytes=0,
             dense_download_reference_bytes=state_num_bytes(global_state),
             dense_download_reference_parameters=state_num_parameters(global_state),
         )
-        return self.method.client_update(
+        common["transport_download_overhead_bytes"] = max(0, common["transport_download_bytes"] - common["parameter_download_bytes"])
+        result = self.method.client_update(
             client=self,
             model=model,
             local_state=local_state,
@@ -266,6 +274,8 @@ class FederatedClient:
             evaluation_kwargs=evaluation_kwargs,
             result_cls=ClientResult,
         )
+        estimate_upload_transport_bytes(result, round_index=round_index)
+        return result
 
     def gradient_sample(self, global_state: StateDict, max_samples: int | None = None, batch_index: int = 0):
         """Return gradients for a selected batch for DLG/iDLG evaluation."""
