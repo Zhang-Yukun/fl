@@ -82,5 +82,6 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["transport"]["download_mode"] == "model"
     assert config["attack"]["model_mode"] == "train"
     assert config["attack"]["reference_metric"] == "auto"
+    assert config["attack"]["report_metrics"] == "auto"
     assert config["grpc"]["max_message_mb"] == 256.0
     assert config["artifacts"]["config_formats"] == ["yaml"]

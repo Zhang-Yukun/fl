@@ -1,6 +1,8 @@
 attack:
   target_type: update_payload
   enabled: true
+  reference_metric: auto
+  report_metrics: auto
   frequency_rounds: 5
   max_samples: 1
   steps: 500

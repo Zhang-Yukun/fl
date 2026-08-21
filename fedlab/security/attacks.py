@@ -68,6 +68,9 @@ class AttackResult:
         record["primary_metric_value"] = record.pop("mse")
         record["objective_mse"] = record.pop("gradient_mse")
         for key, value in list(record.items()):
+            if value is None:
+                record.pop(key, None)
+                continue
             if isinstance(value, float) and not math.isfinite(value):
                 record[key] = None
         return record
@@ -94,6 +97,23 @@ def _normalize_reference_metric(config: dict[str, Any], target_type: str) -> str
     if value not in {"reconstruction_mse", "nearest_client_train_mse"}:
         raise ValueError(f"Unsupported attack reference metric: {value}")
     return value
+
+
+def _normalize_report_metrics(config: dict[str, Any], target_type: str) -> set[str]:
+    """Resolve which auxiliary attack metrics should be exposed in outputs."""
+
+    value = config.get("attack", {}).get("report_metrics", "auto")
+    if value == "auto" or value is None:
+        return {"nearest_client_train_mse"} if target_type == "update_payload" else {"exact_target_mse"}
+    if isinstance(value, str):
+        items = [item.strip().lower() for item in value.split(",") if item.strip()]
+    else:
+        items = [str(item).strip().lower() for item in value if str(item).strip()]
+    allowed = {"exact_target_mse", "nearest_client_train_mse"}
+    unknown = [item for item in items if item not in allowed]
+    if unknown:
+        raise ValueError(f"Unsupported attack report_metrics entries: {unknown}")
+    return set(items)
 
 
 def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_grads: list[torch.Tensor], config: dict[str, Any]) -> torch.Tensor:
@@ -271,18 +291,19 @@ def _evaluate_reconstruction(
     reference_inputs: torch.Tensor | None = None,
     reference_targets: torch.Tensor | None = None,
     reference_metric: str = "reconstruction_mse",
+    report_metrics: set[str] | None = None,
 ) -> AttackResult:
     """Build an attack result from a reconstructed input."""
 
-    exact_target_mse = torch.mean((reconstructed_x.detach().cpu() - real_x.detach().cpu()) ** 2).item()
-    psnr = _compute_psnr(exact_target_mse, data_range)
+    exact_target_value = torch.mean((reconstructed_x.detach().cpu() - real_x.detach().cpu()) ** 2).item()
+    psnr = _compute_psnr(exact_target_value, data_range)
     ssim = _compute_ssim(reconstructed_x, real_x, data_range)
     nearest_client_train_mse = None
     nearest_client_train_indices = None
     if reference_inputs is not None:
         nearest_client_train_mse, nearest_client_train_indices = _nearest_reference_mse(reconstructed_x, reference_inputs)
     metric_name = reference_metric
-    primary_mse = float(exact_target_mse)
+    primary_mse = float(exact_target_value)
     reference_x = real_x.detach().cpu().clone()
     reference_y = real_y.detach().cpu().clone()
     reference_label = "exact_target"
@@ -303,6 +324,9 @@ def _evaluate_reconstruction(
     success = primary_mse <= threshold
     if metric_name == "reconstruction_mse" and ssim_threshold is not None:
         success = success or ssim >= ssim_threshold
+    report_metrics = set() if report_metrics is None else set(report_metrics)
+    expose_exact_target = metric_name == "reconstruction_mse" or "exact_target_mse" in report_metrics
+    expose_nearest = metric_name == "nearest_client_train_mse" or "nearest_client_train_mse" in report_metrics
     return AttackResult(
         name=name,
         mse=primary_mse,
@@ -314,8 +338,8 @@ def _evaluate_reconstruction(
         success_threshold=threshold,
         gradient_mse=float(objective_mse),
         target_type=target_type,
-        exact_target_mse=float(exact_target_mse),
-        nearest_client_train_mse=None if nearest_client_train_mse is None else float(nearest_client_train_mse),
+        exact_target_mse=float(exact_target_value) if expose_exact_target else None,
+        nearest_client_train_mse=None if (nearest_client_train_mse is None or not expose_nearest) else float(nearest_client_train_mse),
         nearest_client_train_indices=nearest_client_train_indices,
         metric_name=metric_name,
         real_x=real_x.detach().cpu().clone(),
@@ -355,6 +379,7 @@ def _attack_loop(
 
     resolved_target_type = _normalize_target_type(target_type, config)
     resolved_reference_metric = _normalize_reference_metric(config, resolved_target_type)
+    report_metrics = _normalize_report_metrics(config, resolved_target_type)
     attack_cfg = config.get("attack", {})
     steps = int(attack_cfg.get("steps", 300))
     lr = float(attack_cfg.get("lr", 0.1))
@@ -457,6 +482,7 @@ def _attack_loop(
         resolved_target_type,
         reference_inputs=reference_inputs,
         reference_metric=resolved_reference_metric,
+        report_metrics=report_metrics,
     )
 
 
@@ -614,7 +640,7 @@ def _summarize_attack_subset(
         avg_primary_metric_value = _mean_finite([result.mse for result in method_subset])
         best_primary_metric_value = _mean_finite(sorted([result.mse for result in method_subset])[:1])
         avg_objective_mse = _mean_finite([result.gradient_mse for result in method_subset])
-        methods[name] = {
+        method_record: dict[str, Any] = {
             "primary_metric_name": method_subset[0].metric_name if method_subset else primary_metric_name,
             "target_type": method_subset[0].target_type if method_subset else None,
             "success_count": success_count,
@@ -623,8 +649,6 @@ def _summarize_attack_subset(
             "success_rate_percent": round((success_count / total if total else 0.0) * 100.0, 2),
             "avg_primary_metric_value": avg_primary_metric_value,
             "best_primary_metric_value": best_primary_metric_value,
-            "avg_exact_target_mse": _mean_finite([result.exact_target_mse for result in method_subset if result.exact_target_mse is not None]),
-            "avg_nearest_client_train_mse": _mean_finite([result.nearest_client_train_mse for result in method_subset if result.nearest_client_train_mse is not None]),
             "avg_psnr": _mean_finite([result.psnr for result in method_subset]),
             "avg_ssim": _mean_finite([result.ssim for result in method_subset]),
             "best_ssim": _mean_finite(sorted([result.ssim for result in method_subset], reverse=True)[:1]),
@@ -632,32 +656,39 @@ def _summarize_attack_subset(
             "avg_time_seconds": _mean_finite([result.time_seconds for result in method_subset]),
             "passes": (success_count / total if total else 0.0) <= success_rate_threshold,
         }
+        exact_values = [result.exact_target_mse for result in method_subset if result.exact_target_mse is not None]
+        nearest_values = [result.nearest_client_train_mse for result in method_subset if result.nearest_client_train_mse is not None]
+        if exact_values:
+            method_record["avg_exact_target_mse"] = _mean_finite(exact_values)
+        if nearest_values:
+            method_record["avg_nearest_client_train_mse"] = _mean_finite(nearest_values)
+        methods[name] = method_record
 
     overall_success_rate = attack_success_rate(subset)
     overall_avg_primary_metric_value = _mean_finite([result.mse for result in subset])
     overall_best_primary_metric_value = _mean_finite(sorted([result.mse for result in subset])[:1])
-    overall_avg_psnr = _mean_finite([result.psnr for result in subset])
-    overall_avg_ssim = _mean_finite([result.ssim for result in subset])
-    overall_avg_objective_mse = _mean_finite([result.gradient_mse for result in subset])
-    overall_avg_exact_target_mse = _mean_finite([result.exact_target_mse for result in subset if result.exact_target_mse is not None])
-    overall_avg_nearest_client_train_mse = _mean_finite([result.nearest_client_train_mse for result in subset if result.nearest_client_train_mse is not None])
-    return {
+    overall_record: dict[str, Any] = {
         "primary_metric_name": primary_metric_name,
         "primary_metric_direction": "higher_is_more_private",
         "target_type": subset[0].target_type if subset else None,
         "success_rate_threshold": success_rate_threshold,
         "overall_avg_primary_metric_value": overall_avg_primary_metric_value,
         "overall_best_primary_metric_value": overall_best_primary_metric_value,
-        "overall_avg_exact_target_mse": overall_avg_exact_target_mse,
-        "overall_avg_nearest_client_train_mse": overall_avg_nearest_client_train_mse,
-        "overall_avg_psnr": overall_avg_psnr,
-        "overall_avg_ssim": overall_avg_ssim,
-        "overall_avg_objective_mse": overall_avg_objective_mse,
+        "overall_avg_psnr": _mean_finite([result.psnr for result in subset]),
+        "overall_avg_ssim": _mean_finite([result.ssim for result in subset]),
+        "overall_avg_objective_mse": _mean_finite([result.gradient_mse for result in subset]),
         "overall_success_rate": overall_success_rate,
         "overall_success_rate_percent": round(overall_success_rate * 100.0, 2),
         "overall_passes": overall_success_rate <= success_rate_threshold,
         "methods": methods,
     }
+    overall_exact_values = [result.exact_target_mse for result in subset if result.exact_target_mse is not None]
+    overall_nearest_values = [result.nearest_client_train_mse for result in subset if result.nearest_client_train_mse is not None]
+    if overall_exact_values:
+        overall_record["overall_avg_exact_target_mse"] = _mean_finite(overall_exact_values)
+    if overall_nearest_values:
+        overall_record["overall_avg_nearest_client_train_mse"] = _mean_finite(overall_nearest_values)
+    return overall_record
 
 
 def summarize_attack_results(results: list[AttackResult], success_rate_threshold: float = 0.03) -> dict[str, Any]:

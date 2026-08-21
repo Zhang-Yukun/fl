@@ -26,6 +26,7 @@ def _tiny_patchtst_config(target_type: str = "update_payload"):
         },
         "attack": {
             "target_type": target_type,
+            "report_metrics": "auto",
             "steps": 1,
             "lr": 0.05,
             "optimizer": "lbfgs",
@@ -115,7 +116,7 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     assert dlg.metric_name == "nearest_client_train_mse"
     assert idlg.metric_name == "nearest_client_train_mse"
     assert dlg.nearest_client_train_mse is not None
-    assert idlg.exact_target_mse is not None
+    assert idlg.exact_target_mse is None
     assert dlg.reference_label == "nearest_client_train"
     assert torch.allclose(dlg.reference_x, x)
     assert torch.allclose(dlg.reference_y, y)

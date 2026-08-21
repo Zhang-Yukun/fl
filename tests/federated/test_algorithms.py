@@ -700,6 +700,7 @@ def test_saved_config_contains_materialized_runtime_defaults(tmp_path):
     assert saved["transport"]["download_mode"] == "model"
     assert saved["attack"]["model_mode"] == "train"
     assert saved["attack"]["reference_metric"] == "auto"
+    assert saved["attack"]["report_metrics"] == "auto"
 
 
 def test_config_artifact_formats_are_configurable(tmp_path):
@@ -755,7 +756,8 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "exact_target_mse", "nearest_client_train_mse"} <= set(attack_results[0])
+    assert {"primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "nearest_client_train_mse"} <= set(attack_results[0])
+    assert "exact_target_mse" not in attack_results[0]
     assert "mse" not in attack_results[0]
     assert "metric_name" not in attack_results[0]
     assert result["attack_evaluations"] == 6
@@ -768,6 +770,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert result["attack_summary"]["target_type"] == "update_payload"
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
     assert result["attack_summary"]["overall_avg_nearest_client_train_mse"] is not None
+    assert "overall_avg_exact_target_mse" not in result["attack_summary"]
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 3
     assert set(result["attack_summary"]["clients"]) == {"Nd2O3", "CeO2", "La2O3"}
     assert result["attack_summary"]["clients"]["Nd2O3"]["methods"]["DLG"]["total_count"] == 1

@@ -812,10 +812,16 @@ def _attack_payload_metrics(subset: list[Any], cumulative_subset: list[Any], pre
     payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "reconstruction_mse")
     payload[f"{prefix}/primary_metric_value"] = sum(result.mse for result in subset) / len(subset)
     payload[f"{prefix}/avg_primary_metric_value_so_far"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
-    payload[f"{prefix}/exact_target_mse"] = _mean_finite([getattr(result, "exact_target_mse", None) for result in subset if getattr(result, "exact_target_mse", None) is not None])
-    payload[f"{prefix}/avg_exact_target_mse_so_far"] = _mean_finite([getattr(result, "exact_target_mse", None) for result in cumulative_subset if getattr(result, "exact_target_mse", None) is not None])
-    payload[f"{prefix}/nearest_client_train_mse"] = _mean_finite([getattr(result, "nearest_client_train_mse", None) for result in subset if getattr(result, "nearest_client_train_mse", None) is not None])
-    payload[f"{prefix}/avg_nearest_client_train_mse_so_far"] = _mean_finite([getattr(result, "nearest_client_train_mse", None) for result in cumulative_subset if getattr(result, "nearest_client_train_mse", None) is not None])
+    exact_values = [getattr(result, "exact_target_mse", None) for result in subset if getattr(result, "exact_target_mse", None) is not None]
+    exact_so_far = [getattr(result, "exact_target_mse", None) for result in cumulative_subset if getattr(result, "exact_target_mse", None) is not None]
+    nearest_values = [getattr(result, "nearest_client_train_mse", None) for result in subset if getattr(result, "nearest_client_train_mse", None) is not None]
+    nearest_so_far = [getattr(result, "nearest_client_train_mse", None) for result in cumulative_subset if getattr(result, "nearest_client_train_mse", None) is not None]
+    if exact_values:
+        payload[f"{prefix}/exact_target_mse"] = _mean_finite(exact_values)
+        payload[f"{prefix}/avg_exact_target_mse_so_far"] = _mean_finite(exact_so_far)
+    if nearest_values:
+        payload[f"{prefix}/nearest_client_train_mse"] = _mean_finite(nearest_values)
+        payload[f"{prefix}/avg_nearest_client_train_mse_so_far"] = _mean_finite(nearest_so_far)
     payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
     payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
     payload[f"{prefix}/iterations"] = float(subset[0].iterations)

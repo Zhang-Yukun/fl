@@ -50,6 +50,7 @@ _RUNTIME_DEFAULTS = {
         "enabled": True,
         "target_type": "update_payload",
         "reference_metric": "auto",
+        "report_metrics": "auto",
         "steps": 300,
         "lr": 0.1,
         "optimizer": "adam",

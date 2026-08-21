@@ -235,3 +235,6 @@
 - 攻击实现：
   - `src/fedlab/security/attacks.py`
 
+
+
+- `attack.report_metrics`: controls which auxiliary attack metrics are emitted. Default `auto` records `nearest_client_train_mse` for `update_payload` and does not expose `exact_target_mse` unless explicitly requested.

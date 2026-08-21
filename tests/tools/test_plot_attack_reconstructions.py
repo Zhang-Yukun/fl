@@ -47,7 +47,6 @@ def test_plot_attack_reconstructions_plots_saved_artifacts(tmp_path):
                     "sample_index": 0,
                     "artifact_path": "attack_artifacts/round_0000/Nd2O3/sample_0000/dlg_00000.pt",
                     "primary_metric_value": 0.12,
-                    "exact_target_mse": 0.12,
                     "primary_metric_name": "nearest_client_train_mse",
                 }
             ],

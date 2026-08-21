@@ -584,3 +584,6 @@ Attack reconstructions:
 3. Use `parameter_*` for algorithm communication analysis.
 4. Use `transport_*` for real serialized network cost.
 5. For EGA, download-side reconstruction context is already counted in `parameter_download_*`, not only in `transport_*`.
+
+
+- `attack.report_metrics`: controls which auxiliary attack metrics are emitted. Default `auto` records `nearest_client_train_mse` for `update_payload` and does not expose `exact_target_mse` unless explicitly requested.
