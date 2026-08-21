@@ -10,11 +10,59 @@ from __future__ import annotations
 import pickle
 from typing import Any
 
+import torch
+
 
 def serialized_num_bytes(payload: Any) -> int:
     """Return the pickle-serialized size of one Python payload."""
 
     return len(pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
+
+
+def auxiliary_payload_num_bytes(payload: Any) -> int:
+    """Return algorithm-level bytes needed to reconstruct one auxiliary payload.
+
+    Only payload values are counted. Container keys are treated as protocol labels,
+    not algorithm data.
+    """
+
+    if payload is None:
+        return 0
+    if isinstance(payload, torch.Tensor):
+        return int(payload.numel()) * int(payload.element_size())
+    if isinstance(payload, bool):
+        return 1
+    if isinstance(payload, int):
+        return 8
+    if isinstance(payload, float):
+        return 4
+    if isinstance(payload, complex):
+        return 8
+    if isinstance(payload, bytes):
+        return len(payload)
+    if isinstance(payload, str):
+        return len(payload.encode("utf-8"))
+    if isinstance(payload, dict):
+        return sum(auxiliary_payload_num_bytes(value) for value in payload.values())
+    if isinstance(payload, (list, tuple, set)):
+        return sum(auxiliary_payload_num_bytes(value) for value in payload)
+    return serialized_num_bytes(payload)
+
+
+def auxiliary_payload_num_parameters(payload: Any) -> int:
+    """Return the number of scalar algorithm values in one auxiliary payload."""
+
+    if payload is None:
+        return 0
+    if isinstance(payload, torch.Tensor):
+        return int(payload.numel())
+    if isinstance(payload, (bool, int, float, complex, bytes, str)):
+        return 1
+    if isinstance(payload, dict):
+        return sum(auxiliary_payload_num_parameters(value) for value in payload.values())
+    if isinstance(payload, (list, tuple, set)):
+        return sum(auxiliary_payload_num_parameters(value) for value in payload)
+    return 1
 
 
 def estimate_download_transport_bytes(

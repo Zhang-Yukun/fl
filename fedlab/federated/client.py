@@ -21,7 +21,12 @@ from fedlab.utils.serialization import (
     state_num_parameters,
     subtract_state,
 )
-from fedlab.utils.transport import estimate_download_transport_bytes, estimate_upload_transport_bytes
+from fedlab.utils.transport import (
+    auxiliary_payload_num_bytes,
+    auxiliary_payload_num_parameters,
+    estimate_download_transport_bytes,
+    estimate_upload_transport_bytes,
+)
 from fedlab.engine.training import build_training_optimizer, first_batch_gradient, first_batch_sample, train_n_steps, train_one_epoch
 
 
@@ -240,21 +245,24 @@ class FederatedClient:
         evaluation_kwargs = self._evaluation_result_kwargs(local_state, global_state)
         dense_bytes = state_num_bytes(local_state)
         dense_parameters = state_num_parameters(local_state)
+        round_context_payload = round_context or {}
+        algorithm_download_bytes = state_num_bytes(download_state) + auxiliary_payload_num_bytes(round_context_payload)
+        algorithm_download_parameters = state_num_parameters(download_state) + auxiliary_payload_num_parameters(round_context_payload)
         common = dict(
             client_id=self.client_id,
             num_samples=self._loader_num_samples(self.train_loader),
             loss=float(sum(losses) / len(losses)),
             dense_bytes=dense_bytes,
             dense_parameters=dense_parameters,
-            download_bytes=state_num_bytes(download_state),
-            download_parameters=state_num_parameters(download_state),
-            parameter_download_bytes=state_num_bytes(download_state),
-            parameter_download_parameters=state_num_parameters(download_state),
+            download_bytes=algorithm_download_bytes,
+            download_parameters=algorithm_download_parameters,
+            parameter_download_bytes=algorithm_download_bytes,
+            parameter_download_parameters=algorithm_download_parameters,
             transport_download_bytes=estimate_download_transport_bytes(
                 download_state,
                 round_index=round_index,
                 compressed=compressed,
-                round_context=round_context or {},
+                round_context=round_context_payload,
             ),
             transport_download_overhead_bytes=0,
             dense_download_reference_bytes=state_num_bytes(global_state),

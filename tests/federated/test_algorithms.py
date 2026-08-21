@@ -18,7 +18,7 @@ from fedlab.federated.protocol import validate_transport_modes
 from fedlab.federated.methods.encoded import EGAFedAvgMethod
 from fedlab.modeling.forecasting import build_model
 from fedlab.utils.serialization import compress_topk, decompress_topk, dequantize_qsgd_state_update, dequantize_state_update, serialize_model
-from fedlab.utils.transport import estimate_download_transport_bytes
+from fedlab.utils.transport import auxiliary_payload_num_bytes, auxiliary_payload_num_parameters, estimate_download_transport_bytes
 
 from fedlab.federated.algorithms import (
     AsyncAttackManager,
@@ -2140,7 +2140,14 @@ def test_single_node_ega_transport_counts_round_context_bytes(tmp_path, monkeypa
     _, download_state, _ = rounds[0]["prepared_states"][0]
     first_result = rounds[0]["results"][0]
     without_context = estimate_download_transport_bytes(download_state, round_index=0, compressed=False, round_context={})
+    context_bytes = auxiliary_payload_num_bytes({"ega_normalization": 1.0})
+    context_parameters = auxiliary_payload_num_parameters({"ega_normalization": 1.0})
 
+    assert first_result.parameter_download_bytes == first_result.download_bytes
+    assert first_result.parameter_download_bytes == client_module.state_num_bytes(download_state) + context_bytes
+    assert first_result.parameter_download_parameters == first_result.download_parameters
+    assert first_result.parameter_download_parameters == client_module.state_num_parameters(download_state) + context_parameters
+    assert first_result.transport_download_bytes > first_result.parameter_download_bytes
     assert first_result.transport_download_bytes > without_context
     assert first_result.transport_download_overhead_bytes == first_result.transport_download_bytes - first_result.parameter_download_bytes
 
