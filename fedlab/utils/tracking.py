@@ -166,7 +166,9 @@ def _prediction_figure(input_series, prediction, target, title: str | None = Non
 def _attack_reconstruction_figure(result):
     """Return a matplotlib figure for attack reconstruction diagnostics."""
 
-    real_x = getattr(result, "plot_real_x", getattr(result, "real_x", None))
+    real_x = getattr(result, "plot_reference_x", None)
+    if real_x is None:
+        real_x = getattr(result, "plot_real_x", getattr(result, "reference_x", getattr(result, "real_x", None)))
     reconstructed_x = getattr(result, "plot_reconstructed_x", getattr(result, "reconstructed_x", None))
     if real_x is None or reconstructed_x is None:
         return None
@@ -176,10 +178,13 @@ def _attack_reconstruction_figure(result):
         logger.warning("Attack plot disabled: {}", exc)
         return None
 
-    real_y = getattr(result, "plot_real_y", getattr(result, "real_y", None))
+    real_y = getattr(result, "plot_reference_y", None)
+    if real_y is None:
+        real_y = getattr(result, "plot_real_y", getattr(result, "reference_y", getattr(result, "real_y", None)))
     reconstructed_y = getattr(result, "plot_reconstructed_y", getattr(result, "reconstructed_y", None))
+    reference_label = getattr(result, "reference_label", None) or "reference"
     figure, axes = plt.subplots(1, 2, figsize=(12, 3))
-    axes[0].plot(_to_series(real_x), label="real_x", linewidth=2.0)
+    axes[0].plot(_to_series(real_x), label=f"{reference_label}_x", linewidth=2.0)
     axes[0].plot(_to_series(reconstructed_x), label="reconstructed_x", linewidth=2.0)
     axes[0].set_title("Input reconstruction")
     axes[0].grid(True, alpha=0.3)
@@ -187,7 +192,7 @@ def _attack_reconstruction_figure(result):
     y_real_series = _to_series(real_y)
     y_recon_series = _to_series(reconstructed_y)
     if y_real_series:
-        axes[1].plot(y_real_series, label="real_y", linewidth=2.0)
+        axes[1].plot(y_real_series, label=f"{reference_label}_y", linewidth=2.0)
     if y_recon_series:
         axes[1].plot(y_recon_series, label="reconstructed_y", linewidth=2.0)
     axes[1].set_title("Target reconstruction")

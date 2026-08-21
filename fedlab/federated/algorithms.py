@@ -589,6 +589,7 @@ class AttackSampleTask:
     real_x: torch.Tensor
     real_y: torch.Tensor
     reference_inputs: torch.Tensor | None = None
+    reference_targets: torch.Tensor | None = None
     scale_mean: list[float] | None = None
     scale_std: list[float] | None = None
 
@@ -661,6 +662,7 @@ def _build_attack_round_task(
         result = results_by_client[client.client_id]
         for sample_index in range(sample_count):
             reference_inputs = None
+            reference_targets = None
             train_loader = getattr(client, "train_loader", None)
             scaler = getattr(train_loader, "scaler", None)
             if attack_target_type == "gradient":
@@ -688,6 +690,9 @@ def _build_attack_round_task(
                     round_context=round_context,
                 )
                 reference_inputs = client.train_reference_inputs()
+                reference_target_getter = getattr(client, "train_reference_targets", None)
+                if callable(reference_target_getter):
+                    reference_targets = reference_target_getter()
             samples.append(
                 AttackSampleTask(
                     client_id=client.client_id,
@@ -699,6 +704,7 @@ def _build_attack_round_task(
                     real_x=real_x.detach().cpu().clone(),
                     real_y=real_y.detach().cpu().clone(),
                     reference_inputs=None if reference_inputs is None else reference_inputs.detach().cpu().clone(),
+                    reference_targets=None if reference_targets is None else reference_targets.detach().cpu().clone(),
                     scale_mean=None if getattr(scaler, "mean", None) is None else [float(value) for value in scaler.mean.reshape(-1).tolist()],
                     scale_std=None if getattr(scaler, "std", None) is None else [float(value) for value in scaler.std.reshape(-1).tolist()],
                 )
@@ -746,6 +752,7 @@ def _execute_attack_round_task(
                     attack_device,
                     target_type=sample.target_type,
                     reference_inputs=sample.reference_inputs,
+                    reference_targets=sample.reference_targets,
                 ),
                 client_id=sample.client_id,
                 round_index=sample.round_index,
@@ -761,16 +768,21 @@ def _execute_attack_round_task(
                     attack_device,
                     target_type=sample.target_type,
                     reference_inputs=sample.reference_inputs,
+                    reference_targets=sample.reference_targets,
                 ),
                 client_id=sample.client_id,
                 round_index=sample.round_index,
                 sample_index=sample.sample_index,
             ),
         ):
-            result.plot_real_x = _inverse_plot_tensor(result.real_x, sample.scale_mean, sample.scale_std)
+            plot_reference_x = result.reference_x if getattr(result, "reference_x", None) is not None else result.real_x
+            plot_reference_y = result.reference_y if getattr(result, "reference_y", None) is not None else result.real_y
+            result.plot_reference_x = _inverse_plot_tensor(plot_reference_x, sample.scale_mean, sample.scale_std)
             result.plot_reconstructed_x = _inverse_plot_tensor(result.reconstructed_x, sample.scale_mean, sample.scale_std)
-            result.plot_real_y = None if result.real_y is None else _inverse_plot_tensor(result.real_y, sample.scale_mean, sample.scale_std)
+            result.plot_reference_y = None if plot_reference_y is None else _inverse_plot_tensor(plot_reference_y, sample.scale_mean, sample.scale_std)
             result.plot_reconstructed_y = None if result.reconstructed_y is None else _inverse_plot_tensor(result.reconstructed_y, sample.scale_mean, sample.scale_std)
+            result.plot_real_x = result.plot_reference_x
+            result.plot_real_y = result.plot_reference_y
             attacks.append(result)
     return AttackRoundResult(
         round_index=task.round_index,

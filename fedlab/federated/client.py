@@ -319,3 +319,14 @@ class FederatedClient:
 
         dataset = self.train_loader.dataset
         return torch.stack([dataset[index][0] for index in range(len(dataset))], dim=0)
+
+    def train_reference_targets(self) -> torch.Tensor:
+        """Return all normalized target windows from this client training dataset.
+
+        Example:
+            ``targets = client.train_reference_targets()`` provides the paired
+            target windows for reference-aligned attack visualization.
+        """
+
+        dataset = self.train_loader.dataset
+        return torch.stack([dataset[index][1] for index in range(len(dataset))], dim=0)

@@ -106,9 +106,9 @@ def plot_one_artifact(
         raise ValueError("Attack record does not include artifact_path")
     artifact = torch.load(run_dir / artifact_rel, map_location="cpu", weights_only=False)
 
-    real_x = _flatten_first_channel(artifact.get("plot_real_x") if artifact.get("plot_real_x") is not None else artifact.get("real_x"))
+    real_x = _flatten_first_channel(artifact.get("plot_reference_x") if artifact.get("plot_reference_x") is not None else (artifact.get("plot_real_x") if artifact.get("plot_real_x") is not None else (artifact.get("reference_x") if artifact.get("reference_x") is not None else artifact.get("real_x"))))
     recon_x = _flatten_first_channel(artifact.get("plot_reconstructed_x") if artifact.get("plot_reconstructed_x") is not None else artifact.get("reconstructed_x"))
-    real_y = _flatten_first_channel(artifact.get("plot_real_y") if artifact.get("plot_real_y") is not None else artifact.get("real_y"))
+    real_y = _flatten_first_channel(artifact.get("plot_reference_y") if artifact.get("plot_reference_y") is not None else (artifact.get("plot_real_y") if artifact.get("plot_real_y") is not None else (artifact.get("reference_y") if artifact.get("reference_y") is not None else artifact.get("real_y"))))
     recon_y = _flatten_first_channel(artifact.get("plot_reconstructed_y") if artifact.get("plot_reconstructed_y") is not None else artifact.get("reconstructed_y"))
 
     if real_x is None or recon_x is None:
@@ -117,11 +117,12 @@ def plot_one_artifact(
     x_axis = list(range(len(real_x)))
     y_axis = list(range(len(real_x), len(real_x) + (len(real_y) if real_y is not None else 0)))
 
+    reference_label = artifact.get("reference_label") or record.get("reference_label") or "reference"
     plt.figure(figsize=(16, 5))
-    plt.plot(x_axis, real_x, label="real_x", linewidth=1.8)
+    plt.plot(x_axis, real_x, label=f"{reference_label}_x", linewidth=1.8)
     plt.plot(x_axis, recon_x, label="reconstructed_x", linewidth=1.5)
     if real_y is not None and should_plot_real_y(record, show_idlg_y=show_idlg_y):
-        label = "real_y" if str(record.get("name", "")).lower() != "idlg" else "real_y (forced)"
+        label = f"{reference_label}_y" if str(record.get("name", "")).lower() != "idlg" else f"{reference_label}_y (forced)"
         plt.plot(y_axis, real_y, label=label, linewidth=1.8)
     if recon_y is not None and should_plot_reconstructed_y(record, show_idlg_y=show_idlg_y):
         label = "reconstructed_y" if str(record.get("name", "")).lower() != "idlg" else "reconstructed_y (forced)"

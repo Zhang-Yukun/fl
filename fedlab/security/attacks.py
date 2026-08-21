@@ -46,6 +46,9 @@ class AttackResult:
     artifact_path: str | None = None
     real_x: torch.Tensor | None = None
     real_y: torch.Tensor | None = None
+    reference_x: torch.Tensor | None = None
+    reference_y: torch.Tensor | None = None
+    reference_label: str | None = None
     reconstructed_x: torch.Tensor | None = None
     reconstructed_y: torch.Tensor | None = None
 
@@ -59,7 +62,7 @@ class AttackResult:
         """Return a JSON-serializable attack record."""
 
         record = asdict(self)
-        for key in ("real_x", "real_y", "reconstructed_x", "reconstructed_y"):
+        for key in ("real_x", "real_y", "reference_x", "reference_y", "reconstructed_x", "reconstructed_y"):
             record.pop(key, None)
         record["primary_metric_name"] = self.metric_name
         record["primary_metric_value"] = self.mse
@@ -238,6 +241,21 @@ def _nearest_reference_mse(reconstructed: torch.Tensor, reference_inputs: torch.
     return float(nearest_values.mean().item()), [int(index) for index in nearest_indices.tolist()]
 
 
+def _select_reference_targets(
+    reference_inputs: torch.Tensor | None,
+    reference_targets: torch.Tensor | None,
+    nearest_indices: list[int] | None,
+) -> tuple[torch.Tensor | None, torch.Tensor | None, str]:
+    """Return the reference pair used for visualization and metric interpretation."""
+
+    if reference_inputs is None or nearest_indices is None:
+        return None, None, "exact_target"
+    index_tensor = torch.tensor(nearest_indices, dtype=torch.long)
+    reference_x = reference_inputs.detach().cpu().index_select(0, index_tensor)
+    reference_y = None if reference_targets is None else reference_targets.detach().cpu().index_select(0, index_tensor)
+    return reference_x, reference_y, "nearest_client_train"
+
+
 def _evaluate_reconstruction(
     name: str,
     reconstructed_x: torch.Tensor,
@@ -252,6 +270,7 @@ def _evaluate_reconstruction(
     ssim_threshold: float | None,
     target_type: str,
     reference_inputs: torch.Tensor | None = None,
+    reference_targets: torch.Tensor | None = None,
     reference_metric: str = "reconstruction_mse",
 ) -> AttackResult:
     """Build an attack result from a reconstructed input."""
@@ -265,11 +284,23 @@ def _evaluate_reconstruction(
         nearest_client_train_mse, nearest_client_train_indices = _nearest_reference_mse(reconstructed_x, reference_inputs)
     metric_name = reference_metric
     primary_mse = float(exact_target_mse)
+    reference_x = real_x.detach().cpu().clone()
+    reference_y = real_y.detach().cpu().clone()
+    reference_label = "exact_target"
     if metric_name == "nearest_client_train_mse":
         if nearest_client_train_mse is None:
             metric_name = "reconstruction_mse"
         else:
             primary_mse = float(nearest_client_train_mse)
+            selected_reference_x, selected_reference_y, reference_label = _select_reference_targets(
+                reference_inputs,
+                reference_targets,
+                nearest_client_train_indices,
+            )
+            if selected_reference_x is not None:
+                reference_x = selected_reference_x
+            if selected_reference_y is not None:
+                reference_y = selected_reference_y
     success = primary_mse <= threshold
     if metric_name == "reconstruction_mse" and ssim_threshold is not None:
         success = success or ssim >= ssim_threshold
@@ -290,6 +321,9 @@ def _evaluate_reconstruction(
         metric_name=metric_name,
         real_x=real_x.detach().cpu().clone(),
         real_y=real_y.detach().cpu().clone(),
+        reference_x=reference_x,
+        reference_y=reference_y,
+        reference_label=reference_label,
         reconstructed_x=reconstructed_x.detach().cpu().clone(),
         reconstructed_y=None if reconstructed_y is None else reconstructed_y.detach().cpu().clone(),
     )
@@ -316,6 +350,7 @@ def _attack_loop(
     optimize_y: bool,
     target_type: str | None = None,
     reference_inputs: torch.Tensor | None = None,
+    reference_targets: torch.Tensor | None = None,
 ) -> AttackResult:
     """Run one configurable reconstruction attack loop."""
 
@@ -468,10 +503,15 @@ def save_attack_artifacts(output_dir: Path, results: list[AttackResult]) -> list
                 "primary_metric_value": result.mse,
                 "real_x": None if result.real_x is None else result.real_x.detach().cpu(),
                 "real_y": None if result.real_y is None else result.real_y.detach().cpu(),
+                "reference_x": None if result.reference_x is None else result.reference_x.detach().cpu(),
+                "reference_y": None if result.reference_y is None else result.reference_y.detach().cpu(),
+                "reference_label": result.reference_label,
                 "reconstructed_x": None if result.reconstructed_x is None else result.reconstructed_x.detach().cpu(),
                 "reconstructed_y": None if result.reconstructed_y is None else result.reconstructed_y.detach().cpu(),
                 "plot_real_x": None if getattr(result, "plot_real_x", None) is None else getattr(result, "plot_real_x").detach().cpu(),
                 "plot_real_y": None if getattr(result, "plot_real_y", None) is None else getattr(result, "plot_real_y").detach().cpu(),
+                "plot_reference_x": None if getattr(result, "plot_reference_x", None) is None else getattr(result, "plot_reference_x").detach().cpu(),
+                "plot_reference_y": None if getattr(result, "plot_reference_y", None) is None else getattr(result, "plot_reference_y").detach().cpu(),
                 "plot_reconstructed_x": None if getattr(result, "plot_reconstructed_x", None) is None else getattr(result, "plot_reconstructed_x").detach().cpu(),
                 "plot_reconstructed_y": None if getattr(result, "plot_reconstructed_y", None) is None else getattr(result, "plot_reconstructed_y").detach().cpu(),
                 "exact_target_mse": result.exact_target_mse,
@@ -493,6 +533,7 @@ def dlg_attack(
     device: torch.device,
     target_type: str | None = None,
     reference_inputs: torch.Tensor | None = None,
+    reference_targets: torch.Tensor | None = None,
 ) -> AttackResult:
     """Reconstruct a batch by optimizing dummy inputs against the chosen target."""
 
@@ -507,6 +548,7 @@ def dlg_attack(
         optimize_y=True,
         target_type=target_type,
         reference_inputs=reference_inputs,
+        reference_targets=reference_targets,
     )
 
 
@@ -519,6 +561,7 @@ def idlg_attack(
     device: torch.device,
     target_type: str | None = None,
     reference_inputs: torch.Tensor | None = None,
+    reference_targets: torch.Tensor | None = None,
 ) -> AttackResult:
     """Run iDLG-style reconstruction for forecasting targets."""
 
@@ -533,6 +576,7 @@ def idlg_attack(
         optimize_y=False,
         target_type=target_type,
         reference_inputs=reference_inputs,
+        reference_targets=reference_targets,
     )
 
 

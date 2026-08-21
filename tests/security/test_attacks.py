@@ -113,6 +113,9 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     assert idlg.metric_name == "nearest_client_train_mse"
     assert dlg.nearest_client_train_mse is not None
     assert idlg.exact_target_mse is not None
+    assert dlg.reference_label == "nearest_client_train"
+    assert torch.allclose(dlg.reference_x, x)
+    assert torch.allclose(dlg.reference_y, y)
 
     dlg.client_id = "Nd2O3"
     idlg.client_id = "Nd2O3"
@@ -168,5 +171,7 @@ def test_attack_artifacts_persist_reconstructions(tmp_path):
     payload = torch.load(artifact_path, map_location="cpu", weights_only=False)
     assert torch.allclose(payload["real_x"], x)
     assert torch.allclose(payload["real_y"], y)
+    assert payload["reference_x"] is not None
+    assert payload["reference_label"] is not None
     assert payload["reconstructed_x"].shape == x.shape
     assert payload["reconstructed_y"] is not None

@@ -88,9 +88,10 @@ def test_tracker_log_attack_reconstruction_creates_wandb_image():
     result = type("AttackResultStub", (), {
         "name": "DLG",
         "round_index": 2,
-        "real_x": torch.tensor([[[1.0], [2.0], [3.0]]]),
+        "reference_label": "nearest_client_train",
+        "reference_x": torch.tensor([[[1.0], [2.0], [3.0]]]),
         "reconstructed_x": torch.tensor([[[1.1], [1.9], [3.2]]]),
-        "real_y": torch.tensor([[[4.0], [5.0]]]),
+        "reference_y": torch.tensor([[[4.0], [5.0]]]),
         "reconstructed_y": torch.tensor([[[4.1], [4.8]]]),
     })()
 
