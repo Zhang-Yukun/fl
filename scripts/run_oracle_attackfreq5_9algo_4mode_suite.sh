@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 PYTHON_BIN="${PYTHON_BIN:-python}"
 GPU_ID="${GPU_ID:-0}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
-BASE_OUTPUT="${BASE_OUTPUT:-outputs/oracle_noattack_9algo_4mode_$(date +%Y%m%d_%H%M%S)}"
-PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-oracle-noattack-v1}"
+BASE_OUTPUT="${BASE_OUTPUT:-outputs/oracle_attackfreq5_9algo_4mode_$(date +%Y%m%d_%H%M%S)}"
+PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-oracle-attackfreq5-v1}"
 BASE_PORT="${BASE_PORT:-58000}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-5}"
 POLL_SECONDS="${POLL_SECONDS:-1.0}"
@@ -87,9 +87,15 @@ transport.download_mode=model
 --override
 evaluation.mode=oracle_full_update
 --override
-attack.enabled=false
+attack.enabled=true
 --override
 attack.async_enabled=false
+--override
+attack.frequency_rounds=5
+--override
+attack.client_selection=all
+--override
+attack.clients_per_round=3
 ' 
   if [[ -n "${ROUNDS}" ]]; then
     printf -- '--override
@@ -261,8 +267,8 @@ main() {
 
   if [[ "${RUN_CENTRALIZED}" == "true" ]]; then
     run_centralized \
-      centralized_uupdate_dmodel_oracle_noattack \
-      centralized-oracle-noattack \
+      centralized_uupdate_dmodel_oracle_attackfreq5 \
+      centralized-oracle-attackfreq5 \
       configs/rawdata2_centralized.yaml
   fi
 
@@ -272,16 +278,16 @@ main() {
   for mode in "${modes[@]}"; do
     if [[ "${mode}" == grpc_* ]]; then
       run_grpc \
-        "fedavg_${mode}_uupdate_dmodel_oracle_noattack" \
-        "fedavg-${mode}-uupdate-dmodel-oracle-noattack" \
+        "fedavg_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "fedavg-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_fedavg.yaml \
         "${port}" \
         --override federated.algorithm=fedavg
       port=$((port + 1))
 
       run_grpc \
-        "topk_${mode}_uupdate_dmodel_oracle_noattack" \
-        "topk10-${mode}-uupdate-dmodel-oracle-noattack" \
+        "topk_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "topk10-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_fedlab_topk.yaml \
         "${port}" \
         --override federated.algorithm=sparse_fedavg \
@@ -289,8 +295,8 @@ main() {
       port=$((port + 1))
 
       run_grpc \
-        "qsgd_${mode}_uupdate_dmodel_oracle_noattack" \
-        "qsgd63-${mode}-uupdate-dmodel-oracle-noattack" \
+        "qsgd_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "qsgd63-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_qsgd.yaml \
         "${port}" \
         --override federated.algorithm=qsgd_fedavg \
@@ -298,8 +304,8 @@ main() {
       port=$((port + 1))
 
       run_grpc \
-        "randomk_${mode}_uupdate_dmodel_oracle_noattack" \
-        "randomk10-${mode}-uupdate-dmodel-oracle-noattack" \
+        "randomk_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "randomk10-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_randomk.yaml \
         "${port}" \
         --override federated.algorithm=randomk_fedavg \
@@ -308,16 +314,16 @@ main() {
       port=$((port + 1))
 
       run_grpc \
-        "sign_${mode}_uupdate_dmodel_oracle_noattack" \
-        "sign-${mode}-uupdate-dmodel-oracle-noattack" \
+        "sign_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "sign-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_sign.yaml \
         "${port}" \
         --override federated.algorithm=sign_fedavg
       port=$((port + 1))
 
       run_grpc \
-        "adaptive_${mode}_uupdate_dmodel_oracle_noattack" \
-        "adaptive-rdp-${mode}-uupdate-dmodel-oracle-noattack" \
+        "adaptive_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "adaptive-rdp-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml \
         "${port}" \
         --override federated.algorithm=adaptive_clipped_rdp_fedavg \
@@ -325,8 +331,8 @@ main() {
       port=$((port + 1))
 
       run_grpc \
-        "qint8_${mode}_uupdate_dmodel_oracle_noattack" \
-        "qint8-${mode}-uupdate-dmodel-oracle-noattack" \
+        "qint8_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "qint8-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_secure_quantized_fedavg.yaml \
         "${port}" \
         --override federated.algorithm=secure_quantized_fedavg \
@@ -337,8 +343,8 @@ main() {
       port=$((port + 1))
 
       run_grpc \
-        "ega_${mode}_uupdate_dmodel_oracle_noattack" \
-        "ega-ed128-dm-ega-pcq127-${mode}-uupdate-dmodel-oracle-noattack" \
+        "ega_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "ega-ed128-dm-ega-pcq127-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_ega.yaml \
         "${port}" \
         --override federated.algorithm=ega_fedavg \
@@ -371,16 +377,16 @@ main() {
       fi
 
       run_single \
-        "fedavg_${mode}_uupdate_dmodel_oracle_noattack" \
-        "fedavg-${mode}-uupdate-dmodel-oracle-noattack" \
+        "fedavg_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "fedavg-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_fedavg.yaml \
         --override federated.algorithm=fedavg \
         --override attack.async_enabled=${async_flag} \
         "${async_workers[@]}"
 
       run_single \
-        "topk_${mode}_uupdate_dmodel_oracle_noattack" \
-        "topk10-${mode}-uupdate-dmodel-oracle-noattack" \
+        "topk_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "topk10-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_fedlab_topk.yaml \
         --override federated.algorithm=sparse_fedavg \
         --override federated.topk_fraction=0.10 \
@@ -388,8 +394,8 @@ main() {
         "${async_workers[@]}"
 
       run_single \
-        "qsgd_${mode}_uupdate_dmodel_oracle_noattack" \
-        "qsgd63-${mode}-uupdate-dmodel-oracle-noattack" \
+        "qsgd_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "qsgd63-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_qsgd.yaml \
         --override federated.algorithm=qsgd_fedavg \
         --override federated.qsgd_levels=63 \
@@ -397,8 +403,8 @@ main() {
         "${async_workers[@]}"
 
       run_single \
-        "randomk_${mode}_uupdate_dmodel_oracle_noattack" \
-        "randomk10-${mode}-uupdate-dmodel-oracle-noattack" \
+        "randomk_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "randomk10-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_randomk.yaml \
         --override federated.algorithm=randomk_fedavg \
         --override federated.topk_fraction=0.10 \
@@ -407,16 +413,16 @@ main() {
         "${async_workers[@]}"
 
       run_single \
-        "sign_${mode}_uupdate_dmodel_oracle_noattack" \
-        "sign-${mode}-uupdate-dmodel-oracle-noattack" \
+        "sign_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "sign-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_sign.yaml \
         --override federated.algorithm=sign_fedavg \
         --override attack.async_enabled=${async_flag} \
         "${async_workers[@]}"
 
       run_single \
-        "adaptive_${mode}_uupdate_dmodel_oracle_noattack" \
-        "adaptive-rdp-${mode}-uupdate-dmodel-oracle-noattack" \
+        "adaptive_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "adaptive-rdp-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml \
         --override federated.algorithm=adaptive_clipped_rdp_fedavg \
         --override adaptive_clipped_rdp.seed=2026 \
@@ -424,8 +430,8 @@ main() {
         "${async_workers[@]}"
 
       run_single \
-        "qint8_${mode}_uupdate_dmodel_oracle_noattack" \
-        "qint8-${mode}-uupdate-dmodel-oracle-noattack" \
+        "qint8_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "qint8-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_secure_quantized_fedavg.yaml \
         --override federated.algorithm=secure_quantized_fedavg \
         --override federated.quantization_dtype=int8 \
@@ -436,8 +442,8 @@ main() {
         "${async_workers[@]}"
 
       run_single \
-        "ega_${mode}_uupdate_dmodel_oracle_noattack" \
-        "ega-ed128-dm-ega-pcq127-${mode}-uupdate-dmodel-oracle-noattack" \
+        "ega_${mode}_uupdate_dmodel_oracle_attackfreq5" \
+        "ega-ed128-dm-ega-pcq127-${mode}-uupdate-dmodel-oracle-attackfreq5" \
         configs/rawdata2_ega.yaml \
         --override federated.algorithm=ega_fedavg \
         --override ega.artifact_path=artifacts/ega/ega_ed128_dm_ega_pc_q127.pt \
