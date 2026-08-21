@@ -7,13 +7,14 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 GPU_ID="${GPU_ID:-0}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
 BASE_OUTPUT="${BASE_OUTPUT:-outputs/oracle_attackfreq5_1000r_pat100_9algo_4mode_mae_$(date +%Y%m%d_%H%M%S)}"
-PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-oracle-attackfreq5-1000r-pat100-mae-v1}"
+PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-oracle-attackfreq5-1000r-pat100-v1}"
 BASE_PORT="${BASE_PORT:-58000}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-5}"
 POLL_SECONDS="${POLL_SECONDS:-1.0}"
 RUN_CENTRALIZED="${RUN_CENTRALIZED:-true}"
 ROUNDS="${ROUNDS:-1000}"
 PATIENCE="${PATIENCE:-100}"
+LOSS_TAG="${LOSS_TAG:-mae}"
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -40,8 +41,8 @@ tracking.project=%s
 --override
 tracking.group=%s
 --override
-tracking.name=%s
-' "${PROJECT_NAME}" "$(basename "${BASE_OUTPUT}")" "${tracking_name}"
+tracking.name=%s-%s
+' "${PROJECT_NAME}" "$(basename "${BASE_OUTPUT}")" "${tracking_name}" "${LOSS_TAG}"
 }
 
 base_runtime_args() {

@@ -14,6 +14,7 @@ POLL_SECONDS="${POLL_SECONDS:-1.0}"
 RUN_CENTRALIZED="${RUN_CENTRALIZED:-true}"
 ROUNDS="${ROUNDS:-}"
 PATIENCE="${PATIENCE:-50}"
+LOSS_TAG="${LOSS_TAG:-mse}"
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -40,8 +41,8 @@ tracking.project=%s
 --override
 tracking.group=%s
 --override
-tracking.name=%s
-' "${PROJECT_NAME}" "$(basename "${BASE_OUTPUT}")" "${tracking_name}"
+tracking.name=%s-%s
+' "${PROJECT_NAME}" "$(basename "${BASE_OUTPUT}")" "${tracking_name}" "${LOSS_TAG}"
 }
 
 base_runtime_args() {
