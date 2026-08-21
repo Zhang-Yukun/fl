@@ -283,11 +283,10 @@ def _build_federated_summary(
         "last_communication_ratio": history[-1].communication_ratio if history else 0.0,
         **_round_history_communication_summary(history),
         "attack_target_type": attack_summary.get("target_type", attack_target_type),
-        "attack_primary_metric": attack_summary["primary_metric"],
+        "attack_primary_metric_name": attack_summary["primary_metric_name"],
         "attack_primary_metric_direction": attack_summary["primary_metric_direction"],
-        "attack_overall_avg_primary_metric": attack_summary["overall_avg_primary_metric"],
-        "attack_overall_best_primary_metric": attack_summary["overall_best_primary_metric"],
-        "attack_overall_avg_mse": attack_summary["overall_avg_mse"],
+        "attack_overall_avg_primary_metric_value": attack_summary["overall_avg_primary_metric_value"],
+        "attack_overall_best_primary_metric_value": attack_summary["overall_best_primary_metric_value"],
         "attack_success_rate": attack_summary["overall_success_rate"],
         "attack_evaluations": len(attack_records),
         "attack_summary": attack_summary,
@@ -793,25 +792,37 @@ def _execute_attack_round_task(
     )
 
 
+def _mean_finite(values: list[float]) -> float | None:
+    """Return the mean of finite values, or None when all values are non-finite."""
+
+    finite = [value for value in values if value is not None and isinstance(value, (int, float)) and float("-inf") < float(value) < float("inf")]
+    if not values:
+        return 0.0
+    if not finite:
+        return None
+    return sum(float(value) for value in finite) / len(finite)
+
+
 def _attack_payload_metrics(subset: list[Any], cumulative_subset: list[Any], prefix: str) -> dict[str, float | str]:
     """Return one attack-metric payload block for one subset prefix."""
 
     if not subset:
         return {}
-    payload: dict[str, float | str] = {}
+    payload: dict[str, float | str | None] = {}
     payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "reconstruction_mse")
-    payload[f"{prefix}/primary_metric"] = sum(result.mse for result in subset) / len(subset)
-    payload[f"{prefix}/mse"] = payload[f"{prefix}/primary_metric"]
-    payload[f"{prefix}/reconstruction_mse"] = payload[f"{prefix}/mse"]
-    payload[f"{prefix}/avg_primary_metric_so_far"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
-    payload[f"{prefix}/avg_mse_so_far"] = payload[f"{prefix}/avg_primary_metric_so_far"]
+    payload[f"{prefix}/primary_metric_value"] = sum(result.mse for result in subset) / len(subset)
+    payload[f"{prefix}/avg_primary_metric_value_so_far"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
+    payload[f"{prefix}/exact_target_mse"] = _mean_finite([getattr(result, "exact_target_mse", None) for result in subset if getattr(result, "exact_target_mse", None) is not None])
+    payload[f"{prefix}/avg_exact_target_mse_so_far"] = _mean_finite([getattr(result, "exact_target_mse", None) for result in cumulative_subset if getattr(result, "exact_target_mse", None) is not None])
+    payload[f"{prefix}/nearest_client_train_mse"] = _mean_finite([getattr(result, "nearest_client_train_mse", None) for result in subset if getattr(result, "nearest_client_train_mse", None) is not None])
+    payload[f"{prefix}/avg_nearest_client_train_mse_so_far"] = _mean_finite([getattr(result, "nearest_client_train_mse", None) for result in cumulative_subset if getattr(result, "nearest_client_train_mse", None) is not None])
     payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
     payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
     payload[f"{prefix}/iterations"] = float(subset[0].iterations)
     payload[f"{prefix}/time_seconds"] = sum(result.time_seconds for result in subset) / len(subset)
     payload[f"{prefix}/objective_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
-    payload[f"{prefix}/gradient_mse"] = payload[f"{prefix}/objective_mse"]
-    payload[f"{prefix}/success"] = sum(float(result.success) for result in subset) / len(subset)
+    payload[f"{prefix}/avg_objective_mse_so_far"] = _mean_finite([result.gradient_mse for result in cumulative_subset])
+    payload[f"{prefix}/success_fraction"] = sum(float(result.success) for result in subset) / len(subset)
     payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(cumulative_subset)
     return payload
 
@@ -822,15 +833,14 @@ def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: l
     round_attacks = round_result.attacks
     primary_metric_name = "reconstruction_mse" if not round_attacks else getattr(round_attacks[0], "metric_name", "reconstruction_mse")
     overall_avg_primary_metric = 0.0 if not cumulative_results else sum(result.mse for result in cumulative_results) / len(cumulative_results)
-    payload: dict[str, float | str] = {
+    payload: dict[str, float | str | None] = {
         "attack/round_index": float(round_result.round_index),
         "attack/time_seconds": round_result.time_seconds,
         "attack/evaluations_this_round": float(len(round_attacks)),
         "attack/clients_this_round": float(round_result.clients_this_round),
         "attack/samples_per_client": float(round_result.samples_per_client),
         "attack/primary_metric_name": primary_metric_name,
-        "attack/overall_avg_primary_metric_so_far": overall_avg_primary_metric,
-        "attack/overall_avg_mse_so_far": overall_avg_primary_metric,
+        "attack/overall_avg_primary_metric_value_so_far": overall_avg_primary_metric,
         "attack/success_rate_so_far": attack_success_rate(cumulative_results),
     }
     for name in sorted({result.name for result in round_attacks}):

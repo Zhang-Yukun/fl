@@ -68,21 +68,24 @@ def test_gradient_attacks_run_on_vendored_patchtst():
         assert result.time_seconds >= 0.0
         assert result.success_threshold == 0.5
         record = result.to_record()
-        assert record["mse"] == record["reconstruction_mse"]
-        assert {"psnr", "ssim", "iterations", "time_seconds", "gradient_mse", "objective_mse", "primary_metric_name", "primary_metric_value", "target_type"} <= set(record)
+        assert record["primary_metric_name"] == result.metric_name
+        assert record["primary_metric_value"] == result.mse
+        assert {"psnr", "ssim", "iterations", "time_seconds", "objective_mse", "primary_metric_name", "primary_metric_value", "target_type"} <= set(record)
+        assert "mse" not in record
+        assert "gradient_mse" not in record
 
     dlg.client_id = "Nd2O3"
     idlg.client_id = "CeO2"
     summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
     assert set(summary["methods"]) == {"DLG", "iDLG"}
-    assert summary["primary_metric"] == "reconstruction_mse"
+    assert summary["primary_metric_name"] == "reconstruction_mse"
     assert summary["primary_metric_direction"] == "higher_is_more_private"
     assert summary["target_type"] == "gradient"
-    assert summary["overall_avg_mse"] is not None
+    assert summary["overall_avg_primary_metric_value"] is not None
     assert summary["success_rate_threshold"] == 0.03
-    assert summary["methods"]["DLG"]["primary_metric"] == "reconstruction_mse"
+    assert summary["methods"]["DLG"]["primary_metric_name"] == "reconstruction_mse"
     assert summary["methods"]["DLG"]["total_count"] == 1
-    assert "avg_gradient_mse" in summary["methods"]["DLG"]
+    assert "avg_objective_mse" in summary["methods"]["DLG"]
     assert set(summary["clients"]) == {"Nd2O3", "CeO2"}
     assert summary["clients"]["Nd2O3"]["methods"]["DLG"]["total_count"] == 1
 
@@ -121,7 +124,7 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     idlg.client_id = "Nd2O3"
     summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
     assert summary["target_type"] == "update_payload"
-    assert summary["primary_metric"] == "nearest_client_train_mse"
+    assert summary["primary_metric_name"] == "nearest_client_train_mse"
     assert summary["methods"]["DLG"]["target_type"] == "update_payload"
     assert summary["overall_avg_nearest_client_train_mse"] is not None
     assert summary["overall_avg_objective_mse"] is not None

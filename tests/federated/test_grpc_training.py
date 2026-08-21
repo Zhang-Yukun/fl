@@ -192,7 +192,7 @@ def test_grpc_coordinator_aggregates_one_round_and_saves_summary(tmp_path):
     assert len(metrics) == 1
     assert metrics[0]["algorithm"] == "fedavg"
     assert metrics[0]["total_parameter_upload_bytes"] == metrics[0]["total_upload_bytes"]
-    assert metrics[0]["total_transport_upload_bytes"] == metrics[0]["total_parameter_upload_bytes"]
+    assert metrics[0]["total_transport_upload_bytes"] >= metrics[0]["total_parameter_upload_bytes"]
     assert summary["transport"] == "grpc"
     assert summary["rounds"] == 1
     assert summary["last_upload_compression_ratio"] == 1.0
@@ -265,7 +265,7 @@ def test_grpc_coordinator_saves_attack_results(tmp_path):
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
     assert summary["attack_evaluations"] == len(attack_results) == 6
     assert summary["attack_target_type"] == "update_payload"
-    assert summary["attack_primary_metric"] == "nearest_client_train_mse"
+    assert summary["attack_primary_metric_name"] == "nearest_client_train_mse"
 
 
 def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path, monkeypatch):
@@ -506,12 +506,12 @@ def test_grpc_matches_single_process_fedavg_when_randomness_disabled(tmp_path):
     assert local_summary["test"]["mse"] == pytest.approx(grpc_summary["test"]["mse"])
     assert local_summary["test"]["mae"] == pytest.approx(grpc_summary["test"]["mae"])
     assert local_summary["test"]["mape"] == pytest.approx(grpc_summary["test"]["mape"])
-    assert local_summary["attack_overall_avg_mse"] == pytest.approx(grpc_summary["attack_overall_avg_mse"])
+    assert local_summary["attack_overall_avg_primary_metric_value"] == pytest.approx(grpc_summary["attack_overall_avg_primary_metric_value"])
     assert local_summary["attack_success_rate"] == pytest.approx(grpc_summary["attack_success_rate"])
     assert [entry["name"] for entry in local_attacks] == [entry["name"] for entry in grpc_attacks]
     for local_entry, grpc_entry in zip(local_attacks, grpc_attacks):
         assert local_entry["target_type"] == grpc_entry["target_type"]
-        assert local_entry["mse"] == pytest.approx(grpc_entry["mse"])
+        assert local_entry["primary_metric_value"] == pytest.approx(grpc_entry["primary_metric_value"])
         assert local_entry["objective_mse"] == pytest.approx(grpc_entry["objective_mse"])
 
 

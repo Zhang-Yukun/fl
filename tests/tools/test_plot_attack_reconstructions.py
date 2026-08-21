@@ -26,7 +26,7 @@ def test_plot_attack_reconstructions_plots_saved_artifacts(tmp_path):
             "round_index": 0,
             "sample_index": 0,
             "target_type": "update_payload",
-            "metric_name": "nearest_client_train_mse",
+            "primary_metric_name": "nearest_client_train_mse",
             "real_x": torch.tensor([[[9.0], [9.0], [9.0]]]),
             "real_y": torch.tensor([[[8.0], [8.0]]]),
             "reference_x": torch.tensor([[[1.0], [2.0], [3.0]]]),
@@ -46,9 +46,9 @@ def test_plot_attack_reconstructions_plots_saved_artifacts(tmp_path):
                     "round_index": 0,
                     "sample_index": 0,
                     "artifact_path": "attack_artifacts/round_0000/Nd2O3/sample_0000/dlg_00000.pt",
-                    "mse": 0.12,
+                    "primary_metric_value": 0.12,
                     "exact_target_mse": 0.12,
-                    "metric_name": "nearest_client_train_mse",
+                    "primary_metric_name": "nearest_client_train_mse",
                 }
             ],
             ensure_ascii=False,
@@ -57,7 +57,7 @@ def test_plot_attack_reconstructions_plots_saved_artifacts(tmp_path):
         encoding="utf-8",
     )
 
-    selected = module.select_records(module.load_json(run_dir / "attack_results.json"), sort_key="mse", descending=False, attack_name=None, client_id=None, round_index=None, limit=5)
+    selected = module.select_records(module.load_json(run_dir / "attack_results.json"), sort_key="primary_metric_value", descending=False, attack_name=None, client_id=None, round_index=None, limit=5)
     assert len(selected) == 1
 
     output_dir = run_dir / "plots"

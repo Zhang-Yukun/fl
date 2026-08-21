@@ -121,11 +121,11 @@ These alias fields also follow the new **algorithm-effective communication** sem
 | `total_transport_upload_overhead_bytes` | int | cumulative upload transport overhead |
 | `total_transport_download_overhead_bytes` | int | cumulative download transport overhead |
 | `attack_target_type` | string | attack interception target type |
-| `attack_primary_metric` | string | primary attack metric name |
-| `attack_primary_metric_direction` | string | current value is `higher_is_more_private` |
-| `attack_overall_avg_primary_metric` | float or null | average primary attack metric |
-| `attack_overall_best_primary_metric` | float or null | best (minimum) primary attack metric |
-| `attack_overall_avg_mse` | float or null | compatibility alias of `attack_overall_avg_primary_metric` |
+| `attack_primary_primary_metric_name` | string | primary attack metric name |
+| `attack_primary_primary_metric_name_direction` | string | current value is `higher_is_more_private` |
+| `attack_overall_avg_primary_metric_value_value_value` | float or null | average primary attack metric |
+| `attack_overall_best_primary_metric_value_value_value` | float or null | best (minimum) primary attack metric |
+| `attack_overall_avg_mse` | float or null | compatibility alias of `attack_overall_avg_primary_metric_value_value_value` |
 | `attack_success_rate` | float | overall attack success rate |
 | `attack_evaluations` | int | number of attack records |
 | `attack_summary` | object | aggregated attack summary |
@@ -146,12 +146,12 @@ These alias fields also follow the new **algorithm-effective communication** sem
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `primary_metric` | string | primary metric name |
+| `primary_primary_metric_name` | string | primary metric name |
 | `primary_metric_direction` | string | current value `higher_is_more_private` |
 | `target_type` | string or null | attack target type |
 | `success_rate_threshold` | float | threshold used for `passes` |
-| `overall_avg_primary_metric` | float or null | average primary metric |
-| `overall_best_primary_metric` | float or null | best (minimum) primary metric |
+| `overall_avg_primary_metric_value_value` | float or null | average primary metric |
+| `overall_best_primary_metric_value_value` | float or null | best (minimum) primary metric |
 | `overall_avg_mse` | float or null | compatibility alias |
 | `overall_best_mse` | float or null | compatibility alias |
 | `overall_avg_exact_target_mse` | float or null | average exact-target reconstruction error |
@@ -159,7 +159,7 @@ These alias fields also follow the new **algorithm-effective communication** sem
 | `overall_avg_psnr` | float or null | average PSNR |
 | `overall_avg_ssim` | float or null | average SSIM |
 | `overall_avg_objective_mse` | float or null | average objective-space error |
-| `overall_avg_gradient_mse` | float or null | compatibility alias |
+| `overall_avg_objective_mse` | float or null | compatibility alias |
 | `overall_success_rate` | float | overall success rate |
 | `overall_success_rate_percent` | float | overall success rate in percent |
 | `overall_passes` | bool | whether the overall success rate is below threshold |
@@ -170,14 +170,14 @@ These alias fields also follow the new **algorithm-effective communication** sem
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `primary_metric` | string | primary metric for that method |
+| `primary_primary_metric_name` | string | primary metric for that method |
 | `target_type` | string or null | target type |
 | `success_count` | int | successful attack count |
 | `total_count` | int | total attack count |
 | `success_rate` | float | success rate |
 | `success_rate_percent` | float | success rate in percent |
-| `avg_primary_metric` | float or null | average primary metric |
-| `best_primary_metric` | float or null | best (minimum) primary metric |
+| `avg_primary_metric_value` | float or null | average primary metric |
+| `best_primary_metric_value` | float or null | best (minimum) primary metric |
 | `avg_mse` | float or null | compatibility alias |
 | `best_mse` | float or null | compatibility alias |
 | `avg_exact_target_mse` | float or null | average exact-target reconstruction error |
@@ -186,7 +186,7 @@ These alias fields also follow the new **algorithm-effective communication** sem
 | `avg_ssim` | float or null | average SSIM |
 | `best_ssim` | float or null | best SSIM |
 | `avg_objective_mse` | float or null | average objective error |
-| `avg_gradient_mse` | float or null | compatibility alias |
+| `avg_objective_mse` | float or null | compatibility alias |
 | `avg_time_seconds` | float or null | average attack time |
 | `passes` | bool | whether method success rate is below threshold |
 
@@ -198,12 +198,12 @@ This object reuses the same schema as top-level `attack_summary`, but only for t
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `primary_metric` | string | primary metric name for this client |
+| `primary_primary_metric_name` | string | primary metric name for this client |
 | `primary_metric_direction` | string | current value `higher_is_more_private` |
 | `target_type` | string or null | attack target type for this client |
 | `success_rate_threshold` | float | threshold used for `passes` |
-| `overall_avg_primary_metric` | float or null | average primary metric for this client |
-| `overall_best_primary_metric` | float or null | best (minimum) primary metric for this client |
+| `overall_avg_primary_metric_value_value` | float or null | average primary metric for this client |
+| `overall_best_primary_metric_value_value` | float or null | best (minimum) primary metric for this client |
 | `overall_avg_mse` | float or null | compatibility alias |
 | `overall_best_mse` | float or null | compatibility alias |
 | `overall_avg_exact_target_mse` | float or null | average exact-target reconstruction error for this client |
@@ -211,7 +211,7 @@ This object reuses the same schema as top-level `attack_summary`, but only for t
 | `overall_avg_psnr` | float or null | average PSNR for this client |
 | `overall_avg_ssim` | float or null | average SSIM for this client |
 | `overall_avg_objective_mse` | float or null | average objective error for this client |
-| `overall_avg_gradient_mse` | float or null | compatibility alias |
+| `overall_avg_objective_mse` | float or null | compatibility alias |
 | `overall_success_rate` | float | success rate for this client |
 | `overall_success_rate_percent` | float | success rate in percent |
 | `overall_passes` | bool | whether the client success rate is below threshold |
@@ -255,8 +255,8 @@ Federated/gRPC `metrics.json` is a list of `RoundRecord` objects. The round-leve
 
 Each item is produced by `AttackResult.to_record()` and includes:
 - attack identity: `name`, `target_type`, `client_id`, `round_index`, `sample_index`
-- core metrics: `mse`, `psnr`, `ssim`, `gradient_mse`, `objective_mse`
-- success metadata: `success`, `success_threshold`, `metric_name`, `primary_metric_name`, `primary_metric_value`
+- core metrics: `mse`, `psnr`, `ssim`, `objective_mse`, `objective_mse`
+- success metadata: `success`, `success_threshold`, `primary_metric_name`, `primary_primary_metric_name`, `primary_metric_value`
 - reconstruction metrics: `exact_target_mse`, `nearest_client_train_mse`, `nearest_client_train_indices`
 - artifact link: `artifact_path`
 
@@ -465,64 +465,64 @@ There are two levels:
 - `attack/evaluations_this_round`
 - `attack/clients_this_round`
 - `attack/samples_per_client`
-- `attack/primary_metric_name`
-- `attack/overall_avg_primary_metric_so_far`
+- `attack/primary_primary_metric_name`
+- `attack/overall_avg_primary_metric_value_value_so_far`
 - `attack/overall_avg_mse_so_far`
 - `attack/success_rate_so_far`
 
 2. Method-specific attack metrics for `<method>` such as `DLG` or `iDLG`
-- `attack/<method>/primary_metric_name`
-- `attack/<method>/primary_metric`
+- `attack/<method>/primary_primary_metric_name`
+- `attack/<method>/primary_primary_metric_name`
 - `attack/<method>/mse`
 - `attack/<method>/reconstruction_mse`
-- `attack/<method>/avg_primary_metric_so_far`
+- `attack/<method>/avg_primary_metric_value_so_far`
 - `attack/<method>/avg_mse_so_far`
 - `attack/<method>/psnr`
 - `attack/<method>/ssim`
 - `attack/<method>/iterations`
 - `attack/<method>/time_seconds`
 - `attack/<method>/objective_mse`
-- `attack/<method>/gradient_mse`
+- `attack/<method>/objective_mse`
 - `attack/<method>/success`
 - `attack/<method>/success_rate_so_far`
 
 3. Client-specific merged attack metrics for `<client_id>`
-- `attack/client/<client_id>/primary_metric_name`
-- `attack/client/<client_id>/primary_metric`
+- `attack/client/<client_id>/primary_primary_metric_name`
+- `attack/client/<client_id>/primary_primary_metric_name`
 - `attack/client/<client_id>/mse`
 - `attack/client/<client_id>/reconstruction_mse`
-- `attack/client/<client_id>/avg_primary_metric_so_far`
+- `attack/client/<client_id>/avg_primary_metric_value_so_far`
 - `attack/client/<client_id>/avg_mse_so_far`
 - `attack/client/<client_id>/psnr`
 - `attack/client/<client_id>/ssim`
 - `attack/client/<client_id>/iterations`
 - `attack/client/<client_id>/time_seconds`
 - `attack/client/<client_id>/objective_mse`
-- `attack/client/<client_id>/gradient_mse`
+- `attack/client/<client_id>/objective_mse`
 - `attack/client/<client_id>/success`
 - `attack/client/<client_id>/success_rate_so_far`
 
 4. Client-and-method-specific attack metrics for `<client_id>` and `<method>`
-- `attack/client/<client_id>/<method>/primary_metric_name`
-- `attack/client/<client_id>/<method>/primary_metric`
+- `attack/client/<client_id>/<method>/primary_primary_metric_name`
+- `attack/client/<client_id>/<method>/primary_primary_metric_name`
 - `attack/client/<client_id>/<method>/mse`
 - `attack/client/<client_id>/<method>/reconstruction_mse`
-- `attack/client/<client_id>/<method>/avg_primary_metric_so_far`
+- `attack/client/<client_id>/<method>/avg_primary_metric_value_so_far`
 - `attack/client/<client_id>/<method>/avg_mse_so_far`
 - `attack/client/<client_id>/<method>/psnr`
 - `attack/client/<client_id>/<method>/ssim`
 - `attack/client/<client_id>/<method>/iterations`
 - `attack/client/<client_id>/<method>/time_seconds`
 - `attack/client/<client_id>/<method>/objective_mse`
-- `attack/client/<client_id>/<method>/gradient_mse`
+- `attack/client/<client_id>/<method>/objective_mse`
 - `attack/client/<client_id>/<method>/success`
 - `attack/client/<client_id>/<method>/success_rate_so_far`
 
 Interpretation:
-- “how hard is it to attack right now?”: use `attack/<method>/primary_metric` or `attack/client/<client_id>/primary_metric`
-- “is privacy improving or degrading over time?”: use `attack/<method>/avg_primary_metric_so_far` or `attack/client/<client_id>/avg_primary_metric_so_far`
+- “how hard is it to attack right now?”: use `attack/<method>/primary_primary_metric_name` or `attack/client/<client_id>/primary_primary_metric_name`
+- “is privacy improving or degrading over time?”: use `attack/<method>/avg_primary_metric_value_so_far` or `attack/client/<client_id>/avg_primary_metric_value_so_far`
 - “is the attack succeeding less often?”: use `attack/<method>/success_rate_so_far` or `attack/client/<client_id>/success_rate_so_far`
-- “how good is the reconstruction this round?”: inspect `primary_metric`, `psnr`, and `ssim` together
+- “how good is the reconstruction this round?”: inspect `primary_primary_metric_name`, `psnr`, and `ssim` together
 - “which client is easier to attack?”: compare `attack/client/<client_id>/...` across clients
 
 ### 6.5 Final scalar keys

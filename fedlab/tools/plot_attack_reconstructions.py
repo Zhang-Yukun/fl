@@ -130,7 +130,7 @@ def plot_one_artifact(
     plt.axvline(len(real_x) - 1, color="gray", linestyle="--", linewidth=1.0)
     plt.title(
         f"{record.get('name')} client={record.get('client_id')} round={record.get('round_index')} sample={record.get('sample_index')} "
-        f"metric={record.get('metric_name')} mse={record.get('mse')}"
+        f"metric={record.get('primary_metric_name', record.get('metric_name'))} value={record.get('primary_metric_value', record.get('mse'))}"
     )
     plt.xlabel("Time Step")
     plt.ylabel("Value")
@@ -158,7 +158,7 @@ def build_report(records: list[dict[str, Any]], plotted_paths: list[Path]) -> li
     for record, path in zip(records, plotted_paths):
         lines.append(
             f"- {path.name}: name={record.get('name')} client={record.get('client_id')} round={record.get('round_index')} "
-            f"sample={record.get('sample_index')} mse={record.get('mse')} exact_target_mse={record.get('exact_target_mse')}"
+            f"sample={record.get('sample_index')} primary_metric_value={record.get('primary_metric_value', record.get('mse'))} exact_target_mse={record.get('exact_target_mse')}"
         )
     return lines
 
@@ -169,7 +169,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", type=Path, help="Experiment directory containing attack_results.json and attack_artifacts/")
     parser.add_argument("--output-dir", type=Path, default=None, help="Directory for generated PNG files")
-    parser.add_argument("--sort-key", default="mse", help="Attack record key used for ranking")
+    parser.add_argument("--sort-key", default="primary_metric_value", help="Attack record key used for ranking")
     parser.add_argument("--descending", action="store_true", help="Sort descending instead of ascending")
     parser.add_argument("--attack-name", default=None, help="Only plot one attack method, e.g. DLG or iDLG")
     parser.add_argument("--client-id", default=None, help="Only plot one client")

@@ -755,14 +755,16 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"mse", "reconstruction_mse", "primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "exact_target_mse", "nearest_client_train_mse", "metric_name"} <= set(attack_results[0])
+    assert {"primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "exact_target_mse", "nearest_client_train_mse"} <= set(attack_results[0])
+    assert "mse" not in attack_results[0]
+    assert "metric_name" not in attack_results[0]
     assert result["attack_evaluations"] == 6
     assert result["attack_target_type"] == "update_payload"
-    assert result["attack_primary_metric"] == "nearest_client_train_mse"
+    assert result["attack_primary_metric_name"] == "nearest_client_train_mse"
     assert result["attack_primary_metric_direction"] == "higher_is_more_private"
-    assert result["attack_overall_avg_mse"] is not None
+    assert result["attack_overall_avg_primary_metric_value"] is not None
     assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
-    assert result["attack_summary"]["primary_metric"] == "nearest_client_train_mse"
+    assert result["attack_summary"]["primary_metric_name"] == "nearest_client_train_mse"
     assert result["attack_summary"]["target_type"] == "update_payload"
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
     assert result["attack_summary"]["overall_avg_nearest_client_train_mse"] is not None
@@ -1580,7 +1582,7 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
     assert sync_artifacts
     assert async_artifacts
     assert sync_summary["test"]["mse"] == pytest.approx(async_summary["test"]["mse"])
-    assert sync_summary["attack_overall_avg_mse"] == pytest.approx(async_summary["attack_overall_avg_mse"])
+    assert sync_summary["attack_overall_avg_primary_metric_value"] == pytest.approx(async_summary["attack_overall_avg_primary_metric_value"])
     assert sync_summary["attack_success_rate"] == pytest.approx(async_summary["attack_success_rate"])
     assert compare_fedavg_runs(sync_dir, async_dir) == []
 
@@ -1714,7 +1716,8 @@ def test_round_attack_payload_includes_explicit_round_index():
 
     assert payload["attack/round_index"] == 3.0
     assert payload["attack/client/Nd2O3/primary_metric_name"] == "reconstruction_mse"
-    assert payload["attack/client/Nd2O3/DLG/mse"] == 0.4
+    assert "attack/client/Nd2O3/primary_metric_value" in payload
+    assert payload["attack/client/Nd2O3/DLG/primary_metric_value"] == 0.4
 
 
 def test_log_prediction_views_adds_client_specific_keys(monkeypatch):
