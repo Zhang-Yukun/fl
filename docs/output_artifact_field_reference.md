@@ -164,6 +164,7 @@ These alias fields also follow the new **algorithm-effective communication** sem
 | `overall_success_rate_percent` | float | overall success rate in percent |
 | `overall_passes` | bool | whether the overall success rate is below threshold |
 | `methods` | object | grouped method summary, e.g. `DLG`, `iDLG` |
+| `clients` | object | per-client attack summary keyed by client id, e.g. `Nd2O3` |
 
 ### `summary.json.attack_summary.methods.<method>`
 
@@ -188,6 +189,37 @@ These alias fields also follow the new **algorithm-effective communication** sem
 | `avg_gradient_mse` | float or null | compatibility alias |
 | `avg_time_seconds` | float or null | average attack time |
 | `passes` | bool | whether method success rate is below threshold |
+
+
+
+### `summary.json.attack_summary.clients.<client_id>`
+
+This object reuses the same schema as top-level `attack_summary`, but only for the specified client.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `primary_metric` | string | primary metric name for this client |
+| `primary_metric_direction` | string | current value `higher_is_more_private` |
+| `target_type` | string or null | attack target type for this client |
+| `success_rate_threshold` | float | threshold used for `passes` |
+| `overall_avg_primary_metric` | float or null | average primary metric for this client |
+| `overall_best_primary_metric` | float or null | best (minimum) primary metric for this client |
+| `overall_avg_mse` | float or null | compatibility alias |
+| `overall_best_mse` | float or null | compatibility alias |
+| `overall_avg_exact_target_mse` | float or null | average exact-target reconstruction error for this client |
+| `overall_avg_nearest_client_train_mse` | float or null | average nearest-train-sample error for this client |
+| `overall_avg_psnr` | float or null | average PSNR for this client |
+| `overall_avg_ssim` | float or null | average SSIM for this client |
+| `overall_avg_objective_mse` | float or null | average objective error for this client |
+| `overall_avg_gradient_mse` | float or null | compatibility alias |
+| `overall_success_rate` | float | success rate for this client |
+| `overall_success_rate_percent` | float | success rate in percent |
+| `overall_passes` | bool | whether the client success rate is below threshold |
+| `methods` | object | method summary within this client |
+
+### `summary.json.attack_summary.clients.<client_id>.methods.<method>`
+
+This object uses the same fields as `summary.json.attack_summary.methods.<method>`, but restricted to one client and one attack method.
 
 ## 4. `metrics.json`
 
@@ -454,11 +486,44 @@ There are two levels:
 - `attack/<method>/success`
 - `attack/<method>/success_rate_so_far`
 
+3. Client-specific merged attack metrics for `<client_id>`
+- `attack/client/<client_id>/primary_metric_name`
+- `attack/client/<client_id>/primary_metric`
+- `attack/client/<client_id>/mse`
+- `attack/client/<client_id>/reconstruction_mse`
+- `attack/client/<client_id>/avg_primary_metric_so_far`
+- `attack/client/<client_id>/avg_mse_so_far`
+- `attack/client/<client_id>/psnr`
+- `attack/client/<client_id>/ssim`
+- `attack/client/<client_id>/iterations`
+- `attack/client/<client_id>/time_seconds`
+- `attack/client/<client_id>/objective_mse`
+- `attack/client/<client_id>/gradient_mse`
+- `attack/client/<client_id>/success`
+- `attack/client/<client_id>/success_rate_so_far`
+
+4. Client-and-method-specific attack metrics for `<client_id>` and `<method>`
+- `attack/client/<client_id>/<method>/primary_metric_name`
+- `attack/client/<client_id>/<method>/primary_metric`
+- `attack/client/<client_id>/<method>/mse`
+- `attack/client/<client_id>/<method>/reconstruction_mse`
+- `attack/client/<client_id>/<method>/avg_primary_metric_so_far`
+- `attack/client/<client_id>/<method>/avg_mse_so_far`
+- `attack/client/<client_id>/<method>/psnr`
+- `attack/client/<client_id>/<method>/ssim`
+- `attack/client/<client_id>/<method>/iterations`
+- `attack/client/<client_id>/<method>/time_seconds`
+- `attack/client/<client_id>/<method>/objective_mse`
+- `attack/client/<client_id>/<method>/gradient_mse`
+- `attack/client/<client_id>/<method>/success`
+- `attack/client/<client_id>/<method>/success_rate_so_far`
+
 Interpretation:
-- “how hard is it to attack right now?”: use `attack/<method>/primary_metric`
-- “is privacy improving or degrading over time?”: use `attack/<method>/avg_primary_metric_so_far`
-- “is the attack succeeding less often?”: use `attack/<method>/success_rate_so_far`
+- “how hard is it to attack right now?”: use `attack/<method>/primary_metric` or `attack/client/<client_id>/primary_metric`
+- “is privacy improving or degrading over time?”: use `attack/<method>/avg_primary_metric_so_far` or `attack/client/<client_id>/avg_primary_metric_so_far`
+- “is the attack succeeding less often?”: use `attack/<method>/success_rate_so_far` or `attack/client/<client_id>/success_rate_so_far`
 - “how good is the reconstruction this round?”: inspect `primary_metric`, `psnr`, and `ssim` together
+- “which client is easier to attack?”: compare `attack/client/<client_id>/...` across clients
 
 ### 6.5 Final scalar keys
 

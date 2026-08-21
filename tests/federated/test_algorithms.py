@@ -139,7 +139,8 @@ def test_standard_fedavg_uses_dense_updates(tmp_path):
     assert all(client["aggregation_payload_kind"] == "dense_update" for client in metrics[0]["clients"])
     assert metrics[0]["total_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
     assert metrics[0]["total_parameter_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
-    assert metrics[0]["transport_upload_compression_ratio"] == 1.0
+    assert metrics[0]["parameter_upload_compression_ratio"] == 1.0
+    assert 0.0 < metrics[0]["transport_upload_compression_ratio"] < 1.0
 
 
 def test_fedavg_upload_model_mode_preserves_dense_aggregation_metrics(tmp_path):
@@ -746,6 +747,8 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
     assert result["attack_summary"]["overall_avg_nearest_client_train_mse"] is not None
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 3
+    assert set(result["attack_summary"]["clients"]) == {"Nd2O3", "CeO2", "La2O3"}
+    assert result["attack_summary"]["clients"]["Nd2O3"]["methods"]["DLG"]["total_count"] == 1
 
 
 def test_federated_run_supports_legacy_gradient_attacks(tmp_path):
@@ -1570,7 +1573,7 @@ class _TrackerStub:
         self.logs.append((step, data))
 
 
-def _attack_result_stub(name: str, mse: float = 0.5):
+def _attack_result_stub(name: str, mse: float = 0.5, client_id: str = "Nd2O3"):
     return SimpleNamespace(
         name=name,
         mse=mse,
@@ -1580,6 +1583,8 @@ def _attack_result_stub(name: str, mse: float = 0.5):
         time_seconds=0.01,
         gradient_mse=0.02,
         success=False,
+        client_id=client_id,
+        metric_name="reconstruction_mse",
     )
 
 
@@ -1672,12 +1677,14 @@ def test_round_attack_payload_includes_explicit_round_index():
         time_seconds=0.2,
         clients_this_round=1,
         samples_per_client=1,
-        attacks=[_attack_result_stub("DLG", mse=0.4)],
+        attacks=[_attack_result_stub("DLG", mse=0.4, client_id="Nd2O3")],
     )
 
     payload = _round_attack_payload(round_result, round_result.attacks)
 
     assert payload["attack/round_index"] == 3.0
+    assert payload["attack/client/Nd2O3/primary_metric_name"] == "reconstruction_mse"
+    assert payload["attack/client/Nd2O3/DLG/mse"] == 0.4
 
 
 class _DummyLoader:

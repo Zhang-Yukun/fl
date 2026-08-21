@@ -556,21 +556,25 @@ def _mean_finite(values: list[float]) -> float | None:
     return sum(finite) / len(finite)
 
 
-def summarize_attack_results(results: list[AttackResult], success_rate_threshold: float = 0.03) -> dict[str, Any]:
-    """Summarize DLG/iDLG metrics with the configured primary view."""
+def _summarize_attack_subset(
+    subset: list[AttackResult],
+    *,
+    primary_metric: str,
+    success_rate_threshold: float,
+) -> dict[str, Any]:
+    """Return one aggregated attack summary for an arbitrary filtered subset."""
 
-    primary_metric = results[0].metric_name if results else "reconstruction_mse"
     methods: dict[str, dict[str, float | int | bool | None | str]] = {}
-    for name in sorted({result.name for result in results}):
-        subset = [result for result in results if result.name == name]
-        total = len(subset)
-        success_count = sum(result.success for result in subset)
-        avg_primary_metric = _mean_finite([result.mse for result in subset])
-        best_primary_metric = _mean_finite(sorted([result.mse for result in subset])[:1])
-        avg_objective_mse = _mean_finite([result.gradient_mse for result in subset])
+    for name in sorted({result.name for result in subset}):
+        method_subset = [result for result in subset if result.name == name]
+        total = len(method_subset)
+        success_count = sum(result.success for result in method_subset)
+        avg_primary_metric = _mean_finite([result.mse for result in method_subset])
+        best_primary_metric = _mean_finite(sorted([result.mse for result in method_subset])[:1])
+        avg_objective_mse = _mean_finite([result.gradient_mse for result in method_subset])
         methods[name] = {
-            "primary_metric": subset[0].metric_name if subset else primary_metric,
-            "target_type": subset[0].target_type if subset else None,
+            "primary_metric": method_subset[0].metric_name if method_subset else primary_metric,
+            "target_type": method_subset[0].target_type if method_subset else None,
             "success_count": success_count,
             "total_count": total,
             "success_rate": success_count / total if total else 0.0,
@@ -579,28 +583,29 @@ def summarize_attack_results(results: list[AttackResult], success_rate_threshold
             "best_primary_metric": best_primary_metric,
             "avg_mse": avg_primary_metric,
             "best_mse": best_primary_metric,
-            "avg_exact_target_mse": _mean_finite([result.exact_target_mse for result in subset if result.exact_target_mse is not None]),
-            "avg_nearest_client_train_mse": _mean_finite([result.nearest_client_train_mse for result in subset if result.nearest_client_train_mse is not None]),
-            "avg_psnr": _mean_finite([result.psnr for result in subset]),
-            "avg_ssim": _mean_finite([result.ssim for result in subset]),
-            "best_ssim": _mean_finite(sorted([result.ssim for result in subset], reverse=True)[:1]),
+            "avg_exact_target_mse": _mean_finite([result.exact_target_mse for result in method_subset if result.exact_target_mse is not None]),
+            "avg_nearest_client_train_mse": _mean_finite([result.nearest_client_train_mse for result in method_subset if result.nearest_client_train_mse is not None]),
+            "avg_psnr": _mean_finite([result.psnr for result in method_subset]),
+            "avg_ssim": _mean_finite([result.ssim for result in method_subset]),
+            "best_ssim": _mean_finite(sorted([result.ssim for result in method_subset], reverse=True)[:1]),
             "avg_objective_mse": avg_objective_mse,
             "avg_gradient_mse": avg_objective_mse,
-            "avg_time_seconds": _mean_finite([result.time_seconds for result in subset]),
+            "avg_time_seconds": _mean_finite([result.time_seconds for result in method_subset]),
             "passes": (success_count / total if total else 0.0) <= success_rate_threshold,
         }
-    overall_success_rate = attack_success_rate(results)
-    overall_avg_primary_metric = _mean_finite([result.mse for result in results])
-    overall_best_primary_metric = _mean_finite(sorted([result.mse for result in results])[:1])
-    overall_avg_psnr = _mean_finite([result.psnr for result in results])
-    overall_avg_ssim = _mean_finite([result.ssim for result in results])
-    overall_avg_objective_mse = _mean_finite([result.gradient_mse for result in results])
-    overall_avg_exact_target_mse = _mean_finite([result.exact_target_mse for result in results if result.exact_target_mse is not None])
-    overall_avg_nearest_client_train_mse = _mean_finite([result.nearest_client_train_mse for result in results if result.nearest_client_train_mse is not None])
+
+    overall_success_rate = attack_success_rate(subset)
+    overall_avg_primary_metric = _mean_finite([result.mse for result in subset])
+    overall_best_primary_metric = _mean_finite(sorted([result.mse for result in subset])[:1])
+    overall_avg_psnr = _mean_finite([result.psnr for result in subset])
+    overall_avg_ssim = _mean_finite([result.ssim for result in subset])
+    overall_avg_objective_mse = _mean_finite([result.gradient_mse for result in subset])
+    overall_avg_exact_target_mse = _mean_finite([result.exact_target_mse for result in subset if result.exact_target_mse is not None])
+    overall_avg_nearest_client_train_mse = _mean_finite([result.nearest_client_train_mse for result in subset if result.nearest_client_train_mse is not None])
     return {
         "primary_metric": primary_metric,
         "primary_metric_direction": "higher_is_more_private",
-        "target_type": results[0].target_type if results else None,
+        "target_type": subset[0].target_type if subset else None,
         "success_rate_threshold": success_rate_threshold,
         "overall_avg_primary_metric": overall_avg_primary_metric,
         "overall_best_primary_metric": overall_best_primary_metric,
@@ -617,3 +622,24 @@ def summarize_attack_results(results: list[AttackResult], success_rate_threshold
         "overall_passes": overall_success_rate <= success_rate_threshold,
         "methods": methods,
     }
+
+
+def summarize_attack_results(results: list[AttackResult], success_rate_threshold: float = 0.03) -> dict[str, Any]:
+    """Summarize DLG/iDLG metrics with both merged and per-client views."""
+
+    primary_metric = results[0].metric_name if results else "reconstruction_mse"
+    summary = _summarize_attack_subset(
+        results,
+        primary_metric=primary_metric,
+        success_rate_threshold=success_rate_threshold,
+    )
+    clients: dict[str, dict[str, Any]] = {}
+    for client_id in sorted({str(result.client_id) for result in results if result.client_id is not None}):
+        client_subset = [result for result in results if result.client_id == client_id]
+        clients[client_id] = _summarize_attack_subset(
+            client_subset,
+            primary_metric=primary_metric,
+            success_rate_threshold=success_rate_threshold,
+        )
+    summary["clients"] = clients
+    return summary

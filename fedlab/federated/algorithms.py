@@ -661,6 +661,8 @@ def _build_attack_round_task(
         result = results_by_client[client.client_id]
         for sample_index in range(sample_count):
             reference_inputs = None
+            train_loader = getattr(client, "train_loader", None)
+            scaler = getattr(train_loader, "scaler", None)
             if attack_target_type == "gradient":
                 grads, real_x, real_y = client.gradient_sample(
                     round_base_state,
@@ -697,8 +699,8 @@ def _build_attack_round_task(
                     real_x=real_x.detach().cpu().clone(),
                     real_y=real_y.detach().cpu().clone(),
                     reference_inputs=None if reference_inputs is None else reference_inputs.detach().cpu().clone(),
-                    scale_mean=None if getattr(getattr(client.train_loader, "scaler", None), "mean", None) is None else [float(value) for value in getattr(client.train_loader, "scaler").mean.reshape(-1).tolist()],
-                    scale_std=None if getattr(getattr(client.train_loader, "scaler", None), "std", None) is None else [float(value) for value in getattr(client.train_loader, "scaler").std.reshape(-1).tolist()],
+                    scale_mean=None if getattr(scaler, "mean", None) is None else [float(value) for value in scaler.mean.reshape(-1).tolist()],
+                    scale_std=None if getattr(scaler, "std", None) is None else [float(value) for value in scaler.std.reshape(-1).tolist()],
                 )
             )
     return AttackRoundTask(
@@ -779,6 +781,29 @@ def _execute_attack_round_task(
     )
 
 
+def _attack_payload_metrics(subset: list[Any], cumulative_subset: list[Any], prefix: str) -> dict[str, float | str]:
+    """Return one attack-metric payload block for one subset prefix."""
+
+    if not subset:
+        return {}
+    payload: dict[str, float | str] = {}
+    payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "reconstruction_mse")
+    payload[f"{prefix}/primary_metric"] = sum(result.mse for result in subset) / len(subset)
+    payload[f"{prefix}/mse"] = payload[f"{prefix}/primary_metric"]
+    payload[f"{prefix}/reconstruction_mse"] = payload[f"{prefix}/mse"]
+    payload[f"{prefix}/avg_primary_metric_so_far"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
+    payload[f"{prefix}/avg_mse_so_far"] = payload[f"{prefix}/avg_primary_metric_so_far"]
+    payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
+    payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
+    payload[f"{prefix}/iterations"] = float(subset[0].iterations)
+    payload[f"{prefix}/time_seconds"] = sum(result.time_seconds for result in subset) / len(subset)
+    payload[f"{prefix}/objective_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
+    payload[f"{prefix}/gradient_mse"] = payload[f"{prefix}/objective_mse"]
+    payload[f"{prefix}/success"] = sum(float(result.success) for result in subset) / len(subset)
+    payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(cumulative_subset)
+    return payload
+
+
 def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: list[Any]) -> dict[str, float | str]:
     """Build per-round and cumulative attack metrics for tracking/logging."""
 
@@ -798,22 +823,17 @@ def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: l
     }
     for name in sorted({result.name for result in round_attacks}):
         subset = [result for result in round_attacks if result.name == name]
-        prefix = f"attack/{name}"
-        payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "reconstruction_mse")
-        payload[f"{prefix}/primary_metric"] = sum(result.mse for result in subset) / len(subset)
-        payload[f"{prefix}/mse"] = payload[f"{prefix}/primary_metric"]
-        payload[f"{prefix}/reconstruction_mse"] = payload[f"{prefix}/mse"]
         cumulative_subset = [result for result in cumulative_results if result.name == name]
-        payload[f"{prefix}/avg_primary_metric_so_far"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
-        payload[f"{prefix}/avg_mse_so_far"] = payload[f"{prefix}/avg_primary_metric_so_far"]
-        payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
-        payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
-        payload[f"{prefix}/iterations"] = float(subset[0].iterations)
-        payload[f"{prefix}/time_seconds"] = sum(result.time_seconds for result in subset) / len(subset)
-        payload[f"{prefix}/objective_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
-        payload[f"{prefix}/gradient_mse"] = payload[f"{prefix}/objective_mse"]
-        payload[f"{prefix}/success"] = sum(float(result.success) for result in subset) / len(subset)
-        payload[f"{prefix}/success_rate_so_far"] = attack_success_rate(cumulative_results, name)
+        payload.update(_attack_payload_metrics(subset, cumulative_subset, f"attack/{name}"))
+    for client_id in sorted({str(result.client_id) for result in round_attacks if getattr(result, "client_id", None) is not None}):
+        client_subset = [result for result in round_attacks if result.client_id == client_id]
+        cumulative_client_subset = [result for result in cumulative_results if result.client_id == client_id]
+        client_prefix = f"attack/client/{client_id}"
+        payload.update(_attack_payload_metrics(client_subset, cumulative_client_subset, client_prefix))
+        for name in sorted({result.name for result in client_subset}):
+            method_subset = [result for result in client_subset if result.name == name]
+            cumulative_method_subset = [result for result in cumulative_client_subset if result.name == name]
+            payload.update(_attack_payload_metrics(method_subset, cumulative_method_subset, f"{client_prefix}/{name}"))
     return payload
 
 
