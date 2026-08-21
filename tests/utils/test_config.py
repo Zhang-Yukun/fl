@@ -79,9 +79,12 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["evaluation"]["mode"] == "protocol"
     assert config["evaluation"]["metrics"] == ["mse", "mae", "mape"]
     assert config["transport"]["upload_mode"] == "update"
+    assert config["training"]["optimizer"] == "sgd"
     assert config["transport"]["download_mode"] == "model"
     assert config["attack"]["model_mode"] == "train"
     assert config["attack"]["reference_metric"] == "nearest_client_train_mse"
     assert config["attack"]["report_metrics"] == ["nearest_client_train_mse"]
+    assert config["attack"]["optimizer"] == "adam"
+    assert config["attack"]["lr"] == 0.001
     assert config["grpc"]["max_message_mb"] == 256.0
     assert config["artifacts"]["config_formats"] == ["yaml"]

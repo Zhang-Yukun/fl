@@ -29,6 +29,6 @@ class TaskSpec:
     compute_metrics: MetricFn | None = None
     default_loss: str = "mse"
     default_metrics: tuple[str, ...] = ("mse",)
-    default_optimizer: str = "adam"
+    default_optimizer: str = "sgd"
     primary_metric: str = "mse"
     primary_metric_mode: str = "min"

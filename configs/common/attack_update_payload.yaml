@@ -6,7 +6,7 @@ attack:
   frequency_rounds: 5
   max_samples: 1
   steps: 500
-  lr: 0.01
+  lr: 0.001
   optimizer: adam
   restarts: 1
   lbfgs_history_size: 20

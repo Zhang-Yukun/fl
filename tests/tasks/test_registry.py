@@ -16,6 +16,15 @@ def test_default_config_resolves_forecasting_task():
     assert primary_metric_mode(config) == 'min'
 
 
+def test_default_optimizer_falls_back_to_sgd_for_forecasting():
+    config = {"task": {"type": "forecasting"}, "training": {"lr": 0.01}}
+
+    optimizer = build_optimizer([torch.nn.Parameter(torch.ones(1))], config)
+
+    assert optimizer.__class__.__name__ == "SGD"
+    assert optimizer_name(config) == "sgd"
+
+
 def test_task_aware_model_builder_annotates_model():
     config = {
         'task': {'type': 'forecasting'},
