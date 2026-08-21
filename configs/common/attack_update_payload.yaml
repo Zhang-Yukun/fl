@@ -13,7 +13,7 @@ attack:
   sample_count: 1
   input_clip: 5.0
   target_clip: 5.0
-  success_mse_threshold: 1.0
+  success_mse_threshold: 0.5
   success_ssim_threshold: 0.3
   success_rate_threshold: 0.03
   data_range: 1.0

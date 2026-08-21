@@ -106,10 +106,10 @@ def plot_one_artifact(
         raise ValueError("Attack record does not include artifact_path")
     artifact = torch.load(run_dir / artifact_rel, map_location="cpu", weights_only=False)
 
-    real_x = _flatten_first_channel(artifact.get("real_x"))
-    recon_x = _flatten_first_channel(artifact.get("reconstructed_x"))
-    real_y = _flatten_first_channel(artifact.get("real_y"))
-    recon_y = _flatten_first_channel(artifact.get("reconstructed_y"))
+    real_x = _flatten_first_channel(artifact.get("plot_real_x") if artifact.get("plot_real_x") is not None else artifact.get("real_x"))
+    recon_x = _flatten_first_channel(artifact.get("plot_reconstructed_x") if artifact.get("plot_reconstructed_x") is not None else artifact.get("reconstructed_x"))
+    real_y = _flatten_first_channel(artifact.get("plot_real_y") if artifact.get("plot_real_y") is not None else artifact.get("real_y"))
+    recon_y = _flatten_first_channel(artifact.get("plot_reconstructed_y") if artifact.get("plot_reconstructed_y") is not None else artifact.get("reconstructed_y"))
 
     if real_x is None or recon_x is None:
         raise ValueError(f"Missing x tensors in {artifact_rel}")

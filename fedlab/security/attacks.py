@@ -180,7 +180,7 @@ def _attack_rng_context(device: torch.device):
 def _attack_threshold(config: dict[str, Any]) -> float:
     """Return the normalized-MSE success threshold used by the attack rules."""
 
-    return float(config.get("attack", {}).get("success_mse_threshold", 0.01))
+    return float(config.get("attack", {}).get("success_mse_threshold", 0.5))
 
 
 def _attack_ssim_threshold(config: dict[str, Any]) -> float | None:
@@ -470,6 +470,10 @@ def save_attack_artifacts(output_dir: Path, results: list[AttackResult]) -> list
                 "real_y": None if result.real_y is None else result.real_y.detach().cpu(),
                 "reconstructed_x": None if result.reconstructed_x is None else result.reconstructed_x.detach().cpu(),
                 "reconstructed_y": None if result.reconstructed_y is None else result.reconstructed_y.detach().cpu(),
+                "plot_real_x": None if getattr(result, "plot_real_x", None) is None else getattr(result, "plot_real_x").detach().cpu(),
+                "plot_real_y": None if getattr(result, "plot_real_y", None) is None else getattr(result, "plot_real_y").detach().cpu(),
+                "plot_reconstructed_x": None if getattr(result, "plot_reconstructed_x", None) is None else getattr(result, "plot_reconstructed_x").detach().cpu(),
+                "plot_reconstructed_y": None if getattr(result, "plot_reconstructed_y", None) is None else getattr(result, "plot_reconstructed_y").detach().cpu(),
                 "exact_target_mse": result.exact_target_mse,
                 "nearest_client_train_mse": result.nearest_client_train_mse,
                 "nearest_client_train_indices": result.nearest_client_train_indices,

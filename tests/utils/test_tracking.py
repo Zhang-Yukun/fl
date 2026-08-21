@@ -1,3 +1,6 @@
+import numpy as np
+
+from fedlab.datasets.rare_earth import Standardizer
 from fedlab.utils.tracking import Tracker, _prediction_figure, _to_series
 
 
@@ -69,6 +72,7 @@ def test_tracker_log_prediction_plot_creates_wandb_image():
         target=__import__("torch").tensor([[[1.5], [2.5], [3.5]]]),
         step=5,
         title="prediction demo",
+        scaler=Standardizer(mean=np.array([10.0], dtype="float32"), std=np.array([2.0], dtype="float32")),
     )
 
     payload, step = tracker.run.calls[0]
@@ -122,3 +126,24 @@ def test_prediction_figure_draws_single_axis_with_history_and_forecast():
     assert "input_x" in labels
     assert "target_y" in labels
     assert "prediction_y" in labels
+
+
+def test_prediction_figure_can_restore_original_scale_with_scaler():
+    torch = __import__("torch")
+
+    scaler = Standardizer(mean=np.array([10.0], dtype="float32"), std=np.array([2.0], dtype="float32"))
+    figure = _prediction_figure(
+        torch.tensor([[[0.0], [0.5]]]),
+        torch.tensor([[[1.0], [2.0]]]),
+        torch.tensor([[[1.5], [2.5]]]),
+        title="scaled",
+        scaler=scaler,
+    )
+
+    axis = figure.axes[0]
+    input_line = next(line for line in axis.lines if line.get_label() == "input_x")
+    target_line = next(line for line in axis.lines if line.get_label() == "target_y")
+    prediction_line = next(line for line in axis.lines if line.get_label() == "prediction_y")
+    assert list(input_line.get_ydata()) == [10.0, 11.0]
+    assert list(target_line.get_ydata()) == [13.0, 15.0]
+    assert list(prediction_line.get_ydata()) == [12.0, 14.0]

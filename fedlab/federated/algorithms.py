@@ -589,6 +589,8 @@ class AttackSampleTask:
     real_x: torch.Tensor
     real_y: torch.Tensor
     reference_inputs: torch.Tensor | None = None
+    scale_mean: list[float] | None = None
+    scale_std: list[float] | None = None
 
 
 @dataclass
@@ -695,6 +697,8 @@ def _build_attack_round_task(
                     real_x=real_x.detach().cpu().clone(),
                     real_y=real_y.detach().cpu().clone(),
                     reference_inputs=None if reference_inputs is None else reference_inputs.detach().cpu().clone(),
+                    scale_mean=None if getattr(getattr(client.train_loader, "scaler", None), "mean", None) is None else [float(value) for value in getattr(client.train_loader, "scaler").mean.reshape(-1).tolist()],
+                    scale_std=None if getattr(getattr(client.train_loader, "scaler", None), "std", None) is None else [float(value) for value in getattr(client.train_loader, "scaler").std.reshape(-1).tolist()],
                 )
             )
     return AttackRoundTask(
@@ -703,6 +707,20 @@ def _build_attack_round_task(
         samples_per_client=sample_count,
         samples=samples,
     )
+
+
+def _inverse_plot_tensor(values: torch.Tensor, mean: list[float] | None, std: list[float] | None) -> torch.Tensor:
+    """Restore one standardized tensor for visualization only."""
+
+    if mean is None or std is None:
+        return values.detach().cpu().clone()
+    tensor = values.detach().cpu().to(torch.float32)
+    mean_tensor = torch.tensor(mean, dtype=tensor.dtype).reshape(1, 1, -1)
+    std_tensor = torch.tensor(std, dtype=tensor.dtype).reshape(1, 1, -1)
+    while mean_tensor.ndim < tensor.ndim:
+        mean_tensor = mean_tensor.unsqueeze(0)
+        std_tensor = std_tensor.unsqueeze(0)
+    return tensor * std_tensor + mean_tensor
 
 
 def _execute_attack_round_task(
@@ -715,7 +733,7 @@ def _execute_attack_round_task(
     start = time.perf_counter()
     attacks = []
     for sample in task.samples:
-        attacks.extend([
+        for result in (
             attach_attack_metadata(
                 dlg_attack(
                     config,
@@ -746,7 +764,12 @@ def _execute_attack_round_task(
                 round_index=sample.round_index,
                 sample_index=sample.sample_index,
             ),
-        ])
+        ):
+            result.plot_real_x = _inverse_plot_tensor(result.real_x, sample.scale_mean, sample.scale_std)
+            result.plot_reconstructed_x = _inverse_plot_tensor(result.reconstructed_x, sample.scale_mean, sample.scale_std)
+            result.plot_real_y = None if result.real_y is None else _inverse_plot_tensor(result.real_y, sample.scale_mean, sample.scale_std)
+            result.plot_reconstructed_y = None if result.reconstructed_y is None else _inverse_plot_tensor(result.reconstructed_y, sample.scale_mean, sample.scale_std)
+            attacks.append(result)
     return AttackRoundResult(
         round_index=task.round_index,
         time_seconds=time.perf_counter() - start,
@@ -997,6 +1020,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
                 target,
                 step=round_index,
                 title="centralized val prediction",
+                scaler=getattr(val_loader, "scaler", None),
             )
         except Exception as exc:
             logger.debug("Skip centralized val prediction plot: {}", exc)
@@ -1156,10 +1180,10 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(server.history)}, step=round_index)
         try:
             input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, val_loader, device)
-            tracker.log_prediction_plot("prediction/federated/val_protocol", input_series, prediction, target, step=round_index, title="federated val protocol prediction")
+            tracker.log_prediction_plot("prediction/federated/val_protocol", input_series, prediction, target, step=round_index, title="federated val protocol prediction", scaler=getattr(val_loader, "scaler", None))
             oracle_state = server.oracle_global_state if server.oracle_global_state is not None else server.global_state
             input_series, prediction, target = predict_first_batch_for_state(server.model, oracle_state, val_loader, device)
-            tracker.log_prediction_plot("prediction/federated/val_oracle", input_series, prediction, target, step=round_index, title="federated val oracle prediction")
+            tracker.log_prediction_plot("prediction/federated/val_oracle", input_series, prediction, target, step=round_index, title="federated val oracle prediction", scaler=getattr(val_loader, "scaler", None))
         except Exception as exc:
             logger.debug("Skip federated val prediction plot: {}", exc)
         attack_task = _build_attack_round_task(
@@ -1208,10 +1232,10 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     tracker.log(final_log_payload)
     try:
         input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, test_loader, device)
-        tracker.log_prediction_plot("prediction/federated/test_protocol", input_series, prediction, target, step=final_test_step, title="federated test protocol prediction")
+        tracker.log_prediction_plot("prediction/federated/test_protocol", input_series, prediction, target, step=final_test_step, title="federated test protocol prediction", scaler=getattr(test_loader, "scaler", None))
         oracle_state = server.oracle_global_state if server.oracle_global_state is not None else server.global_state
         input_series, prediction, target = predict_first_batch_for_state(server.model, oracle_state, test_loader, device)
-        tracker.log_prediction_plot("prediction/federated/test_oracle", input_series, prediction, target, step=final_test_step, title="federated test oracle prediction")
+        tracker.log_prediction_plot("prediction/federated/test_oracle", input_series, prediction, target, step=final_test_step, title="federated test oracle prediction", scaler=getattr(test_loader, "scaler", None))
     except Exception as exc:
         logger.debug("Skip federated prediction plot: {}", exc)
     attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)

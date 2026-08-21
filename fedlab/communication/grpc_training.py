@@ -266,10 +266,10 @@ class GrpcFederatedCoordinator:
         self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=round_index)
         try:
             input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.global_state, self.server.val_loader, self.server.device)
-            self.tracker.log_prediction_plot('prediction/grpc/val_protocol', input_series, prediction, target, step=round_index, title='grpc val protocol prediction')
+            self.tracker.log_prediction_plot('prediction/grpc/val_protocol', input_series, prediction, target, step=round_index, title='grpc val protocol prediction', scaler=getattr(self.server.val_loader, 'scaler', None))
             oracle_state = self.server.oracle_global_state if self.server.oracle_global_state is not None else self.server.global_state
             input_series, prediction, target = predict_first_batch_for_state(self.server.model, oracle_state, self.server.val_loader, self.server.device)
-            self.tracker.log_prediction_plot('prediction/grpc/val_oracle', input_series, prediction, target, step=round_index, title='grpc val oracle prediction')
+            self.tracker.log_prediction_plot('prediction/grpc/val_oracle', input_series, prediction, target, step=round_index, title='grpc val oracle prediction', scaler=getattr(self.server.val_loader, 'scaler', None))
         except Exception as exc:
             logger.debug('Skip gRPC val prediction plot: {}', exc)
         self._run_attacks(round_index, round_base_state, results, round_context)
@@ -345,10 +345,10 @@ class GrpcFederatedCoordinator:
         self.tracker.log(final_log_payload)
         try:
             input_series, prediction, target = predict_first_batch_for_state(self.server.model, self.server.global_state, self.server.test_loader, self.server.device)
-            self.tracker.log_prediction_plot('prediction/grpc/test_protocol', input_series, prediction, target, step=final_test_step, title='grpc test protocol prediction')
+            self.tracker.log_prediction_plot('prediction/grpc/test_protocol', input_series, prediction, target, step=final_test_step, title='grpc test protocol prediction', scaler=getattr(self.server.test_loader, 'scaler', None))
             oracle_state = self.server.oracle_global_state if self.server.oracle_global_state is not None else self.server.global_state
             input_series, prediction, target = predict_first_batch_for_state(self.server.model, oracle_state, self.server.test_loader, self.server.device)
-            self.tracker.log_prediction_plot('prediction/grpc/test_oracle', input_series, prediction, target, step=final_test_step, title='grpc test oracle prediction')
+            self.tracker.log_prediction_plot('prediction/grpc/test_oracle', input_series, prediction, target, step=final_test_step, title='grpc test oracle prediction', scaler=getattr(self.server.test_loader, 'scaler', None))
         except Exception as exc:
             logger.debug('Skip gRPC prediction plot: {}', exc)
         self.tracker.finish()

@@ -7,6 +7,8 @@ from typing import Any
 
 from loguru import logger
 
+from fedlab.datasets.rare_earth import inverse_transform_tensor
+
 
 class Tracker:
     """Thin wrapper that keeps training usable when wandb is unavailable."""
@@ -76,10 +78,11 @@ class Tracker:
         target,
         step: int | None = None,
         title: str | None = None,
+        scaler = None,
     ) -> None:
         """Render and log an input-context plus target-vs-prediction chart."""
 
-        figure = _prediction_figure(input_series, prediction, target, title=title)
+        figure = _prediction_figure(input_series, prediction, target, title=title, scaler=scaler)
         if figure is None:
             return
         self.log_image(key, figure, step=step, caption=title)
@@ -124,7 +127,7 @@ def _to_series(tensor) -> list[float]:
     return [float(value) for value in data.tolist()]
 
 
-def _prediction_figure(input_series, prediction, target, title: str | None = None):
+def _prediction_figure(input_series, prediction, target, title: str | None = None, scaler=None):
     """Return a single-axis matplotlib figure for context and forecast comparison."""
 
     try:
@@ -133,9 +136,9 @@ def _prediction_figure(input_series, prediction, target, title: str | None = Non
         logger.warning("Prediction plot disabled: {}", exc)
         return None
 
-    input_values = _to_series(input_series)
-    pred_series = _to_series(prediction)
-    target_series = _to_series(target)
+    input_values = _to_series(inverse_transform_tensor(input_series, scaler))
+    pred_series = _to_series(inverse_transform_tensor(prediction, scaler))
+    target_series = _to_series(inverse_transform_tensor(target, scaler))
     if not pred_series or not target_series:
         return None
     figure, axis = plt.subplots(figsize=(10, 3.5))
@@ -163,8 +166,8 @@ def _prediction_figure(input_series, prediction, target, title: str | None = Non
 def _attack_reconstruction_figure(result):
     """Return a matplotlib figure for attack reconstruction diagnostics."""
 
-    real_x = getattr(result, "real_x", None)
-    reconstructed_x = getattr(result, "reconstructed_x", None)
+    real_x = getattr(result, "plot_real_x", getattr(result, "real_x", None))
+    reconstructed_x = getattr(result, "plot_reconstructed_x", getattr(result, "reconstructed_x", None))
     if real_x is None or reconstructed_x is None:
         return None
     try:
@@ -173,8 +176,8 @@ def _attack_reconstruction_figure(result):
         logger.warning("Attack plot disabled: {}", exc)
         return None
 
-    real_y = getattr(result, "real_y", None)
-    reconstructed_y = getattr(result, "reconstructed_y", None)
+    real_y = getattr(result, "plot_real_y", getattr(result, "real_y", None))
+    reconstructed_y = getattr(result, "plot_reconstructed_y", getattr(result, "reconstructed_y", None))
     figure, axes = plt.subplots(1, 2, figsize=(12, 3))
     axes[0].plot(_to_series(real_x), label="real_x", linewidth=2.0)
     axes[0].plot(_to_series(reconstructed_x), label="reconstructed_x", linewidth=2.0)

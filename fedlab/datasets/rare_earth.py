@@ -49,6 +49,31 @@ class Standardizer:
         return values * self.std + self.mean
 
 
+def inverse_transform_tensor(values: torch.Tensor, scaler: Standardizer | None) -> torch.Tensor:
+    """Map one standardized tensor back to the original value scale.
+
+    Example:
+        ``restored = inverse_transform_tensor(batch, loader.scaler)``.
+    """
+
+    if scaler is None:
+        return values.detach().cpu().clone()
+    tensor = values.detach().cpu().to(torch.float32)
+    mean = torch.as_tensor(scaler.mean, dtype=tensor.dtype).reshape(1, 1, -1)
+    std = torch.as_tensor(scaler.std, dtype=tensor.dtype).reshape(1, 1, -1)
+    while mean.ndim < tensor.ndim:
+        mean = mean.unsqueeze(0)
+        std = std.unsqueeze(0)
+    return tensor * std + mean
+
+
+def attach_loader_scaler(loader: DataLoader, scaler: Standardizer) -> DataLoader:
+    """Attach one fitted scaler onto a loader for visualization recovery."""
+
+    setattr(loader, "scaler", scaler)
+    return loader
+
+
 def _stable_text_offset(text: str) -> int:
     """Return a deterministic integer offset for a loader identity string."""
 
@@ -167,9 +192,9 @@ def make_loaders(
     val = scaler.transform(val_raw)
     test = scaler.transform(test_raw)
     return (
-        DataLoader(WindowDataset(train, seq_len, pred_len), **_loader_kwargs(batch_size, shuffle_train, num_workers, seed, identity + ':train')),
-        DataLoader(WindowDataset(val, seq_len, pred_len), **_loader_kwargs(batch_size, False, num_workers, seed, identity + ':val')),
-        DataLoader(WindowDataset(test, seq_len, pred_len), **_loader_kwargs(batch_size, False, num_workers, seed, identity + ':test')),
+        attach_loader_scaler(DataLoader(WindowDataset(train, seq_len, pred_len), **_loader_kwargs(batch_size, shuffle_train, num_workers, seed, identity + ':train')), scaler),
+        attach_loader_scaler(DataLoader(WindowDataset(val, seq_len, pred_len), **_loader_kwargs(batch_size, False, num_workers, seed, identity + ':val')), scaler),
+        attach_loader_scaler(DataLoader(WindowDataset(test, seq_len, pred_len), **_loader_kwargs(batch_size, False, num_workers, seed, identity + ':test')), scaler),
         scaler,
     )
 
@@ -213,9 +238,9 @@ def make_loaders_from_splits(
     val = scaler.transform(val_values)
     test = scaler.transform(test_values)
     return (
-        DataLoader(WindowDataset(train, seq_len, pred_len), **_loader_kwargs(batch_size, shuffle_train, num_workers, seed, identity + ':train')),
-        DataLoader(WindowDataset(val, seq_len, pred_len), **_loader_kwargs(batch_size, False, num_workers, seed, identity + ':val')),
-        DataLoader(WindowDataset(test, seq_len, pred_len), **_loader_kwargs(batch_size, False, num_workers, seed, identity + ':test')),
+        attach_loader_scaler(DataLoader(WindowDataset(train, seq_len, pred_len), **_loader_kwargs(batch_size, shuffle_train, num_workers, seed, identity + ':train')), scaler),
+        attach_loader_scaler(DataLoader(WindowDataset(val, seq_len, pred_len), **_loader_kwargs(batch_size, False, num_workers, seed, identity + ':val')), scaler),
+        attach_loader_scaler(DataLoader(WindowDataset(test, seq_len, pred_len), **_loader_kwargs(batch_size, False, num_workers, seed, identity + ':test')), scaler),
         scaler,
     )
 
@@ -298,6 +323,7 @@ class _ConcatLoader:
         """Store loaders that should be iterated as one stream."""
 
         self.loaders = loaders
+        self.scaler = getattr(loaders[0], "scaler", None) if loaders else None
 
     def __iter__(self):
         """Yield batches from each wrapped loader in order."""

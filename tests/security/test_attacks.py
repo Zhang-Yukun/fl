@@ -33,7 +33,7 @@ def _tiny_patchtst_config(target_type: str = "update_payload"):
             "lbfgs_history_size": 5,
             "input_clip": 5.0,
             "target_clip": 5.0,
-            "success_mse_threshold": 0.01,
+            "success_mse_threshold": 0.5,
             "success_rate_threshold": 0.03,
             "data_range": 1.0,
             "model_mode": "eval",
@@ -66,7 +66,7 @@ def test_gradient_attacks_run_on_vendored_patchtst():
         assert torch.isfinite(torch.tensor(result.ssim))
         assert result.iterations == 1
         assert result.time_seconds >= 0.0
-        assert result.success_threshold == 0.01
+        assert result.success_threshold == 0.5
         record = result.to_record()
         assert record["mse"] == record["reconstruction_mse"]
         assert {"psnr", "ssim", "iterations", "time_seconds", "gradient_mse", "objective_mse", "primary_metric_name", "primary_metric_value", "target_type"} <= set(record)

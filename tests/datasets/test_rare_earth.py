@@ -38,6 +38,9 @@ def test_build_federated_loaders_from_split_dir(tmp_path):
     assert set(train_loaders) == {"Nd2O3", "CeO2", "La2O3"}
     assert len(val_loader) > 0
     assert len(test_loader) > 0
+    assert getattr(train_loaders["Nd2O3"], "scaler", None) is not None
+    assert getattr(val_loader, "scaler", None) is not None
+    assert getattr(test_loader, "scaler", None) is not None
 
 
 def test_build_federated_loaders_respects_runtime_seed_for_train_shuffle(tmp_path):
