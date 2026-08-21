@@ -272,10 +272,193 @@ Final:
 
 ### 6.4 Federated / gRPC per-round keys
 
-- every `RoundRecord` top-level field is flattened as `round/<field>`
-- every `ClientCommunicationRecord` field is flattened as `client/<client_id>/<field>`
-- cumulative communication summary fields are flattened as `cumulative/<field>`
-- attack round payload fields are logged under `attack/...`
+This namespace does not invent a second set of metrics. It flattens four existing sources into wandb-friendly keys:
+- `round/...`: server-side round summary after aggregation
+- `client/<client_id>/...`: per-client local loss, payload, and communication details for that round
+- `cumulative/...`: communication totals accumulated from round 0 up to the current round
+- `attack/...`: attack results emitted after the attack worker finishes
+
+#### 6.4.1 `round/<RoundRecord field>`
+
+`round/...` is the main per-round view for convergence and round-level analysis.
+
+Read it in six groups:
+
+1. Training and validation behavior
+- `round/train_loss`
+- `round/val_mse`, `round/val_mae`, `round/val_mape`
+- `round/active_val_scope`
+- `round/active_val_mse`, `round/active_val_mae`, `round/active_val_mape`
+- `round/protocol_val_*`
+- `round/oracle_val_*`
+
+Interpretation:
+- `round/val_*` is a compatibility view.
+- `round/active_val_*` is the recommended source because it explicitly matches the validation scope currently used for selection.
+- When oracle evaluation is enabled, `protocol_val_*` and `oracle_val_*` let you compare the protocol path against the ideal full-update view in the same round.
+
+2. Time and round index
+- `round/round`
+- `round/round_time_seconds`
+- `round/elapsed_time_seconds`
+
+Interpretation:
+- `round/round` starts at 0.
+- `round/round_time_seconds` is the wall-clock time for that full federated round.
+- `round/elapsed_time_seconds` is cumulative runtime since experiment start.
+
+3. Current global model size
+- `round/model_parameters`
+- `round/model_bytes`
+
+Interpretation:
+- these describe the aggregated global model itself, not the bytes transmitted in that round.
+
+4. Algorithm-effective communication for the current round
+- `round/total_download_bytes`, `round/total_download_parameters`
+- `round/total_upload_bytes`, `round/total_upload_parameters`
+- `round/total_parameter_download_bytes`, `round/total_parameter_download_parameters`
+- `round/total_parameter_upload_bytes`, `round/total_parameter_upload_parameters`
+- `round/total_parameter_bytes`
+
+Interpretation:
+- these are the bytes that the algorithm must communicate for reconstruction/aggregation.
+- `total_download_bytes` and `total_upload_bytes` are compatibility aliases.
+- use this group as the primary communication-analysis view for algorithm comparisons.
+
+5. Actual transport for the current round
+- `round/total_transport_download_bytes`
+- `round/total_transport_upload_bytes`
+- `round/total_transport_bytes`
+- `round/total_transport_download_overhead_bytes`
+- `round/total_transport_upload_overhead_bytes`
+
+Interpretation:
+- these include transport-layer costs on top of the algorithm payload.
+- use this group for deployment-oriented network-cost analysis.
+- `overhead` means `transport - parameter`.
+
+6. Compression, privacy, and mode metadata
+- `round/fedavg_reference_*`
+- `round/parameter_upload_compression_ratio`
+- `round/parameter_total_communication_ratio`
+- `round/upload_compression_ratio`, `round/total_communication_ratio`, `round/communication_ratio`
+- `round/transport_upload_compression_ratio`
+- `round/transport_total_communication_ratio`
+- `round/privacy_*`
+- `round/adaptive_*`
+- `round/evaluation_mode`
+- `tracking/step`
+
+Interpretation:
+- `fedavg_reference_*` is the dense FedAvg baseline used to compute compression ratios.
+- `parameter_*_ratio` is the algorithm-level compression view.
+- `transport_*_ratio` is the real transport compression view.
+- `privacy/*` values are meaningful only for methods that actually track privacy.
+- `tracking/step` mirrors the round index and keeps asynchronous logging aligned.
+
+#### 6.4.2 `client/<client_id>/<ClientCommunicationRecord field>`
+
+`client/<client_id>/...` is the per-client view for one round. Use it to answer questions like:
+- which client uploaded the most?
+- which client had the highest local loss?
+- which payload semantic was used by a given client?
+
+Read it in five groups:
+
+1. Local training and aggregation semantics
+- `num_samples`
+- `loss`
+- `aggregation_payload_kind`
+- `evaluation_payload_kind`
+- `aggregation_weight`
+
+2. Algorithm-effective download
+- `download_bytes`, `download_parameters`
+- `parameter_download_bytes`, `parameter_download_parameters`
+- `dense_download_reference_bytes`, `dense_download_reference_parameters`
+
+3. Algorithm-effective upload
+- `upload_bytes`, `upload_parameters`
+- `parameter_upload_bytes`, `parameter_upload_parameters`
+- `dense_upload_reference_bytes`, `dense_upload_reference_parameters`
+
+4. Actual transport
+- `transport_download_bytes`
+- `transport_upload_bytes`
+- `transport_download_overhead_bytes`
+- `transport_upload_overhead_bytes`
+
+5. Compression/privacy metadata
+- `compressor`
+- `privacy_clip_norm`
+- `privacy_noise_multiplier`
+
+Interpretation:
+- `parameter_*` is the payload required by the algorithm.
+- `transport_*` adds transport-layer overhead.
+- `dense_*_reference_*` fields provide the dense FedAvg baseline for the same client.
+
+#### 6.4.3 `cumulative/<communication summary field>`
+
+`cumulative/...` is not “what happened in this round”; it is “how much has happened up to this round”.
+
+Use it for:
+- total communication vs round plots
+- comparing algorithms at the same round budget
+- checking whether an algorithm saves communication early or only later
+
+Key fields:
+- `cumulative/total_parameter_upload_bytes`
+- `cumulative/total_parameter_download_bytes`
+- `cumulative/total_parameter_bytes`
+- `cumulative/total_transport_upload_bytes`
+- `cumulative/total_transport_download_bytes`
+- `cumulative/total_transport_bytes`
+- plus `last_*` snapshots and corresponding ratio/overhead keys
+
+Interpretation:
+- `total_*` means accumulated from round 0 to the current round.
+- `last_*` means the most recently completed round only.
+
+#### 6.4.4 `attack/...`
+
+`attack/...` is emitted after an attack batch completes. It is the privacy-analysis channel rather than the training-performance channel.
+
+There are two levels:
+
+1. Aggregate attack status for the current attack batch
+- `attack/round_index`
+- `attack/time_seconds`
+- `attack/evaluations_this_round`
+- `attack/clients_this_round`
+- `attack/samples_per_client`
+- `attack/primary_metric_name`
+- `attack/overall_avg_primary_metric_so_far`
+- `attack/overall_avg_mse_so_far`
+- `attack/success_rate_so_far`
+
+2. Method-specific attack metrics for `<method>` such as `DLG` or `iDLG`
+- `attack/<method>/primary_metric_name`
+- `attack/<method>/primary_metric`
+- `attack/<method>/mse`
+- `attack/<method>/reconstruction_mse`
+- `attack/<method>/avg_primary_metric_so_far`
+- `attack/<method>/avg_mse_so_far`
+- `attack/<method>/psnr`
+- `attack/<method>/ssim`
+- `attack/<method>/iterations`
+- `attack/<method>/time_seconds`
+- `attack/<method>/objective_mse`
+- `attack/<method>/gradient_mse`
+- `attack/<method>/success`
+- `attack/<method>/success_rate_so_far`
+
+Interpretation:
+- “how hard is it to attack right now?”: use `attack/<method>/primary_metric`
+- “is privacy improving or degrading over time?”: use `attack/<method>/avg_primary_metric_so_far`
+- “is the attack succeeding less often?”: use `attack/<method>/success_rate_so_far`
+- “how good is the reconstruction this round?”: inspect `primary_metric`, `psnr`, and `ssim` together
 
 ### 6.5 Final scalar keys
 
