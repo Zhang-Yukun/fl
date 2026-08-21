@@ -837,6 +837,100 @@ def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: l
     return payload
 
 
+def _log_attack_reconstruction_views(tracker: Tracker, results: list[Any], step: int) -> None:
+    """Log merged and per-client attack reconstruction figures."""
+
+    if not hasattr(tracker, "log_attack_reconstruction"):
+        return
+    seen_methods: set[str] = set()
+    seen_client_methods: set[tuple[str, str]] = set()
+    for result in results:
+        method = str(result.name)
+        if method not in seen_methods:
+            seen_methods.add(method)
+            tracker.log_attack_reconstruction(f"attack/{method}/reconstruction", result, step=step)
+        client_id = getattr(result, "client_id", None)
+        if client_id is None:
+            continue
+        client_method = (str(client_id), method)
+        if client_method in seen_client_methods:
+            continue
+        seen_client_methods.add(client_method)
+        tracker.log_attack_reconstruction(
+            f"attack/client/{client_id}/{method}/reconstruction",
+            result,
+            step=step,
+        )
+
+
+def _iter_client_prediction_loaders(loader: Any, client_ids: list[str] | None) -> list[tuple[str, Any]]:
+    """Return ordered client-specific subloaders when the loader is concatenated."""
+
+    if not client_ids:
+        return []
+    subloaders = getattr(loader, "loaders", None)
+    if subloaders is None:
+        return []
+    if len(subloaders) != len(client_ids):
+        logger.debug(
+            "Skip split prediction plots because subloader count {} != client count {}",
+            len(subloaders),
+            len(client_ids),
+        )
+        return []
+    return [(client_id, subloader) for client_id, subloader in zip(client_ids, subloaders)]
+
+
+def _predict_for_logging(
+    model,
+    loader: Any,
+    device: torch.device,
+    state: StateDict | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return one prediction triplet for merged or client-specific visualization."""
+
+    if state is None:
+        return predict_first_batch(model, loader, device)
+    return predict_first_batch_for_state(model, state, loader, device)
+
+
+def _log_prediction_views(
+    tracker: Tracker,
+    key: str,
+    title: str,
+    model,
+    loader: Any,
+    device: torch.device,
+    *,
+    step: int | None = None,
+    client_ids: list[str] | None = None,
+    state: StateDict | None = None,
+) -> None:
+    """Log one merged prediction plot and optional per-client prediction plots."""
+
+    input_series, prediction, target = _predict_for_logging(model, loader, device, state=state)
+    tracker.log_prediction_plot(
+        key,
+        input_series,
+        prediction,
+        target,
+        step=step,
+        title=title,
+        scaler=getattr(loader, "scaler", None),
+    )
+    for client_id, client_loader in _iter_client_prediction_loaders(loader, client_ids):
+        input_series, prediction, target = _predict_for_logging(model, client_loader, device, state=state)
+        tracker.log_prediction_plot(
+            f"{key}/client/{client_id}",
+            input_series,
+            prediction,
+            target,
+            step=step,
+            title=f"{title} client={client_id}",
+            scaler=getattr(client_loader, "scaler", getattr(loader, "scaler", None)),
+        )
+
+
 class AsyncAttackManager:
     """Queue attack evaluations away from the training hot path and drain them in order."""
 
@@ -932,18 +1026,7 @@ class AsyncAttackManager:
             self.attack_results.extend(round_result.attacks)
             payload = _round_attack_payload(round_result, self.attack_results)
             self.tracker.log(payload, step=round_index)
-            seen_methods: set[str] = set()
-            if hasattr(self.tracker, "log_attack_reconstruction"):
-                for result in round_result.attacks:
-                    method = str(result.name)
-                    if method in seen_methods:
-                        continue
-                    seen_methods.add(method)
-                    self.tracker.log_attack_reconstruction(
-                        f"attack/{method}/reconstruction",
-                        result,
-                        step=round_index,
-                    )
+            _log_attack_reconstruction_views(self.tracker, round_result.attacks, round_index)
             logger.info("Round {} attack metrics {}", round_index, payload)
 
     def finalize(self) -> None:
@@ -972,6 +1055,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     start_time = time.perf_counter()
     device = resolve_device(config)
     train_loaders, val_loader, test_loader = build_federated_loaders(config)
+    client_ids = list(train_loaders.keys())
     model = build_model(config).to(device)
     model_state = serialize_model(model)
     logger.info(
@@ -1032,15 +1116,15 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
             "run/elapsed_time_seconds": elapsed,
         }, step=round_index)
         try:
-            input_series, prediction, target = predict_first_batch(model, val_loader, device)
-            tracker.log_prediction_plot(
+            _log_prediction_views(
+                tracker,
                 "prediction/centralized/val",
-                input_series,
-                prediction,
-                target,
+                "centralized val prediction",
+                model,
+                val_loader,
+                device,
                 step=round_index,
-                title="centralized val prediction",
-                scaler=getattr(val_loader, "scaler", None),
+                client_ids=client_ids,
             )
         except Exception as exc:
             logger.debug("Skip centralized val prediction plot: {}", exc)
@@ -1077,8 +1161,16 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
         "run/best_val_mape": best_metrics["mape"],
     })
     try:
-        input_series, prediction, target = predict_first_batch(model, test_loader, device)
-        tracker.log_prediction_plot("prediction/centralized/test", input_series, prediction, target, step=final_test_step, title="centralized test prediction")
+        _log_prediction_views(
+            tracker,
+            "prediction/centralized/test",
+            "centralized test prediction",
+            model,
+            test_loader,
+            device,
+            step=final_test_step,
+            client_ids=client_ids,
+        )
     except Exception as exc:
         logger.debug("Skip centralized prediction plot: {}", exc)
     tracker.finish()
@@ -1118,6 +1210,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     start_time = time.perf_counter()
     device = resolve_device(config)
     train_loaders, val_loader, test_loader = build_federated_loaders(config)
+    client_ids = list(train_loaders.keys())
     server = FederatedServer(config, val_loader, test_loader, device)
     total_train_samples = sum(_loader_num_samples(loader) for loader in train_loaders.values())
     clients = [
@@ -1199,11 +1292,29 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         )
         tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(server.history)}, step=round_index)
         try:
-            input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, val_loader, device)
-            tracker.log_prediction_plot("prediction/federated/val_protocol", input_series, prediction, target, step=round_index, title="federated val protocol prediction", scaler=getattr(val_loader, "scaler", None))
+            _log_prediction_views(
+                tracker,
+                "prediction/federated/val_protocol",
+                "federated val protocol prediction",
+                server.model,
+                val_loader,
+                device,
+                step=round_index,
+                client_ids=client_ids,
+                state=server.global_state,
+            )
             oracle_state = server.oracle_global_state if server.oracle_global_state is not None else server.global_state
-            input_series, prediction, target = predict_first_batch_for_state(server.model, oracle_state, val_loader, device)
-            tracker.log_prediction_plot("prediction/federated/val_oracle", input_series, prediction, target, step=round_index, title="federated val oracle prediction", scaler=getattr(val_loader, "scaler", None))
+            _log_prediction_views(
+                tracker,
+                "prediction/federated/val_oracle",
+                "federated val oracle prediction",
+                server.model,
+                val_loader,
+                device,
+                step=round_index,
+                client_ids=client_ids,
+                state=oracle_state,
+            )
         except Exception as exc:
             logger.debug("Skip federated val prediction plot: {}", exc)
         attack_task = _build_attack_round_task(
@@ -1251,11 +1362,29 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         final_log_payload.update({f"oracle_test/{key}": value for key, value in oracle_test_metrics.items()})
     tracker.log(final_log_payload)
     try:
-        input_series, prediction, target = predict_first_batch_for_state(server.model, server.global_state, test_loader, device)
-        tracker.log_prediction_plot("prediction/federated/test_protocol", input_series, prediction, target, step=final_test_step, title="federated test protocol prediction", scaler=getattr(test_loader, "scaler", None))
+        _log_prediction_views(
+            tracker,
+            "prediction/federated/test_protocol",
+            "federated test protocol prediction",
+            server.model,
+            test_loader,
+            device,
+            step=final_test_step,
+            client_ids=client_ids,
+            state=server.global_state,
+        )
         oracle_state = server.oracle_global_state if server.oracle_global_state is not None else server.global_state
-        input_series, prediction, target = predict_first_batch_for_state(server.model, oracle_state, test_loader, device)
-        tracker.log_prediction_plot("prediction/federated/test_oracle", input_series, prediction, target, step=final_test_step, title="federated test oracle prediction", scaler=getattr(test_loader, "scaler", None))
+        _log_prediction_views(
+            tracker,
+            "prediction/federated/test_oracle",
+            "federated test oracle prediction",
+            server.model,
+            test_loader,
+            device,
+            step=final_test_step,
+            client_ids=client_ids,
+            state=oracle_state,
+        )
     except Exception as exc:
         logger.debug("Skip federated prediction plot: {}", exc)
     attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)

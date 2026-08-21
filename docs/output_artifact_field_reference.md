@@ -552,18 +552,30 @@ gRPC additionally logs:
 Prediction plots:
 - `prediction/centralized/val`
 - `prediction/centralized/test`
+- `prediction/centralized/val/client/<client_id>`
+- `prediction/centralized/test/client/<client_id>`
 - `prediction/federated/val_protocol`
 - `prediction/federated/val_oracle`
 - `prediction/federated/test_protocol`
 - `prediction/federated/test_oracle`
+- `prediction/federated/val_protocol/client/<client_id>`
+- `prediction/federated/val_oracle/client/<client_id>`
+- `prediction/federated/test_protocol/client/<client_id>`
+- `prediction/federated/test_oracle/client/<client_id>`
 - `prediction/grpc/val_protocol`
 - `prediction/grpc/val_oracle`
 - `prediction/grpc/test_protocol`
 - `prediction/grpc/test_oracle`
+- `prediction/grpc/val_protocol/client/<client_id>`
+- `prediction/grpc/val_oracle/client/<client_id>`
+- `prediction/grpc/test_protocol/client/<client_id>`
+- `prediction/grpc/test_oracle/client/<client_id>`
 
 Attack reconstructions:
 - `attack/DLG/reconstruction`
 - `attack/iDLG/reconstruction`
+- `attack/client/<client_id>/DLG/reconstruction`
+- `attack/client/<client_id>/iDLG/reconstruction`
 
 ## 7. Notes
 

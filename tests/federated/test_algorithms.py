@@ -1568,9 +1568,17 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
 class _TrackerStub:
     def __init__(self):
         self.logs = []
+        self.prediction_logs = []
+        self.attack_images = []
 
     def log(self, data, step=None):
         self.logs.append((step, data))
+
+    def log_prediction_plot(self, key, input_series, prediction, target, step=None, title=None, scaler=None):
+        self.prediction_logs.append((key, step, title, scaler))
+
+    def log_attack_reconstruction(self, key, result, step=None):
+        self.attack_images.append((key, step, getattr(result, "client_id", None), getattr(result, "name", None)))
 
 
 def _attack_result_stub(name: str, mse: float = 0.5, client_id: str = "Nd2O3"):
@@ -1599,7 +1607,7 @@ def test_async_attack_manager_preserves_sync_mode(monkeypatch):
             time_seconds=0.1,
             clients_this_round=task.clients_this_round,
             samples_per_client=task.samples_per_client,
-            attacks=[_attack_result_stub("DLG")],
+            attacks=[_attack_result_stub("DLG", client_id="Nd2O3")],
         )
 
     monkeypatch.setattr(algorithms_module, "_execute_attack_round_task", fake_execute)
@@ -1610,6 +1618,8 @@ def test_async_attack_manager_preserves_sync_mode(monkeypatch):
     assert manager.executor is None
     assert len(manager.attack_results) == 1
     assert tracker.logs[0][0] == 0
+    assert ("attack/DLG/reconstruction", 0, "Nd2O3", "DLG") in tracker.attack_images
+    assert ("attack/client/Nd2O3/DLG/reconstruction", 0, "Nd2O3", "DLG") in tracker.attack_images
 
 
 def test_async_attack_manager_applies_pending_round_backpressure(monkeypatch):
@@ -1685,6 +1695,33 @@ def test_round_attack_payload_includes_explicit_round_index():
     assert payload["attack/round_index"] == 3.0
     assert payload["attack/client/Nd2O3/primary_metric_name"] == "reconstruction_mse"
     assert payload["attack/client/Nd2O3/DLG/mse"] == 0.4
+
+
+def test_log_prediction_views_adds_client_specific_keys(monkeypatch):
+    tracker = _TrackerStub()
+    loader_a = SimpleNamespace(scaler="scale_a")
+    loader_b = SimpleNamespace(scaler="scale_b")
+    merged_loader = SimpleNamespace(loaders=[loader_a, loader_b], scaler="scale_merged")
+    sample = (torch.zeros(1, 2, 1), torch.zeros(1, 1, 1), torch.zeros(1, 1, 1))
+
+    monkeypatch.setattr(algorithms_module, "_predict_for_logging", lambda model, loader, device, state=None: sample)
+
+    algorithms_module._log_prediction_views(
+        tracker,
+        "prediction/federated/val_protocol",
+        "federated val protocol prediction",
+        model=None,
+        loader=merged_loader,
+        device=torch.device("cpu"),
+        step=5,
+        client_ids=["Nd2O3", "CeO2"],
+        state=OrderedDict(),
+    )
+
+    keys = [item[0] for item in tracker.prediction_logs]
+    assert "prediction/federated/val_protocol" in keys
+    assert "prediction/federated/val_protocol/client/Nd2O3" in keys
+    assert "prediction/federated/val_protocol/client/CeO2" in keys
 
 
 class _DummyLoader:
