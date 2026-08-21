@@ -41,7 +41,7 @@ def test_one_round_federated_run(tmp_path):
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
     assert result["rounds"] == 1
-    assert result["last_upload_compression_ratio"] >= 6.0
+    assert result["last_parameter_upload_compression_ratio"] >= 6.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     assert metrics[0]["total_upload_bytes"] > 0
     assert metrics[0]["total_download_bytes"] > 0
@@ -135,7 +135,7 @@ def test_standard_fedavg_uses_dense_updates(tmp_path):
     config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["federated.algorithm=fedavg"])
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
-    assert result["last_upload_compression_ratio"] == 1.0
+    assert result["last_parameter_upload_compression_ratio"] == 1.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     assert all(client["aggregation_payload_kind"] == "dense_update" for client in metrics[0]["clients"])
     assert metrics[0]["total_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
@@ -677,7 +677,7 @@ def test_fedaware_uses_dense_updates_and_records_weights(tmp_path):
     result = run_federated(config)
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     clients = metrics[0]["clients"]
-    assert result["last_upload_compression_ratio"] == 1.0
+    assert result["last_parameter_upload_compression_ratio"] == 1.0
     assert all(client["aggregation_payload_kind"] == "dense_update" for client in clients)
     assert abs(sum(client["aggregation_weight"] for client in clients) - 1.0) < 1e-6
     assert all(client["aggregation_weight"] >= 0.0 for client in clients)
@@ -941,7 +941,7 @@ def test_randomk_fedavg_uses_unbiased_sparse_payloads(tmp_path):
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     clients = metrics[0]["clients"]
 
-    assert result["last_upload_compression_ratio"] > 1.0
+    assert result["last_parameter_upload_compression_ratio"] > 1.0
     assert all(client["aggregation_payload_kind"] == "randomk_update" for client in clients)
     assert all(client["compressor"] == "randomk_unbiased" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
@@ -961,7 +961,7 @@ def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    assert result["last_upload_compression_ratio"] >= 6.0
+    assert result["last_parameter_upload_compression_ratio"] >= 6.0
     assert all(client["aggregation_payload_kind"] == "soteriafl_randomk_dp_update" for client in metrics[0]["clients"])
     assert all(client["compressor"] == "randomk_unbiased" for client in metrics[0]["clients"])
     assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])
@@ -982,7 +982,7 @@ def test_sign_fedavg_uses_sign_quantized_dense_updates(tmp_path):
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     clients = metrics[0]["clients"]
 
-    assert result["last_upload_compression_ratio"] > 2.0
+    assert result["last_parameter_upload_compression_ratio"] > 2.0
     assert all(client["aggregation_payload_kind"] == "sign_update" for client in clients)
     assert all(client["compressor"] == "sign_mean_abs" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
@@ -1005,8 +1005,8 @@ def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     clients = metrics[0]["clients"]
 
-    assert result["last_upload_compression_ratio"] > 1.5
-    assert result["last_total_communication_ratio"] > 1.9
+    assert result["last_parameter_upload_compression_ratio"] > 1.5
+    assert result["last_parameter_total_communication_ratio"] > 1.9
     assert all(client["aggregation_payload_kind"] == "quantized_update" for client in clients)
     assert all(client["compressor"] == "float16_quantized_dense" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
@@ -1031,7 +1031,7 @@ def test_qsgd_fedavg_uses_stochastic_multilevel_quantization(tmp_path):
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     clients = metrics[0]["clients"]
 
-    assert result["last_upload_compression_ratio"] > 1.5
+    assert result["last_parameter_upload_compression_ratio"] > 1.5
     assert all(client["aggregation_payload_kind"] == "qsgd_update" for client in clients)
     assert all(client["compressor"] == "qsgd_31_levels" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
@@ -1077,8 +1077,8 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
     clients = metrics[0]["clients"]
 
     assert (tmp_path / "ega_codec.pt").exists()
-    assert result["last_upload_compression_ratio"] > 1.0
-    assert result["last_total_communication_ratio"] > 1.0
+    assert result["last_parameter_upload_compression_ratio"] > 1.0
+    assert result["last_parameter_total_communication_ratio"] > 1.0
     assert result["best_val_mse"] == result["best_val_mse"]
     assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
@@ -1298,8 +1298,8 @@ def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     clients = metrics[0]["clients"]
 
-    assert result["last_upload_compression_ratio"] > 3.0
-    assert result["last_total_communication_ratio"] > 3.0
+    assert result["last_parameter_upload_compression_ratio"] > 3.0
+    assert result["last_parameter_total_communication_ratio"] > 3.0
     assert all(client["compressor"] == "int8_quantized_dense" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
     assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
@@ -1469,7 +1469,7 @@ def test_dp_topk_uses_sparse_dp_topk_payloads(tmp_path):
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    assert result["last_upload_compression_ratio"] >= 6.0
+    assert result["last_parameter_upload_compression_ratio"] >= 6.0
     assert all(client["aggregation_payload_kind"] == "dp_topk_dp_update" for client in metrics[0]["clients"])
     assert all(client["compressor"] == "topk_dp" for client in metrics[0]["clients"])
     assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])
@@ -1624,14 +1624,14 @@ def _attack_result_stub(name: str, mse: float = 0.5, client_id: str = "Nd2O3"):
 def test_async_attack_manager_preserves_sync_mode(monkeypatch):
     tracker = _TrackerStub()
     config = {"attack": {"enabled": True, "async_enabled": False}}
-    task = AttackRoundTask(round_index=0, clients_this_round=1, samples_per_client=1, samples=[])
+    task = AttackRoundTask(round_index=0, clients_this_round=1, evaluations_per_client=1, samples=[])
 
     def fake_execute(config, task, attack_device):
         return AttackRoundResult(
             round_index=task.round_index,
             time_seconds=0.1,
             clients_this_round=task.clients_this_round,
-            samples_per_client=task.samples_per_client,
+            evaluations_per_client=task.evaluations_per_client,
             attacks=[_attack_result_stub("DLG", client_id="Nd2O3")],
         )
 
@@ -1695,9 +1695,9 @@ def test_async_attack_manager_applies_pending_round_backpressure(monkeypatch):
     monkeypatch.setattr(algorithms_module, "wait", fake_wait)
 
     manager = AsyncAttackManager(config, tracker)
-    manager.submit(AttackRoundTask(round_index=0, clients_this_round=1, samples_per_client=1, samples=[]))
+    manager.submit(AttackRoundTask(round_index=0, clients_this_round=1, evaluations_per_client=1, samples=[]))
     assert len(manager.pending_round_order) == 1
-    manager.submit(AttackRoundTask(round_index=1, clients_this_round=1, samples_per_client=1, samples=[]))
+    manager.submit(AttackRoundTask(round_index=1, clients_this_round=1, evaluations_per_client=1, samples=[]))
 
     assert tracker.logs[0][0] == 0
     assert manager.pending_round_order == [1]
@@ -1711,7 +1711,7 @@ def test_round_attack_payload_includes_explicit_round_index():
         round_index=3,
         time_seconds=0.2,
         clients_this_round=1,
-        samples_per_client=1,
+        evaluations_per_client=1,
         attacks=[_attack_result_stub("DLG", mse=0.4, client_id="Nd2O3")],
     )
 

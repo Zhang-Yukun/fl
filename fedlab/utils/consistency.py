@@ -24,7 +24,7 @@ def _should_ignore_key(key: str, ignore_transport: bool) -> bool:
         return True
     if not ignore_transport:
         return False
-    return "transport_" in key or key in {"last_total_communication_ratio", "total_transport_bytes", "total_transport_upload_bytes", "total_transport_download_bytes"}
+    return "transport_" in key or key in {"total_transport_bytes", "total_transport_upload_bytes", "total_transport_download_bytes"}
 
 
 def _sanitize_artifact(value: Any, ignore_transport: bool = False) -> Any:

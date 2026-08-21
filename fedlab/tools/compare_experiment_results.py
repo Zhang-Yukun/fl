@@ -101,7 +101,7 @@ def summarize_run(run_dir: Path) -> dict[str, Any]:
         'fedavg_reference_upload_bytes': fedavg_reference_upload_bytes,
         'fedavg_reference_total_bytes': fedavg_reference_total_bytes,
         'total_upload_ratio': fedavg_reference_upload_bytes / max(total_parameter_upload_bytes, 1),
-        'total_communication_ratio': fedavg_reference_total_bytes / max(total_parameter_bytes, 1),
+        'parameter_total_communication_ratio': fedavg_reference_total_bytes / max(total_parameter_bytes, 1),
         'transport_total_upload_ratio': fedavg_reference_upload_bytes / max(total_transport_upload_bytes, 1),
         'transport_total_communication_ratio': fedavg_reference_total_bytes / max(total_transport_bytes, 1),
         'test': {},
@@ -164,8 +164,8 @@ def compute_communication_gaps(baseline: dict[str, Any], candidate: dict[str, An
         'candidate_transport_reduction_percent': (1.0 - transport_ratio) * 100.0,
         'candidate_vs_baseline_actual_ratio': transport_ratio,
         'candidate_actual_reduction_percent': (1.0 - transport_ratio) * 100.0,
-        'baseline_total_communication_ratio': float(baseline['total_communication_ratio']),
-        'candidate_total_communication_ratio': float(candidate['total_communication_ratio']),
+        'baseline_parameter_total_communication_ratio': float(baseline['parameter_total_communication_ratio']),
+        'candidate_parameter_total_communication_ratio': float(candidate['parameter_total_communication_ratio']),
         'baseline_total_upload_ratio': float(baseline['total_upload_ratio']),
         'candidate_total_upload_ratio': float(candidate['total_upload_ratio']),
         'baseline_transport_total_communication_ratio': float(baseline['transport_total_communication_ratio']),
@@ -205,7 +205,7 @@ def print_run_summary(title: str, summary: dict[str, Any]) -> None:
     print(f'  total_transport_bytes: {summary["total_transport_bytes"]} ({format_bytes(summary["total_transport_bytes"])})')
     print(f'  fedavg_reference_total_bytes: {summary["fedavg_reference_total_bytes"]} ({format_bytes(summary["fedavg_reference_total_bytes"])})')
     print(f'  total_upload_ratio: {summary["total_upload_ratio"]:.6f}')
-    print(f'  total_communication_ratio: {summary["total_communication_ratio"]:.6f}')
+    print(f'  parameter_total_communication_ratio: {summary["parameter_total_communication_ratio"]:.6f}')
     print(f'  transport_total_upload_ratio: {summary["transport_total_upload_ratio"]:.6f}')
     print(f'  transport_total_communication_ratio: {summary["transport_total_communication_ratio"]:.6f}')
     test = summary.get('test') or {}
@@ -274,8 +274,8 @@ def main() -> None:
     print(f"  candidate_parameter_reduction_percent: {communication_gaps['candidate_parameter_reduction_percent']:.2f}%")
     print(f"  baseline_total_upload_ratio: {communication_gaps['baseline_total_upload_ratio']:.6f}")
     print(f"  candidate_total_upload_ratio: {communication_gaps['candidate_total_upload_ratio']:.6f}")
-    print(f"  baseline_total_communication_ratio: {communication_gaps['baseline_total_communication_ratio']:.6f}")
-    print(f"  candidate_total_communication_ratio: {communication_gaps['candidate_total_communication_ratio']:.6f}")
+    print(f"  baseline_parameter_total_communication_ratio: {communication_gaps['baseline_parameter_total_communication_ratio']:.6f}")
+    print(f"  candidate_parameter_total_communication_ratio: {communication_gaps['candidate_parameter_total_communication_ratio']:.6f}")
     print(f"  candidate_vs_baseline_transport_ratio: {communication_gaps['candidate_vs_baseline_transport_ratio']:.6f}")
     print(f"  candidate_transport_reduction_percent: {communication_gaps['candidate_transport_reduction_percent']:.2f}%")
     print(f"  baseline_transport_total_upload_ratio: {communication_gaps['baseline_transport_total_upload_ratio']:.6f}")

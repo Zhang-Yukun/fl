@@ -195,7 +195,7 @@ def test_grpc_coordinator_aggregates_one_round_and_saves_summary(tmp_path):
     assert metrics[0]["total_transport_upload_bytes"] >= metrics[0]["total_parameter_upload_bytes"]
     assert summary["transport"] == "grpc"
     assert summary["rounds"] == 1
-    assert summary["last_upload_compression_ratio"] == 1.0
+    assert summary["last_parameter_upload_compression_ratio"] == 1.0
     assert summary["total_parameter_bytes"] == metrics[0]["total_parameter_bytes"]
     assert summary["total_transport_bytes"] == metrics[0]["total_transport_bytes"]
 
@@ -369,7 +369,7 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
             round_index=task.round_index,
             time_seconds=0.0,
             clients_this_round=task.clients_this_round,
-            samples_per_client=task.samples_per_client,
+            evaluations_per_client=task.evaluations_per_client,
             attacks=[attacks_module.AttackResult(name="DLG", mse=1.0, psnr=0.0, ssim=0.0, iterations=1, time_seconds=0.0, success=False, success_threshold=0.03, gradient_mse=0.0, target_type="update_payload")],
         ),
     )

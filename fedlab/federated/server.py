@@ -118,9 +118,6 @@ class RoundRecord:
     fedavg_reference_total_bytes: int
     parameter_upload_compression_ratio: float
     parameter_total_communication_ratio: float
-    upload_compression_ratio: float
-    total_communication_ratio: float
-    communication_ratio: float
     transport_upload_compression_ratio: float
     transport_total_communication_ratio: float
     privacy_accountant: str | None = None
@@ -481,9 +478,6 @@ class FederatedServer:
             fedavg_reference_total_bytes=fedavg_reference_total_bytes,
             parameter_upload_compression_ratio=upload_ratio,
             parameter_total_communication_ratio=total_ratio,
-            upload_compression_ratio=upload_ratio,
-            total_communication_ratio=total_ratio,
-            communication_ratio=upload_ratio,
             transport_upload_compression_ratio=transport_upload_ratio,
             transport_total_communication_ratio=transport_total_ratio,
             privacy_accountant=None if self.last_privacy_step is None else "adaptive_clipped_rdp",
@@ -518,7 +512,7 @@ class FederatedServer:
         cumulative_transport_download_bytes = sum(item.total_transport_download_bytes for item in self.history)
         if not silent:
             logger.info(
-                "Round {} algorithm={} val_mse={:.6f} time={:.2f}s parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({}) upload_ratio={:.2f} total_ratio={:.2f}",
+                "Round {} algorithm={} val_mse={:.6f} time={:.2f}s parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({}) parameter_upload_ratio={:.2f} parameter_total_ratio={:.2f}",
                 round_index,
                 record.algorithm,
                 record.val_mse,
@@ -531,8 +525,8 @@ class FederatedServer:
                 _format_num_bytes(record.total_transport_upload_bytes),
                 record.total_transport_download_bytes,
                 _format_num_bytes(record.total_transport_download_bytes),
-                record.upload_compression_ratio,
-                record.total_communication_ratio,
+                record.parameter_upload_compression_ratio,
+                record.parameter_total_communication_ratio,
             )
             if self.last_privacy_step is not None:
                 logger.info(
