@@ -1054,6 +1054,57 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
     assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
 
 
+def test_ega_fedavg_supports_predictive_model_downloads(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=ega_fedavg",
+            "federated.rounds=1",
+            "federated.quantization_seed=2026",
+            "transport.upload_mode=update",
+            "transport.download_mode=model",
+            "evaluation.mode=protocol",
+            "attack.enabled=false",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+    config["ega"] = {
+        "artifact_path": str(tmp_path / "ega_codec.pt"),
+        "block_size": 8,
+        "encoded_dim": 4,
+        "hidden_dim": 16,
+        "residual_blocks": 1,
+        "quantization_level": 16,
+        "normalization": 2e-4,
+        "initial_normalization": 2e-4,
+        "min_normalization": 1e-6,
+        "normalization_strategy": "reported_client_max_abs",
+        "encoded_dtype": "int8",
+        "download_method": "ega",
+        "download_predictive_coding": True,
+        "download_dtype": "float32",
+        "download_encoded_dtype": "int8",
+        "download_trainable_only": True,
+        "error_feedback": True,
+        "pretrain": {
+            "device": "cpu",
+            "epochs": 2,
+            "batch_size": 16,
+            "lr": 1e-3,
+            "train_groups": 64,
+            "val_groups": 16,
+            "seed": 2026,
+        },
+    }
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    clients = metrics[0]["clients"]
+
+    assert result["best_val_mse"] == result["best_val_mse"]
+    assert all(client["download_bytes"] <= client["dense_download_reference_bytes"] for client in clients)
+    assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
+
+
 def test_ega_protocol_aggregation_uses_client_visible_base(monkeypatch):
     method = EGAFedAvgMethod()
     server = SimpleNamespace(

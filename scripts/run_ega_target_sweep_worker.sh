@@ -26,6 +26,8 @@ run_case() {
     --override "runtime.num_threads=1" \
     --override "runtime.num_interop_threads=1" \
     --override "tracking.enabled=false" \
+    --override "attack.enabled=false" \
+    --override "evaluation.mode=protocol" \
     --override "federated.rounds=500" \
     --override "training.patience=50" \
     --override "training.min_delta=0.0" \
@@ -37,12 +39,9 @@ import json, os
 base = json.load(open(os.environ['BASELINE_SUMMARY'], 'r', encoding='utf-8'))
 cand = json.load(open(os.environ['CANDIDATE_SUMMARY'], 'r', encoding='utf-8'))
 base_mse = float(base['test']['mse'])
-base_attack = float(base['attack_overall_avg_primary_metric'])
 base_comm = float(base['total_parameter_bytes'])
 cand_test = float(cand['test']['mse'])
 cand_protocol = float(cand.get('protocol_test', {}).get('mse', cand_test))
-cand_oracle = float(cand.get('oracle_test', {}).get('mse', cand_test))
-cand_attack = float(cand['attack_overall_avg_primary_metric'])
 cand_comm = float(cand['total_parameter_bytes'])
 print({
     'candidate': os.path.basename(os.path.dirname(os.environ['CANDIDATE_SUMMARY'])),
@@ -51,8 +50,6 @@ print({
     'comm_target_max': 1/8,
     'test_delta_pct': (cand_test - base_mse) / base_mse * 100.0,
     'protocol_delta_pct': (cand_protocol - base_mse) / base_mse * 100.0,
-    'oracle_delta_pct': (cand_oracle - base_mse) / base_mse * 100.0,
-    'attack_gain': cand_attack - base_attack,
 })
 PY
 }
@@ -67,6 +64,7 @@ common_overrides=(
   --override ega.download_trainable_only=true
   --override ega.download_quantization_level=127
   --override ega.download_min_normalization=1e-6
+  --override ega.download_predictive_coding=true
   --override ega.normalization_strategy=ema_reported_client_max_abs
   --override ega.normalization_ema=0.9
   --override ega.quantization_level=127
@@ -76,55 +74,53 @@ common_overrides=(
 )
 
 if [[ "${WORKER_KIND}" == "gpu0" ]]; then
-  run_case ega_ed160_dm_ega_q127 \
+  run_case ega_ed160_dm_ega_pc_q127 \
     "${common_overrides[@]}" \
-    --override ega.artifact_path=artifacts/ega/ega_ed160_dm_ega_q127.pt \
+    --override ega.artifact_path=artifacts/ega/ega_ed160_dm_ega_pc_q127.pt \
     --override ega.encoded_dim=160 \
     --override ega.hidden_dim=1024 \
     --override ega.residual_blocks=2 \
     --override ega.pretrain.device=${RUNTIME_DEVICE}
 
-  run_case ega_ed128_dm_ega_q127 \
+  run_case ega_ed128_dm_ega_pc_q127 \
     "${common_overrides[@]}" \
-    --override ega.artifact_path=artifacts/ega/ega_ed128_dm_ega_q127.pt \
+    --override ega.artifact_path=artifacts/ega/ega_ed128_dm_ega_pc_q127.pt \
     --override ega.encoded_dim=128 \
     --override ega.hidden_dim=1024 \
     --override ega.residual_blocks=2 \
     --override ega.pretrain.device=${RUNTIME_DEVICE}
 
-  run_case ega_ed160_dm_ega_q127_noise3e4 \
+  run_case ega_ed112_dm_ega_pc_q127 \
     "${common_overrides[@]}" \
-    --override ega.artifact_path=artifacts/ega/ega_ed160_dm_ega_q127_noise3e4.pt \
-    --override ega.encoded_dim=160 \
+    --override ega.artifact_path=artifacts/ega/ega_ed112_dm_ega_pc_q127.pt \
+    --override ega.encoded_dim=112 \
     --override ega.hidden_dim=1024 \
     --override ega.residual_blocks=2 \
-    --override ega.encoded_noise_std=0.0003 \
     --override ega.pretrain.device=${RUNTIME_DEVICE}
 else
-  run_case ega_ed144_dm_ega_q127 \
+  run_case ega_ed144_dm_ega_pc_q127 \
     "${common_overrides[@]}" \
-    --override ega.artifact_path=artifacts/ega/ega_ed144_dm_ega_q127.pt \
+    --override ega.artifact_path=artifacts/ega/ega_ed144_dm_ega_pc_q127.pt \
     --override ega.encoded_dim=144 \
     --override ega.hidden_dim=1024 \
     --override ega.residual_blocks=2 \
     --override ega.pretrain.device=${RUNTIME_DEVICE}
 
-  run_case ega_ed160_dm_ega_q095 \
+  run_case ega_ed096_dm_ega_pc_q127 \
     "${common_overrides[@]}" \
-    --override ega.artifact_path=artifacts/ega/ega_ed160_dm_ega_q095.pt \
-    --override ega.encoded_dim=160 \
+    --override ega.artifact_path=artifacts/ega/ega_ed096_dm_ega_pc_q127.pt \
+    --override ega.encoded_dim=96 \
+    --override ega.hidden_dim=1024 \
+    --override ega.residual_blocks=2 \
+    --override ega.pretrain.device=${RUNTIME_DEVICE}
+
+  run_case ega_ed128_dm_ega_pc_q095 \
+    "${common_overrides[@]}" \
+    --override ega.artifact_path=artifacts/ega/ega_ed128_dm_ega_pc_q095.pt \
+    --override ega.encoded_dim=128 \
     --override ega.hidden_dim=1024 \
     --override ega.residual_blocks=2 \
     --override ega.quantization_level=95 \
     --override ega.download_quantization_level=95 \
-    --override ega.pretrain.device=${RUNTIME_DEVICE}
-
-  run_case ega_ed160_dm_ega_q127_ema08 \
-    "${common_overrides[@]}" \
-    --override ega.artifact_path=artifacts/ega/ega_ed160_dm_ega_q127_ema08.pt \
-    --override ega.encoded_dim=160 \
-    --override ega.hidden_dim=1024 \
-    --override ega.residual_blocks=2 \
-    --override ega.normalization_ema=0.8 \
     --override ega.pretrain.device=${RUNTIME_DEVICE}
 fi
