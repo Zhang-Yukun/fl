@@ -97,11 +97,11 @@ def _prepare_received_global_state(
         payload = encode_state_update(
             semantic_source,
             codec,
-            quantization_level=int(ega_cfg.get("quantization_level", 64)),
+            quantization_level=int(ega_cfg.get("download_quantization_level", ega_cfg.get("quantization_level", 64))),
             normalization=max(
                 float(ega_cfg.get("download_normalization", 0.0)),
-                _max_abs_state(payload_source),
-                float(ega_cfg.get("min_normalization", 1e-6)),
+                _max_abs_state(semantic_source),
+                float(ega_cfg.get("download_min_normalization", ega_cfg.get("min_normalization", 1e-6))),
             ),
             block_size=int(ega_cfg.get("block_size", 256)),
             contribution_scale=1.0,
