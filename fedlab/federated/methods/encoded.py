@@ -31,6 +31,12 @@ def _merge_state(base_state, override_state):
     return merged
 
 
+def _zero_state_like(state):
+    """Return a zero-valued state dict with the same structure."""
+
+    return type(state)((name, torch.zeros_like(tensor)) for name, tensor in state.items())
+
+
 def _max_abs_state(state) -> float:
     """Return the maximum absolute value over one serialized state."""
 
@@ -79,21 +85,26 @@ def _prepare_received_global_state(
     if download_dtype in {"none", "disabled"}:
         download_dtype = "float32"
     trainable_only = bool(ega_cfg.get("download_trainable_only", False))
+    predictive_coding = bool(ega_cfg.get("download_predictive_coding", False))
     payload_source = global_state
     if trainable_only:
         payload_source = type(global_state)((name, global_state[name]) for name in trainable_keys)
-    base_payload_source = payload_source
     if download_mode == "update":
         reference_base_state = base_state if base_state is not None else global_state
-        base_payload_source = reference_base_state
-        if trainable_only:
-            base_payload_source = type(reference_base_state)((name, reference_base_state[name]) for name in trainable_keys)
+    elif predictive_coding:
+        reference_base_state = base_state if base_state is not None else _zero_state_like(global_state)
+    else:
+        reference_base_state = global_state
+    base_payload_source = reference_base_state
+    if trainable_only:
+        base_payload_source = type(reference_base_state)((name, reference_base_state[name]) for name in payload_source.keys())
+    use_delta_semantics = download_mode == "update" or predictive_coding
+    semantic_source = subtract_state(payload_source, base_payload_source) if use_delta_semantics else payload_source
     download_method = str(ega_cfg.get("download_method", "dense")).lower()
     generator = _quantization_generator(config, round_index, client_id)
     if download_method in {"ega", "encoded", "ega_encoded"}:
         if codec is None:
             raise RuntimeError("EGA codec is required for encoded download reconstruction")
-        semantic_source = subtract_state(payload_source, base_payload_source) if download_mode == "update" else payload_source
         payload = encode_state_update(
             semantic_source,
             codec,
@@ -111,11 +122,10 @@ def _prepare_received_global_state(
             encoded_noise_std=0.0,
         )
         reconstructed_payload = decode_mean_encoded_payload([payload], codec)
-        received_state = add_update(base_payload_source, reconstructed_payload) if download_mode == "update" else reconstructed_payload
+        received_state = add_update(base_payload_source, reconstructed_payload) if use_delta_semantics else reconstructed_payload
         if trainable_only:
             received_state = _merge_state(global_state, received_state)
         return _payload_accounting_state(payload), received_state
-    semantic_source = subtract_state(payload_source, base_payload_source) if download_mode == "update" else payload_source
     download_state = quantize_state_update(
         semantic_source,
         dtype=download_dtype,
@@ -123,7 +133,7 @@ def _prepare_received_global_state(
         generator=generator,
     )
     reconstructed_payload = dequantize_state_update(download_state)
-    received_state = add_update(base_payload_source, reconstructed_payload) if download_mode == "update" else reconstructed_payload
+    received_state = add_update(base_payload_source, reconstructed_payload) if use_delta_semantics else reconstructed_payload
     if trainable_only:
         received_state = _merge_state(global_state, received_state)
     return download_state, received_state
@@ -169,6 +179,7 @@ class EGAFedAvgMethod(FederatedMethod):
         template = build_model(server.config)
         server.ega_trainable_keys = tuple(serialize_trainable_model(template).keys())
         server.ega_normalization = float(ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)))
+        server.ega_received_global_states = {}
 
     def build_round_context(self, server: Any) -> dict[str, Any]:
         """Broadcast the current EGA normalization factor to clients."""
@@ -177,11 +188,20 @@ class EGAFedAvgMethod(FederatedMethod):
             return {}
         return {"ega_normalization": float(server.ega_normalization)}
 
+    def sync_server_client_state(self, *, server: Any, clients: list[Any]) -> None:
+        """Mirror the latest client-visible models onto the server for exact protocol reconstruction."""
+
+        server.ega_received_global_states = {
+            client.client_id: client.cached_received_global_state
+            for client in clients
+            if getattr(client, "cached_received_global_state", None) is not None
+        }
+
     def prepare_client_state(self, *, global_state, client, round_index: int, round_context: dict[str, Any]):
         """Compress the downloaded global state before local training."""
 
         download_mode = resolve_download_mode(client.config)
-        download_base_state = client.cached_received_global_state if client.cached_received_global_state is not None else global_state
+        download_base_state = client.cached_received_global_state
         return _prepare_received_global_state(
             config=client.config,
             global_state=global_state,
@@ -204,6 +224,9 @@ class EGAFedAvgMethod(FederatedMethod):
     ):
         """Return the client-visible EGA-compressed global state used as this round's base."""
 
+        cached_state = getattr(server, "ega_received_global_states", {}).get(client_id)
+        if cached_state is not None:
+            return cached_state
         return _prepare_received_global_state(
             config=server.config,
             global_state=global_state,
@@ -212,7 +235,7 @@ class EGAFedAvgMethod(FederatedMethod):
             round_index=round_index,
             client_id=client_id,
             download_mode=resolve_download_mode(server.config),
-            base_state=global_state,
+            base_state=None,
         )[1]
 
     def client_update(

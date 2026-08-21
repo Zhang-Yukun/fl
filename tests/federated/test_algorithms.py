@@ -1131,6 +1131,72 @@ def test_ega_update_download_uses_delta_normalization_and_quantization(monkeypat
     assert torch.allclose(received_state["running_mean"], torch.tensor([3.0]))
 
 
+def test_ega_model_download_predictive_coding_uses_previous_received_state(monkeypatch):
+    captured = {}
+
+    def _fake_encode(update, codec, **kwargs):
+        del codec
+        captured["normalization"] = kwargs["normalization"]
+        captured["quantization_level"] = kwargs["quantization_level"]
+        captured["update"] = OrderedDict((name, tensor.clone()) for name, tensor in update.items())
+        return SimpleNamespace(encoded_blocks=torch.zeros((1, 1), dtype=torch.float32), encoded_scale=None)
+
+    monkeypatch.setattr(encoded_methods, "encode_state_update", _fake_encode)
+    monkeypatch.setattr(
+        encoded_methods,
+        "decode_mean_encoded_payload",
+        lambda payloads, codec: OrderedDict((name, tensor.clone()) for name, tensor in captured["update"].items()),
+    )
+
+    global_state = OrderedDict([("weight", torch.tensor([101.0])), ("running_mean", torch.tensor([3.0]))])
+    base_state = OrderedDict([("weight", torch.tensor([100.0])), ("running_mean", torch.tensor([3.0]))])
+    download_state, received_state = encoded_methods._prepare_received_global_state(
+        config={
+            "ega": {
+                "download_method": "ega",
+                "download_trainable_only": True,
+                "download_predictive_coding": True,
+                "download_quantization_level": 17,
+                "download_min_normalization": 1e-6,
+            },
+            "federated": {"quantization_seed": 2026},
+        },
+        global_state=global_state,
+        codec=object(),
+        trainable_keys=("weight",),
+        round_index=0,
+        client_id="c1",
+        download_mode="model",
+        base_state=base_state,
+    )
+
+    assert "__ega_blocks__" in download_state
+    assert captured["quantization_level"] == 17
+    assert captured["normalization"] == pytest.approx(1.0)
+    assert torch.allclose(captured["update"]["weight"], torch.tensor([1.0]))
+    assert torch.allclose(received_state["weight"], torch.tensor([101.0]))
+    assert torch.allclose(received_state["running_mean"], torch.tensor([3.0]))
+
+
+def test_ega_sync_server_client_state_tracks_received_models():
+    method = EGAFedAvgMethod()
+    server = SimpleNamespace(ega_received_global_states={})
+    synced_state = OrderedDict([("weight", torch.tensor([2.0]))])
+    clients = [SimpleNamespace(client_id="c1", cached_received_global_state=synced_state)]
+
+    method.sync_server_client_state(server=server, clients=clients)
+
+    reconstructed = method.reconstruct_received_global_state(
+        server=server,
+        global_state=OrderedDict([("weight", torch.tensor([5.0]))]),
+        client_id="c1",
+        round_index=3,
+        round_context={},
+    )
+
+    assert reconstructed is synced_state
+
+
 def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",

@@ -1124,6 +1124,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             ]
         else:
             results = [client.train(round_base_state, compressed=compressed, round_index=round_index) for client in clients]
+        server.method.sync_server_client_state(server=server, clients=clients)
         if compressed:
             aggregation_weights = server.aggregate_sparse(results, round_base_state=round_base_state, round_index=round_index, round_context=round_context)
         else:

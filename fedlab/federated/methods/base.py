@@ -42,6 +42,9 @@ class FederatedMethod(ABC):
 
         return {}
 
+    def sync_server_client_state(self, *, server: Any, clients: list[Any]) -> None:
+        """Copy any client-side per-round state the server needs for exact protocol reconstruction."""
+
     def uses_custom_download_transport(self) -> bool:
         """Return whether the method owns download-payload construction itself."""
 
