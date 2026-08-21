@@ -699,8 +699,8 @@ def test_saved_config_contains_materialized_runtime_defaults(tmp_path):
     assert saved["transport"]["upload_mode"] == "update"
     assert saved["transport"]["download_mode"] == "model"
     assert saved["attack"]["model_mode"] == "train"
-    assert saved["attack"]["reference_metric"] == "auto"
-    assert saved["attack"]["report_metrics"] == "auto"
+    assert saved["attack"]["reference_metric"] == "nearest_client_train_mse"
+    assert saved["attack"]["report_metrics"] == ["nearest_client_train_mse"]
 
 
 def test_config_artifact_formats_are_configurable(tmp_path):

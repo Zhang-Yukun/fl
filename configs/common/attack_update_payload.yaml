@@ -1,8 +1,8 @@
 attack:
   target_type: update_payload
   enabled: true
-  reference_metric: auto
-  report_metrics: auto
+  reference_metric: nearest_client_train_mse
+  report_metrics: [nearest_client_train_mse]
   frequency_rounds: 5
   max_samples: 1
   steps: 500

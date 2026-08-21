@@ -47,8 +47,8 @@ transport:
 attack:
   target_type: update_payload
   enabled: true
-  reference_metric: auto
-  report_metrics: auto
+  reference_metric: nearest_client_train_mse
+  report_metrics: [nearest_client_train_mse]
   steps: 20
   lr: 0.1
   success_mse_threshold: 0.5
