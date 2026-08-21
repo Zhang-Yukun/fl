@@ -18,3 +18,9 @@ PROJECT_NAME="rare-earth-fl-oracle-attackfreq5-v1" \
 GPU_ID="${GPU_ID:-1}" \
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}" \
 bash scripts/run_oracle_attackfreq5_9algo_4mode_suite.sh
+
+BASE_OUTPUT="${BASE_OUTPUT_ROOT}/attackfreq5_maxsamples8" \
+PROJECT_NAME="rare-earth-fl-oracle-attackfreq5-maxsamples8-v1" \
+GPU_ID="${GPU_ID:-1}" \
+RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}" \
+bash scripts/run_oracle_attackfreq5_maxsamples8_9algo_4mode_suite.sh
