@@ -69,3 +69,18 @@ def test_deprecated_centralized_epochs_key_is_rejected():
 def test_deprecated_training_epochs_key_is_rejected():
     with pytest.raises(ValueError, match=r"training\.epochs"):
         load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["training.epochs=3"])
+
+
+def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        ["tracking.enabled=false"],
+    )
+    assert config["evaluation"]["mode"] == "protocol"
+    assert config["evaluation"]["metrics"] == ["mse", "mae", "mape"]
+    assert config["transport"]["upload_mode"] == "update"
+    assert config["transport"]["download_mode"] == "model"
+    assert config["attack"]["model_mode"] == "train"
+    assert config["attack"]["reference_metric"] == "auto"
+    assert config["grpc"]["max_message_mb"] == 256.0
+    assert config["artifacts"]["config_formats"] == ["yaml"]

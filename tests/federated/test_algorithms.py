@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import yaml
 
 import fedlab.federated.algorithms as algorithms_module
 import fedlab.federated.client as client_module
@@ -680,6 +681,25 @@ def test_fedaware_uses_dense_updates_and_records_weights(tmp_path):
     assert all(client["aggregation_payload_kind"] == "dense_update" for client in clients)
     assert abs(sum(client["aggregation_weight"] for client in clients) - 1.0) < 1e-6
     assert all(client["aggregation_weight"] >= 0.0 for client in clients)
+
+
+def test_saved_config_contains_materialized_runtime_defaults(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+        ],
+    )
+    run_federated(config)
+    saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    assert saved["evaluation"]["mode"] == "protocol"
+    assert saved["transport"]["upload_mode"] == "update"
+    assert saved["transport"]["download_mode"] == "model"
+    assert saved["attack"]["model_mode"] == "train"
+    assert saved["attack"]["reference_metric"] == "auto"
 
 
 def test_config_artifact_formats_are_configurable(tmp_path):

@@ -7,6 +7,89 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+_RUNTIME_DEFAULTS = {
+    "experiment": {
+        "mode": "federated",
+    },
+    "runtime": {
+        "device": "cpu",
+        "log_level": "INFO",
+        "deterministic": True,
+    },
+    "task": {
+        "type": "forecasting",
+    },
+    "training": {
+        "lr": 1e-3,
+        "patience": 5,
+        "min_delta": 0.0,
+        "loss": "mse",
+        "optimizer": "adam",
+        "optimizer_eps": 1e-8,
+        "weight_decay": 0.0,
+        "momentum": 0.0,
+        "nesterov": False,
+    },
+    "evaluation": {
+        "mode": "protocol",
+        "metrics": ["mse", "mae", "mape"],
+    },
+    "centralized": {
+        "rounds": 10,
+    },
+    "federated": {
+        "algorithm": "fedavg",
+        "rounds": 20,
+        "local_epochs": 1,
+    },
+    "transport": {
+        "upload_mode": "update",
+        "download_mode": "model",
+    },
+    "attack": {
+        "enabled": True,
+        "target_type": "update_payload",
+        "reference_metric": "auto",
+        "steps": 300,
+        "lr": 0.1,
+        "optimizer": "adam",
+        "restarts": 1,
+        "lbfgs_history_size": 20,
+        "success_mse_threshold": 0.5,
+        "success_rate_threshold": 0.03,
+        "data_range": 1.0,
+        "client_selection": "all",
+        "clients_per_round": 1,
+        "frequency_rounds": 1,
+        "sample_count": 1,
+        "max_samples": 1,
+        "model_mode": "train",
+        "local_optimizer": "adam",
+        "local_lr": 1e-3,
+        "local_optimizer_eps": 1e-8,
+        "async_enabled": False,
+        "async_workers": 1,
+        "async_max_pending_rounds": 5,
+        "device": "same",
+    },
+    "tracking": {
+        "enabled": True,
+        "offline": True,
+        "project": "federated-rare-earth",
+    },
+    "grpc": {
+        "address": "0.0.0.0:50051",
+        "server_address": "127.0.0.1:50051",
+        "poll_seconds": 1.0,
+        "max_message_mb": 256.0,
+    },
+    "artifacts": {
+        "config_formats": ["yaml"],
+        "save_every_rounds": 0,
+    },
+}
+
+
 _COMMON_FEDERATED_KEYS = {"algorithm", "rounds", "local_epochs", "local_steps"}
 _ALGORITHM_FEDERATED_KEYS = {
     "compressed_fedavg": {"topk_fraction"},
@@ -103,6 +186,12 @@ def apply_overrides(config: dict[str, Any], overrides: Iterable[str] | None) -> 
     return result
 
 
+def _materialize_runtime_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    """Merge runtime defaults so saved configs match actual effective behavior."""
+
+    return _deep_merge(_RUNTIME_DEFAULTS, config)
+
+
 def _validate_no_deprecated_schedule_keys(config: dict[str, Any]) -> None:
     """Reject deprecated schedule keys that were intentionally removed."""
 
@@ -150,6 +239,7 @@ def load_config(path: str | Path, overrides: Iterable[str] | None = None) -> dic
     path = Path(path).expanduser().resolve()
     config = _resolve_includes(_load_one(path), path.parent)
     config = apply_overrides(config, overrides)
+    config = _materialize_runtime_defaults(config)
     _validate_no_deprecated_schedule_keys(config)
     config = _sanitize_algorithm_config(config)
     logger.info("Loaded config from {}", path)
