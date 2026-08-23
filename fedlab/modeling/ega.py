@@ -406,6 +406,9 @@ def resolve_ega_artifact_path(config: dict[str, Any], num_clients: int) -> Path:
     configured = ega_cfg.get("artifact_path")
     if configured:
         return Path(configured)
+    output_dir = config.get("experiment", {}).get("output_dir")
+    if output_dir:
+        return Path(str(output_dir)) / "artifacts" / "ega" / "pretrained_codec.pt"
     experiment_name = str(config.get("experiment", {}).get("name", "ega"))
     return Path("artifacts") / "ega" / f"{experiment_name}_m{num_clients}_b{int(ega_cfg.get('block_size', 256))}_h{int(ega_cfg.get('encoded_dim', int(ega_cfg.get('block_size', 256))))}_s{int(ega_cfg.get('quantization_level', 64))}.pt"
 

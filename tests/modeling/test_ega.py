@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from pathlib import Path
 
 import pytest
 import torch
@@ -11,6 +12,7 @@ from fedlab.modeling.ega import (
     encode_state_update,
     pack_flat_blocks,
     pretrain_ega_codec,
+    resolve_ega_artifact_path,
     stochastic_quantize_block_vector,
 )
 
@@ -124,3 +126,14 @@ def test_encode_state_update_moves_blocks_to_codec_device():
     assert payload.encoded_blocks.device.type == "cpu"
     assert payload.encoded_blocks.shape[1] == codec.encoded_dim
     assert payload.encoded_blocks.dtype == torch.int8
+
+
+def test_resolve_ega_artifact_path_defaults_to_experiment_output_dir():
+    config = {
+        "experiment": {"output_dir": "outputs/demo_run", "name": "demo"},
+        "ega": {},
+    }
+
+    path = resolve_ega_artifact_path(config, num_clients=3)
+
+    assert path == Path("outputs/demo_run/artifacts/ega/pretrained_codec.pt")

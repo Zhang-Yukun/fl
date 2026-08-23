@@ -71,3 +71,67 @@ def test_formal_suite_script_exists_and_lists_all_requested_runs():
         "-m fedlab.entrypoints.client",
     ):
         assert marker in content
+
+
+def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
+    """The generic oracle suite should derive scenario behavior from env vars and keep EGA right after FedAvg."""
+
+    path = SCRIPT_DIR / "run_oracle_suite.sh"
+    assert path.exists()
+    content = path.read_text(encoding="utf-8")
+    fedavg_pos = content.index('"fedavg_${mode}_uupdate_dmodel_${RUN_TAG}"')
+    ega_pos = content.index('local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"')
+    topk_pos = content.index('"topk_${mode}_uupdate_dmodel_${RUN_TAG}"')
+    assert fedavg_pos < ega_pos < topk_pos
+    for marker in (
+        'RUN_TAG="${RUN_TAG:-oracle_attackfreq5}"',
+        'TRACKING_TAG="${TRACKING_TAG:-oracle-attackfreq5}"',
+        'ATTACK_ENABLED="${ATTACK_ENABLED:-true}"',
+        'ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-5}"',
+        'ATTACK_MAX_SAMPLES="${ATTACK_MAX_SAMPLES:-}"',
+        'LOSS_NAME="${LOSS_NAME:-mse}"',
+        'LOSS_TAG="${LOSS_TAG:-${LOSS_NAME}}"',
+        'attack.enabled=%s',
+        'attack.max_samples=%s',
+        'training.loss=%s',
+    ):
+        assert marker in content
+    assert 'ega.artifact_path' not in content
+    assert 'rm -f "${ega_artifact}"' not in content
+
+
+def test_oracle_gpu_wrappers_call_generic_suite_without_duplicate_attackfreq5_runs():
+    wrappers = (
+        "run_oracle_gpu0_batch.sh",
+        "run_oracle_gpu1_batch.sh",
+        "run_oracle_gpu0_fast.sh",
+        "run_oracle_gpu1_fast.sh",
+    )
+    for name in wrappers:
+        content = (SCRIPT_DIR / name).read_text(encoding="utf-8")
+        assert "run_oracle_suite.sh" in content
+        assert "_mae.sh" not in content
+        assert "LOSS_NAME=mse LOSS_TAG=mse" in content or "LOSS_NAME=mae LOSS_TAG=mae" in content
+
+    gpu0_batch = (SCRIPT_DIR / "run_oracle_gpu0_batch.sh").read_text(encoding="utf-8")
+    gpu1_batch = (SCRIPT_DIR / "run_oracle_gpu1_batch.sh").read_text(encoding="utf-8")
+    gpu0_fast = (SCRIPT_DIR / "run_oracle_gpu0_fast.sh").read_text(encoding="utf-8")
+    gpu1_fast = (SCRIPT_DIR / "run_oracle_gpu1_fast.sh").read_text(encoding="utf-8")
+
+    assert "RUN_TAG=oracle_attackfreq5 " not in gpu0_batch
+    assert "RUN_TAG=oracle_attackfreq5 " not in gpu1_batch
+    assert "RUN_TAG=oracle_attackfreq5 TRACKING_TAG=oracle-attackfreq5" in gpu0_fast
+    assert "RUN_TAG=oracle_attackfreq5 TRACKING_TAG=oracle-attackfreq5" in gpu1_fast
+
+    for removed_name in (
+        "run_oracle_attackfreq1_suite.sh",
+        "run_oracle_noattack_suite.sh",
+        "run_oracle_attackfreq5_1000r_pat100_suite.sh",
+        "run_oracle_attackfreq5_maxsamples8_suite.sh",
+        "run_oracle_attackfreq1_suite_mae.sh",
+        "run_oracle_noattack_suite_mae.sh",
+        "run_oracle_attackfreq5_suite_mae.sh",
+        "run_oracle_attackfreq5_1000r_pat100_suite_mae.sh",
+        "run_oracle_attackfreq5_maxsamples8_suite_mae.sh",
+    ):
+        assert not (SCRIPT_DIR / removed_name).exists()
