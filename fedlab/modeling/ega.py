@@ -455,10 +455,13 @@ def resolve_ega_artifact_path(config: dict[str, Any], num_clients: int) -> Path:
     """Resolve the checkpoint path used to persist the pretrained EGA codec."""
 
     ega_cfg = _ega_config(config)
+    output_dir = config.get("experiment", {}).get("output_dir")
     configured = ega_cfg.get("artifact_path")
     if configured:
-        return Path(configured)
-    output_dir = config.get("experiment", {}).get("output_dir")
+        configured_path = Path(str(configured))
+        if configured_path.is_absolute() or not output_dir:
+            return configured_path
+        return Path(str(output_dir)) / configured_path
     if output_dir:
         return Path(str(output_dir)) / "artifacts" / "ega" / "pretrained_codec.pt"
     experiment_name = str(config.get("experiment", {}).get("name", "ega"))
