@@ -191,6 +191,21 @@ def subtract_state(new: StateDict, old: StateDict) -> StateDict:
     return OrderedDict((name, new[name] - old[name]) for name in old.keys())
 
 
+def _cast_nonfloating_like(reference: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+    """Cast a computed tensor back to the dtype of a non-floating reference tensor.
+
+    Example:
+        BatchNorm ``num_batches_tracked`` should stay ``int64`` after averaging
+        and update application instead of silently drifting to ``float32``.
+    """
+
+    if reference.dtype == torch.bool:
+        return value != 0
+    if reference.dtype.is_floating_point or reference.dtype.is_complex:
+        return value.to(reference.dtype)
+    return torch.round(value).to(reference.dtype)
+
+
 def add_update(state: StateDict, update: StateDict, scale: float = 1.0) -> StateDict:
     """Apply an update to a state dict.
 
@@ -198,7 +213,16 @@ def add_update(state: StateDict, update: StateDict, scale: float = 1.0) -> State
         ``next_state = add_update(global_state, averaged_update)``.
     """
 
-    return OrderedDict((name, state[name] + update[name] * scale) for name in state.keys())
+    result = OrderedDict()
+    for name in state.keys():
+        base = state[name]
+        delta = update[name]
+        if base.dtype.is_floating_point or base.dtype.is_complex:
+            result[name] = base + delta.to(base.dtype) * scale
+            continue
+        computed = base.to(torch.float64) + delta.to(torch.float64) * scale
+        result[name] = _cast_nonfloating_like(base, computed)
+    return result
 
 
 def average_states(states: Iterable[StateDict], weights: Iterable[float] | None = None) -> StateDict:
@@ -218,7 +242,12 @@ def average_states(states: Iterable[StateDict], weights: Iterable[float] | None 
     weights = [w / total for w in weights]
     result = OrderedDict()
     for name in states[0].keys():
-        result[name] = sum(state[name] * weight for state, weight in zip(states, weights))
+        reference = states[0][name]
+        if reference.dtype.is_floating_point or reference.dtype.is_complex:
+            result[name] = sum(state[name].to(reference.dtype) * weight for state, weight in zip(states, weights))
+            continue
+        weighted = sum(state[name].to(torch.float64) * weight for state, weight in zip(states, weights))
+        result[name] = _cast_nonfloating_like(reference, weighted)
     return result
 
 

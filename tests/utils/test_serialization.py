@@ -2,6 +2,8 @@ import torch
 
 from fedlab.modeling.forecasting import build_model
 from fedlab.utils.serialization import (
+    add_update,
+    average_states,
     clip_state_update,
     compress_randomk,
     compress_topk,
@@ -133,3 +135,30 @@ def test_load_serialized_supports_partial_filtered_load():
 
     assert torch.allclose(reloaded.weight, source['weight'])
     assert torch.allclose(reloaded.bias, original_bias)
+
+
+def test_integer_buffers_keep_dtype_and_byte_width_through_aggregation():
+    model = torch.nn.BatchNorm1d(2)
+    global_state = serialize_model(model)
+    key = 'num_batches_tracked'
+    full_key = next(name for name in global_state.keys() if name.endswith(key))
+
+    local_state = {name: tensor.clone() for name, tensor in global_state.items()}
+    local_state[full_key] = local_state[full_key] + 1
+
+    update = subtract_state(local_state, global_state)
+    averaged = average_states([update, update, update], [1, 1, 1])
+    next_global = add_update(global_state, averaged)
+
+    assert global_state[full_key].dtype == torch.int64
+    assert update[full_key].dtype == torch.int64
+    assert next_global[full_key].dtype == torch.int64
+    assert state_num_bytes(global_state) == state_num_bytes(next_global)
+
+    reloaded = torch.nn.BatchNorm1d(2)
+    reloaded.load_state_dict(next_global, strict=False)
+    reloaded_state = serialize_model(reloaded)
+    next_update = subtract_state(reloaded_state, next_global)
+
+    assert next_update[full_key].dtype == torch.int64
+    assert state_num_bytes(next_update) == state_num_bytes(update)

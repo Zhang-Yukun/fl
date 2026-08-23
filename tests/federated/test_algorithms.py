@@ -144,6 +144,34 @@ def test_standard_fedavg_uses_dense_updates(tmp_path):
     assert 0.0 < metrics[0]["transport_upload_compression_ratio"] < 1.0
 
 
+def test_fedavg_dense_update_bytes_remain_exact_after_first_round(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "federated.algorithm=fedavg",
+            "federated.rounds=2",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+            "runtime.seed=2026",
+            "runtime.deterministic=true",
+            "data.shuffle_train=false",
+            f"experiment.output_dir={tmp_path}",
+        ],
+    )
+
+    result = run_federated(config)
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+
+    assert result["last_parameter_upload_compression_ratio"] == 1.0
+    assert len(metrics) == 2
+    for round_metrics in metrics:
+        assert round_metrics["total_parameter_upload_bytes"] == round_metrics["fedavg_reference_upload_bytes"]
+        assert round_metrics["parameter_upload_compression_ratio"] == 1.0
+        for client in round_metrics["clients"]:
+            assert client["parameter_upload_bytes"] == client["dense_upload_reference_bytes"]
+
+
 def test_fedavg_upload_model_mode_preserves_dense_aggregation_metrics(tmp_path):
     base_overrides = [
         "federated.algorithm=fedavg",
