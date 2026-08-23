@@ -399,6 +399,58 @@ def build_ega_model(config: dict[str, Any]) -> EgaAutoEncoder:
     )
 
 
+def ega_codec_spec(config: dict[str, Any], *, num_clients: int) -> dict[str, int]:
+    """Return the expected structural spec for one EGA codec."""
+
+    ega_cfg = _ega_config(config)
+    block_size = int(ega_cfg.get("block_size", 256))
+    encoded_dim = int(ega_cfg.get("encoded_dim", block_size))
+    hidden_dim = int(ega_cfg.get("hidden_dim", max(block_size, encoded_dim) * 2))
+    return {
+        "block_size": block_size,
+        "encoded_dim": encoded_dim,
+        "hidden_dim": hidden_dim,
+        "residual_blocks": int(ega_cfg.get("residual_blocks", 2)),
+        "quantization_level": int(ega_cfg.get("quantization_level", 64)),
+        "num_clients": int(num_clients),
+    }
+
+
+def export_ega_codec_payload(
+    codec: EgaAutoEncoder,
+    *,
+    config: dict[str, Any],
+    num_clients: int,
+) -> dict[str, Any]:
+    """Serialize one EGA codec for server-to-client bootstrap."""
+
+    state_dict = {name: tensor.detach().cpu().clone() for name, tensor in codec.state_dict().items()}
+    return {
+        "state_dict": state_dict,
+        "config": ega_codec_spec(config, num_clients=num_clients),
+    }
+
+
+def load_ega_codec_payload(
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    device: torch.device,
+    num_clients: int,
+) -> EgaAutoEncoder:
+    """Instantiate one EGA codec from a server bootstrap payload."""
+
+    checkpoint_spec = dict(payload.get("config", {}))
+    expected_spec = ega_codec_spec(config, num_clients=num_clients)
+    if any(checkpoint_spec.get(key) != value for key, value in expected_spec.items()):
+        raise RuntimeError("Server EGA codec payload does not match current client config")
+    codec = build_ega_model(config)
+    codec.load_state_dict(payload["state_dict"])
+    codec.to(device)
+    codec.eval()
+    return codec
+
+
 def resolve_ega_artifact_path(config: dict[str, Any], num_clients: int) -> Path:
     """Resolve the checkpoint path used to persist the pretrained EGA codec."""
 
@@ -567,16 +619,7 @@ def load_ega_codec(
     path = resolve_ega_artifact_path(config, num_clients)
     ega_cfg = _ega_config(config)
     block_size = int(ega_cfg.get("block_size", 256))
-    encoded_dim = int(ega_cfg.get("encoded_dim", block_size))
-    hidden_dim = int(ega_cfg.get("hidden_dim", max(block_size, encoded_dim) * 2))
-    expected_spec = {
-        "block_size": block_size,
-        "encoded_dim": encoded_dim,
-        "hidden_dim": hidden_dim,
-        "residual_blocks": int(ega_cfg.get("residual_blocks", 2)),
-        "quantization_level": int(ega_cfg.get("quantization_level", 64)),
-        "num_clients": int(num_clients),
-    }
+    expected_spec = ega_codec_spec(config, num_clients=num_clients)
     if not path.exists():
         if not allow_pretrain:
             raise FileNotFoundError(f"EGA codec artifact not found: {path}")

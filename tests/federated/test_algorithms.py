@@ -2054,7 +2054,9 @@ class _IdentityEgaCodec(torch.nn.Module):
         return encoded_blocks.to(torch.float32)
 
 
-def _run_manual_ega_rounds(config: dict, monkeypatch):
+def _run_manual_ega_rounds(config: dict, monkeypatch, load_calls=None):
+    config.setdefault("ega", {})["num_clients"] = 2
+
     def _build_toy_model(_config):
         return _TransportToyModel()
 
@@ -2069,7 +2071,14 @@ def _run_manual_ega_rounds(config: dict, monkeypatch):
         return 0.0
 
     def _fake_load_ega_codec(config, device, num_clients, allow_pretrain):
-        del device, num_clients, allow_pretrain
+        del device, num_clients
+        if load_calls is not None:
+            load_calls.append(bool(allow_pretrain))
+        block_size = int(config.get("ega", {}).get("block_size", 19))
+        return _IdentityEgaCodec(block_size=block_size)
+
+    def _fake_load_ega_codec_payload(config, payload, device, num_clients):
+        del payload, device, num_clients
         block_size = int(config.get("ega", {}).get("block_size", 19))
         return _IdentityEgaCodec(block_size=block_size)
 
@@ -2078,6 +2087,7 @@ def _run_manual_ega_rounds(config: dict, monkeypatch):
     monkeypatch.setattr(encoded_methods, "build_model", _build_toy_model)
     monkeypatch.setattr(client_module, "train_one_epoch", _fake_train_one_epoch)
     monkeypatch.setattr(encoded_methods, "load_ega_codec", _fake_load_ega_codec)
+    monkeypatch.setattr(encoded_methods, "load_ega_codec_payload", _fake_load_ega_codec_payload)
 
     train_loaders = {"c1": _ToyLoader(), "c2": _ToyLoader()}
     val_loader = _ToyLoader(length=1)
@@ -2122,12 +2132,52 @@ def _run_manual_ega_rounds(config: dict, monkeypatch):
         )
         rounds.append({
             "round_index": round_index,
+            "round_context": round_context,
             "prepared_states": prepared_states,
             "results": results,
             "aggregation_weights": aggregation_weights,
             "global_state": _clone_state_dict(server.global_state),
         })
     return rounds
+
+
+def test_ega_server_bootstraps_codec_once_via_round_context(tmp_path, monkeypatch):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            f"experiment.output_dir={tmp_path / 'ega_bootstrap'}",
+            "federated.algorithm=ega_fedavg",
+            "federated.rounds=3",
+            "federated.local_epochs=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+            "runtime.seed=2026",
+            "data.shuffle_train=false",
+            "training.optimizer=sgd",
+            "training.lr=0.1",
+            "transport.upload_mode=update",
+            "transport.download_mode=model",
+            "ega.block_size=19",
+            "ega.encoded_dim=19",
+            "ega.hidden_dim=19",
+            "ega.residual_blocks=0",
+            "ega.quantization_level=64",
+            "ega.encoded_dtype=float32",
+            "ega.download_method=ega",
+            "ega.download_dtype=float32",
+            "ega.error_feedback=false",
+            "ega.min_normalization=1e-6",
+        ],
+    )
+
+    load_calls = []
+    rounds = _run_manual_ega_rounds(config, monkeypatch, load_calls=load_calls)
+
+    assert load_calls == [True]
+    assert "ega_codec_payload" in rounds[0]["round_context"]
+    assert "state_dict" in rounds[0]["round_context"]["ega_codec_payload"]
+    assert all("ega_codec_payload" not in round_result["round_context"] for round_result in rounds[1:])
 
 
 @pytest.mark.parametrize("download_mode", ["model", "update"])
@@ -2235,19 +2285,34 @@ def test_single_node_ega_transport_counts_round_context_bytes(tmp_path, monkeypa
     )
 
     rounds = _run_manual_ega_rounds(config, monkeypatch)
-    _, download_state, _ = rounds[0]["prepared_states"][0]
+    _, first_download_state, _ = rounds[0]["prepared_states"][0]
+    _, second_download_state, _ = rounds[1]["prepared_states"][0]
     first_result = rounds[0]["results"][0]
-    without_context = estimate_download_transport_bytes(download_state, round_index=0, compressed=False, round_context={})
-    context_bytes = auxiliary_payload_num_bytes({"ega_normalization": 1.0})
-    context_parameters = auxiliary_payload_num_parameters({"ega_normalization": 1.0})
+    second_result = rounds[1]["results"][0]
+    first_context = rounds[0]["round_context"]
+    second_context = rounds[1]["round_context"]
+    first_without_context = estimate_download_transport_bytes(first_download_state, round_index=0, compressed=False, round_context={})
+    second_without_context = estimate_download_transport_bytes(second_download_state, round_index=1, compressed=False, round_context={})
+    first_context_bytes = auxiliary_payload_num_bytes(first_context)
+    first_context_parameters = auxiliary_payload_num_parameters(first_context)
+    second_context_bytes = auxiliary_payload_num_bytes(second_context)
+    second_context_parameters = auxiliary_payload_num_parameters(second_context)
 
+    assert "ega_codec_payload" in first_context
+    assert "ega_codec_payload" not in second_context
     assert first_result.parameter_download_bytes == first_result.download_bytes
-    assert first_result.parameter_download_bytes == client_module.state_num_bytes(download_state) + context_bytes
+    assert first_result.parameter_download_bytes == client_module.state_num_bytes(first_download_state) + first_context_bytes
     assert first_result.parameter_download_parameters == first_result.download_parameters
-    assert first_result.parameter_download_parameters == client_module.state_num_parameters(download_state) + context_parameters
+    assert first_result.parameter_download_parameters == client_module.state_num_parameters(first_download_state) + first_context_parameters
+    assert second_result.parameter_download_bytes == client_module.state_num_bytes(second_download_state) + second_context_bytes
+    assert second_result.parameter_download_parameters == client_module.state_num_parameters(second_download_state) + second_context_parameters
+    assert first_result.parameter_download_bytes > second_result.parameter_download_bytes
     assert first_result.transport_download_bytes > first_result.parameter_download_bytes
-    assert first_result.transport_download_bytes > without_context
+    assert first_result.transport_download_bytes > first_without_context
+    assert second_result.transport_download_bytes > second_result.parameter_download_bytes
+    assert second_result.transport_download_bytes > second_without_context
     assert first_result.transport_download_overhead_bytes == first_result.transport_download_bytes - first_result.parameter_download_bytes
+    assert second_result.transport_download_overhead_bytes == second_result.transport_download_bytes - second_result.parameter_download_bytes
 
 
 class _ScalarTransportToyModel(torch.nn.Module):
@@ -2317,6 +2382,8 @@ def _canonical_update_from_result(result, server):
 
 
 def _run_single_node_update_update_rounds(config: dict, monkeypatch):
+    config.setdefault("ega", {})["num_clients"] = 2
+
     def _build_toy_model(_config):
         return _ScalarTransportToyModel()
 
@@ -2335,12 +2402,18 @@ def _run_single_node_update_update_rounds(config: dict, monkeypatch):
         block_size = int(config.get("ega", {}).get("block_size", 7))
         return _IdentityEgaCodec(block_size=block_size)
 
+    def _fake_load_ega_codec_payload(config, payload, device, num_clients):
+        del payload, device, num_clients
+        block_size = int(config.get("ega", {}).get("block_size", 7))
+        return _IdentityEgaCodec(block_size=block_size)
+
     monkeypatch.setattr(client_module, "build_model", _build_toy_model)
     monkeypatch.setattr(server_module, "build_model", _build_toy_model)
     monkeypatch.setattr(client_module, "train_one_epoch", _fake_train_one_epoch)
     if str(config.get("federated", {}).get("algorithm", "")).lower() == "ega_fedavg":
         monkeypatch.setattr(encoded_methods, "build_model", _build_toy_model)
         monkeypatch.setattr(encoded_methods, "load_ega_codec", _fake_load_ega_codec)
+        monkeypatch.setattr(encoded_methods, "load_ega_codec_payload", _fake_load_ega_codec_payload)
 
     train_loaders = {"c1": _ToyLoader(), "c2": _ToyLoader()}
     val_loader = _ToyLoader(length=1)
@@ -2445,6 +2518,8 @@ def test_single_node_sync_update_update_simulation_matches_expected_state_progre
 
 
 def _run_single_node_update_update_rounds_with_server(config: dict, monkeypatch):
+    config.setdefault("ega", {})["num_clients"] = 2
+
     def _build_toy_model(_config):
         return _ScalarTransportToyModel()
 
@@ -2463,12 +2538,18 @@ def _run_single_node_update_update_rounds_with_server(config: dict, monkeypatch)
         block_size = int(config.get("ega", {}).get("block_size", 7))
         return _IdentityEgaCodec(block_size=block_size)
 
+    def _fake_load_ega_codec_payload(config, payload, device, num_clients):
+        del payload, device, num_clients
+        block_size = int(config.get("ega", {}).get("block_size", 7))
+        return _IdentityEgaCodec(block_size=block_size)
+
     monkeypatch.setattr(client_module, "build_model", _build_toy_model)
     monkeypatch.setattr(server_module, "build_model", _build_toy_model)
     monkeypatch.setattr(client_module, "train_one_epoch", _fake_train_one_epoch)
     if str(config.get("federated", {}).get("algorithm", "")).lower() == "ega_fedavg":
         monkeypatch.setattr(encoded_methods, "build_model", _build_toy_model)
         monkeypatch.setattr(encoded_methods, "load_ega_codec", _fake_load_ega_codec)
+        monkeypatch.setattr(encoded_methods, "load_ega_codec_payload", _fake_load_ega_codec_payload)
 
     train_loaders = {"c1": _ToyLoader(), "c2": _ToyLoader()}
     val_loader = _ToyLoader(length=1)

@@ -11,7 +11,7 @@ from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
 from fedlab.federated.methods.registry import federated_method
 from fedlab.federated.protocol import resolve_download_mode, weighted_protocol_base_state
 from fedlab.modeling import build_model
-from fedlab.modeling.ega import decode_attack_view_from_mean_difference, decode_mean_encoded_payload, encode_state_update, load_ega_codec
+from fedlab.modeling.ega import decode_attack_view_from_mean_difference, decode_mean_encoded_payload, encode_state_update, export_ega_codec_payload, load_ega_codec, load_ega_codec_payload
 from fedlab.utils.serialization import add_update, average_states, dequantize_state_update, quantize_state_update, serialize_trainable_model, serialize_untrainable_model, state_num_bytes, state_num_parameters, subtract_state
 
 
@@ -65,6 +65,22 @@ def _quantization_generator(config: dict[str, Any], round_index: int, client_id:
     generator = torch.Generator(device="cpu")
     generator.manual_seed(int(seed) + round_index * 1000 + offset)
     return generator
+
+
+def _ensure_client_ega_codec(*, client: Any, round_context: dict[str, Any]) -> None:
+    """Initialize one client-side EGA codec from the server bootstrap payload."""
+
+    if getattr(client, "ega_codec", None) is not None:
+        return
+    codec_payload = round_context.get("ega_codec_payload")
+    if codec_payload is None:
+        raise RuntimeError("EGA client is missing the server codec bootstrap payload")
+    client.ega_codec = load_ega_codec_payload(
+        client.config,
+        codec_payload,
+        device=client.device,
+        num_clients=client.total_clients,
+    )
 
 
 def _prepare_received_global_state(
@@ -153,40 +169,46 @@ class EGAFedAvgMethod(FederatedMethod):
     capabilities = MethodCapabilities(compressed=False, implemented=True, description="Encoded gradient aggregation FedAvg variant")
 
     def configure_client(self, client: Any) -> None:
-        """Initialize the EGA codec and error-feedback state on the client."""
+        """Initialize client-side EGA bookkeeping; codec bootstrap comes from the server."""
 
-        client.ega_codec = load_ega_codec(
-            client.config,
-            device=client.device,
-            num_clients=client.total_clients,
-            allow_pretrain=bool(getattr(client, "allow_ega_pretrain", False)),
-        )
+        client.ega_codec = None
+        client.ega_codec_ready = False
         template = build_model(client.config)
         client.ega_trainable_keys = tuple(serialize_trainable_model(template).keys())
         client.ega_residual = None
 
     def configure_server(self, server: Any) -> None:
-        """Initialize the EGA codec and normalization state on the server."""
+        """Initialize the server-owned EGA codec and normalization state."""
 
         ega_cfg = server.config.get("ega", {})
         total_clients = int(ega_cfg.get("num_clients", len(server.config.get("data", {}).get("clients", [])) or 1))
+        server.ega_total_clients = total_clients
         server.ega_codec = load_ega_codec(
             server.config,
             device=server.device,
             num_clients=total_clients,
             allow_pretrain=True,
         )
+        server.ega_codec_bootstrap_payload = export_ega_codec_payload(
+            server.ega_codec,
+            config=server.config,
+            num_clients=total_clients,
+        )
+        server.ega_codec_bootstrap_pending = True
         template = build_model(server.config)
         server.ega_trainable_keys = tuple(serialize_trainable_model(template).keys())
         server.ega_normalization = float(ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)))
         server.ega_received_global_states = {}
 
     def build_round_context(self, server: Any) -> dict[str, Any]:
-        """Broadcast the current EGA normalization factor to clients."""
+        """Broadcast the current EGA normalization and first-round codec bootstrap."""
 
         if server.ega_normalization is None:
             return {}
-        return {"ega_normalization": float(server.ega_normalization)}
+        payload = {"ega_normalization": float(server.ega_normalization)}
+        if getattr(server, "ega_codec_bootstrap_pending", False):
+            payload["ega_codec_payload"] = server.ega_codec_bootstrap_payload
+        return payload
 
     def sync_server_client_state(self, *, server: Any, clients: list[Any]) -> None:
         """Mirror the latest client-visible models onto the server for exact protocol reconstruction."""
@@ -200,6 +222,8 @@ class EGAFedAvgMethod(FederatedMethod):
     def prepare_client_state(self, *, global_state, client, round_index: int, round_context: dict[str, Any]):
         """Compress the downloaded global state before local training."""
 
+        _ensure_client_ega_codec(client=client, round_context=round_context)
+        client.ega_codec_ready = True
         download_mode = resolve_download_mode(client.config)
         download_base_state = client.cached_received_global_state
         return _prepare_received_global_state(
@@ -328,6 +352,7 @@ class EGAFedAvgMethod(FederatedMethod):
 
         if server.ega_codec is None:
             raise RuntimeError("EGA codec is not initialized on the server")
+        server.ega_codec_bootstrap_pending = False
         sample_weights = [result.num_samples for result in results]
         weights = [weight / float(sum(sample_weights)) for weight in sample_weights]
         payloads = [result.ega_payload for result in results]
