@@ -16,6 +16,64 @@ ROUNDS="${ROUNDS:-500}"
 PATIENCE="${PATIENCE:-50}"
 LOSS_TAG="${LOSS_TAG:-mae}"
 
+SELECT_MODES="${SELECT_MODES:-}"
+
+usage() {
+  cat <<'EOF'
+Usage: bash SCRIPT [--modes centralized,single_sync,single_async,grpc_sync,grpc_async]
+
+Examples:
+  bash SCRIPT --modes single_sync
+  bash SCRIPT --modes single_sync,grpc_sync
+  SELECT_MODES=single_async,grpc_async bash SCRIPT
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --modes)
+        if [[ $# -lt 2 ]]; then
+          echo "--modes requires a comma-separated value" >&2
+          exit 1
+        fi
+        SELECT_MODES="$2"
+        shift 2
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+}
+
+mode_enabled() {
+  local target="$1"
+  if [[ -z "${SELECT_MODES}" ]]; then
+    return 0
+  fi
+  local raw
+  IFS=',' read -r -a raw <<< "${SELECT_MODES}"
+  local mode
+  for mode in "${raw[@]}"; do
+    mode="${mode// /}"
+    if [[ -z "${mode}" ]]; then
+      continue
+    fi
+    if [[ "${mode}" == "all" || "${mode}" == "${target}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
@@ -272,7 +330,7 @@ main() {
   log "output root: ${BASE_OUTPUT}"
   log "gpu=${GPU_ID} device=${RUNTIME_DEVICE} project=${PROJECT_NAME}"
 
-  if [[ "${RUN_CENTRALIZED}" == "true" ]]; then
+  if [[ "${RUN_CENTRALIZED}" == "true" ]] && mode_enabled centralized; then
     run_centralized \
       centralized_uupdate_dmodel_oracle_attackfreq1 \
       centralized-oracle-attackfreq1 \
@@ -283,6 +341,9 @@ main() {
   local port="${BASE_PORT}"
   local mode
   for mode in "${modes[@]}"; do
+    if ! mode_enabled "${mode}"; then
+      continue
+    fi
     if [[ "${mode}" == grpc_* ]]; then
       run_grpc \
         "fedavg_${mode}_uupdate_dmodel_oracle_attackfreq1" \
@@ -480,4 +541,5 @@ main() {
   log "suite finished"
 }
 
-main "$@"
+parse_args "$@"
+main
