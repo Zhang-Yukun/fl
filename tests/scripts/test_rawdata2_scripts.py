@@ -86,13 +86,15 @@ def test_retained_ega_sweep_scripts_are_executable():
 def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
     content = _assert_executable("run_oracle_suite.sh")
     fedavg_pos = content.index('"fedavg_${mode}_uupdate_dmodel_${RUN_TAG}"')
-    ega_pos = content.index('local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"')
+    ega_pos = content.index('local ega_run_name="${ega_label}_${mode}_uupdate_dmodel_${RUN_TAG}"')
     topk_pos = content.index('"topk_${mode}_uupdate_dmodel_${RUN_TAG}"')
     assert fedavg_pos < ega_pos < topk_pos
     assert '--algorithms fedavg,topk,ega' in content
     for marker in (
         'RUN_TAG="${RUN_TAG:-oracle_attackfreq5}"',
         'TRACKING_TAG="${TRACKING_TAG:-oracle-attackfreq5}"',
+        'RUN_NAME_PREFIX="${RUN_NAME_PREFIX:-}"',
+        'RUN_NAME_SUFFIX="${RUN_NAME_SUFFIX:-}"',
         'ATTACK_ENABLED="${ATTACK_ENABLED:-true}"',
         'ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-5}"',
         'ATTACK_MAX_SAMPLES="${ATTACK_MAX_SAMPLES:-}"',
@@ -114,6 +116,12 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'QINT8_DTYPE="${QINT8_DTYPE:-}"',
         'EGA_DOWNLOAD_METHOD="${EGA_DOWNLOAD_METHOD:-}"',
         'EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-}"',
+        'EGA_ENCODED_DIM="${EGA_ENCODED_DIM:-160}"',
+        'EGA_HIDDEN_DIM="${EGA_HIDDEN_DIM:-1024}"',
+        'EGA_RESIDUAL_BLOCKS="${EGA_RESIDUAL_BLOCKS:-2}"',
+        'EGA_QUANTIZATION_LEVEL="${EGA_QUANTIZATION_LEVEL:-159}"',
+        'EGA_NORMALIZATION_EMA="${EGA_NORMALIZATION_EMA:-0.95}"',
+        'EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS:-150}"',
         'emit_optional_override() {',
         'attack.enabled=%s',
         'attack.max_samples=%s',
@@ -125,6 +133,11 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'evaluation.mode=%s',
         'data.shuffle_train=%s',
         'model.dropout=%s',
+        'effective_run_name() {',
+        'ega_name_signature() {',
+        'effective_ega_label() {',
+        'ed%s_hd%s_rb%s_q%s_ema%s_pt%s',
+        'ega_%s',
         'federated.topk_fraction',
         'federated.qsgd_levels',
         'federated.quantization_dtype',
@@ -133,6 +146,7 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'EVAL_MODE=protocol SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync',
         'FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync',
         'RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync',
+        'RUN_NAME_PREFIX=debug_ RUN_NAME_SUFFIX=_trial1 bash SCRIPT --modes single_sync',
         'EGA_DOWNLOAD_METHOD=dense EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync',
     ):
         assert marker in content
@@ -165,6 +179,8 @@ def test_oracle_gpu_wrappers_call_generic_suite_without_duplicate_attackfreq5_ru
     assert "GPU_ID=" not in gpu0_fast
     assert "GPU_ID=" not in gpu1_fast
     assert "CUDA_VISIBLE_DEVICES" not in (SCRIPT_DIR / "run_oracle_suite.sh").read_text(encoding="utf-8")
+    assert 'RUN_NAME_PREFIX="${RUN_NAME_PREFIX:-}"' in (SCRIPT_DIR / "run_oracle_suite.sh").read_text(encoding="utf-8")
+    assert 'RUN_NAME_SUFFIX="${RUN_NAME_SUFFIX:-}"' in (SCRIPT_DIR / "run_oracle_suite.sh").read_text(encoding="utf-8")
 
 
 def test_removed_legacy_scripts_are_absent():

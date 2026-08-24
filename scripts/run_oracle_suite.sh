@@ -9,6 +9,8 @@ RUN_TAG="${RUN_TAG:-oracle_attackfreq5}"
 TRACKING_TAG="${TRACKING_TAG:-oracle-attackfreq5}"
 BASE_OUTPUT="${BASE_OUTPUT:-outputs/${RUN_TAG}_9algo_4mode_$(date +%Y%m%d_%H%M%S)}"
 PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-${TRACKING_TAG}-v1}"
+RUN_NAME_PREFIX="${RUN_NAME_PREFIX:-}"
+RUN_NAME_SUFFIX="${RUN_NAME_SUFFIX:-}"
 BASE_PORT="${BASE_PORT:-58000}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-5}"
 POLL_SECONDS="${POLL_SECONDS:-1.0}"
@@ -42,17 +44,17 @@ QINT8_DTYPE="${QINT8_DTYPE:-}"
 QINT8_STOCHASTIC_ROUNDING="${QINT8_STOCHASTIC_ROUNDING:-}"
 QINT8_SEED="${QINT8_SEED:-}"
 QINT8_NOISE_MULTIPLIER="${QINT8_NOISE_MULTIPLIER:-}"
-EGA_TRACKING_LABEL="${EGA_TRACKING_LABEL:-ega}"
+EGA_TRACKING_LABEL="${EGA_TRACKING_LABEL:-}"
 EGA_ARTIFACT_PATH="${EGA_ARTIFACT_PATH:-}"
-EGA_ENCODED_DIM="${EGA_ENCODED_DIM:-}"
-EGA_HIDDEN_DIM="${EGA_HIDDEN_DIM:-}"
-EGA_RESIDUAL_BLOCKS="${EGA_RESIDUAL_BLOCKS:-}"
-EGA_QUANTIZATION_LEVEL="${EGA_QUANTIZATION_LEVEL:-}"
+EGA_ENCODED_DIM="${EGA_ENCODED_DIM:-160}"
+EGA_HIDDEN_DIM="${EGA_HIDDEN_DIM:-1024}"
+EGA_RESIDUAL_BLOCKS="${EGA_RESIDUAL_BLOCKS:-2}"
+EGA_QUANTIZATION_LEVEL="${EGA_QUANTIZATION_LEVEL:-159}"
 EGA_NORMALIZATION="${EGA_NORMALIZATION:-}"
 EGA_INITIAL_NORMALIZATION="${EGA_INITIAL_NORMALIZATION:-}"
 EGA_MIN_NORMALIZATION="${EGA_MIN_NORMALIZATION:-}"
 EGA_NORMALIZATION_STRATEGY="${EGA_NORMALIZATION_STRATEGY:-}"
-EGA_NORMALIZATION_EMA="${EGA_NORMALIZATION_EMA:-}"
+EGA_NORMALIZATION_EMA="${EGA_NORMALIZATION_EMA:-0.95}"
 EGA_ENCODED_DTYPE="${EGA_ENCODED_DTYPE:-}"
 EGA_ENCODED_STOCHASTIC_ROUNDING="${EGA_ENCODED_STOCHASTIC_ROUNDING:-}"
 EGA_ENCODED_NOISE_STD="${EGA_ENCODED_NOISE_STD:-}"
@@ -67,7 +69,7 @@ EGA_DOWNLOAD_PREDICTIVE_CODING="${EGA_DOWNLOAD_PREDICTIVE_CODING:-}"
 EGA_DOWNLOAD_STOCHASTIC_ROUNDING="${EGA_DOWNLOAD_STOCHASTIC_ROUNDING:-}"
 EGA_ERROR_FEEDBACK="${EGA_ERROR_FEEDBACK:-}"
 EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-}"
-EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS:-}"
+EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS:-150}"
 EGA_PRETRAIN_PATIENCE="${EGA_PRETRAIN_PATIENCE:-}"
 EGA_PRETRAIN_MIN_DELTA="${EGA_PRETRAIN_MIN_DELTA:-}"
 EGA_PRETRAIN_BATCH_SIZE="${EGA_PRETRAIN_BATCH_SIZE:-}"
@@ -88,6 +90,7 @@ Examples:
   EVAL_MODE=protocol SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync
   FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync
   RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync
+  RUN_NAME_PREFIX=debug_ RUN_NAME_SUFFIX=_trial1 bash SCRIPT --modes single_sync
   EGA_DOWNLOAD_METHOD=dense EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   SELECT_MODES=single_async,grpc_async bash SCRIPT
 USAGE
@@ -167,6 +170,30 @@ algo_enabled() {
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+effective_run_name() {
+  local base_name="$1"
+  printf '%s%s%s\n' "${RUN_NAME_PREFIX}" "${base_name}" "${RUN_NAME_SUFFIX}"
+}
+
+ega_name_signature() {
+  local encoded_dim="${EGA_ENCODED_DIM}"
+  local hidden_dim="${EGA_HIDDEN_DIM}"
+  local residual_blocks="${EGA_RESIDUAL_BLOCKS}"
+  local quantization_level="${EGA_QUANTIZATION_LEVEL}"
+  local normalization_ema="${EGA_NORMALIZATION_EMA}"
+  local pretrain_epochs="${EGA_PRETRAIN_EPOCHS}"
+  local ema_token="${normalization_ema//./}"
+  printf 'ed%s_hd%s_rb%s_q%s_ema%s_pt%s\n' "${encoded_dim}" "${hidden_dim}" "${residual_blocks}" "${quantization_level}" "${ema_token}" "${pretrain_epochs}"
+}
+
+effective_ega_label() {
+  if [[ -n "${EGA_TRACKING_LABEL}" ]]; then
+    printf '%s\n' "${EGA_TRACKING_LABEL}"
+    return
+  fi
+  printf 'ega_%s\n' "$(ega_name_signature)"
 }
 
 cleanup_pids() {
@@ -429,6 +456,7 @@ run_single() {
   local tracking_name="$2"
   local config="$3"
   shift 3
+  run_name="$(effective_run_name "${run_name}")"
   local outdir="${BASE_OUTPUT}/${run_name}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.entrypoints.train
@@ -459,6 +487,7 @@ run_grpc() {
   local config="$3"
   local port="$4"
   shift 4
+  run_name="$(effective_run_name "${run_name}")"
   local outdir="${BASE_OUTPUT}/${run_name}"
   local address="127.0.0.1:${port}"
   local server_pid=""
@@ -548,6 +577,7 @@ run_centralized() {
   local tracking_name="$2"
   local config="$3"
   shift 3
+  run_name="$(effective_run_name "${run_name}")"
   local outdir="${BASE_OUTPUT}/${run_name}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.entrypoints.train
@@ -602,10 +632,12 @@ main() {
       fi
 
       if algo_enabled ega; then
-        local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"
+        local ega_label="$(effective_ega_label)"
+        local ega_run_name="${ega_label}_${mode}_uupdate_dmodel_${RUN_TAG}"
+        local ega_tracking_label="${ega_label//_/-}"
         local -a ega_override_args=()
         mapfile -t ega_override_args < <(ega_args)
-        run_grpc "${ega_run_name}" "${EGA_TRACKING_LABEL}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/ega.yaml "${port}" "${ega_override_args[@]}"
+        run_grpc "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/ega.yaml "${port}" "${ega_override_args[@]}"
         port=$((port + 1))
       fi
 
@@ -665,10 +697,12 @@ main() {
       fi
 
       if algo_enabled ega; then
-        local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"
+        local ega_label="$(effective_ega_label)"
+        local ega_run_name="${ega_label}_${mode}_uupdate_dmodel_${RUN_TAG}"
+        local ega_tracking_label="${ega_label//_/-}"
         local -a ega_override_args=()
         mapfile -t ega_override_args < <(ega_args)
-        run_single "${ega_run_name}" "${EGA_TRACKING_LABEL}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/ega.yaml "${ega_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/ega.yaml "${ega_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled topk; then
