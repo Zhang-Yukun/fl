@@ -5,13 +5,7 @@ SCRIPT_DIR = Path(__file__).parents[2] / "scripts"
 
 
 RETAINED_SUITES = (
-    "run_formal_adaptive_clipped_rdp_suite.sh",
-    "run_formal_centralized_fedavg_qint8_suite.sh",
-    "run_formal_multi_algo_suite_tmux.sh",
-    "run_formal_multi_algo_worker.sh",
     "run_oracle_suite.sh",
-    "run_suite_500r_tmux.sh",
-    "run_suite_500r_worker.sh",
 )
 
 RETAINED_WRAPPERS = (
@@ -28,15 +22,6 @@ RETAINED_EGA_SWEEPS = (
     "run_ega_noattack_adam_sweep_worker.sh",
     "run_ega_precision_adam_sweep_tmux.sh",
     "run_ega_precision_adam_sweep_worker.sh",
-    "run_ega_target_sweep_tmux.sh",
-    "run_ega_target_sweep_worker.sh",
-    "run_rawdata2_ega_sweep_base.sh",
-    "run_rawdata2_ega_sweep_ed160.sh",
-    "run_rawdata2_ega_sweep_ed160_q255.sh",
-    "run_rawdata2_ega_sweep_ed192.sh",
-    "run_rawdata2_ega_sweep_ed288.sh",
-    "run_rawdata2_ega_sweep_fp16up.sh",
-    "run_rawdata2_ega_sweep_q255.sh",
 )
 
 REMOVED_LEGACY = (
@@ -61,6 +46,21 @@ REMOVED_LEGACY = (
     "run_test_matrix_common.sh",
     "run_test_matrix_gpu0.sh",
     "run_test_matrix_gpu1.sh",
+    "run_ega_target_sweep_tmux.sh",
+    "run_ega_target_sweep_worker.sh",
+    "run_formal_adaptive_clipped_rdp_suite.sh",
+    "run_formal_centralized_fedavg_qint8_suite.sh",
+    "run_formal_multi_algo_suite_tmux.sh",
+    "run_formal_multi_algo_worker.sh",
+    "run_rawdata2_ega_sweep_base.sh",
+    "run_rawdata2_ega_sweep_ed160.sh",
+    "run_rawdata2_ega_sweep_ed160_q255.sh",
+    "run_rawdata2_ega_sweep_ed192.sh",
+    "run_rawdata2_ega_sweep_ed288.sh",
+    "run_rawdata2_ega_sweep_fp16up.sh",
+    "run_rawdata2_ega_sweep_q255.sh",
+    "run_suite_500r_tmux.sh",
+    "run_suite_500r_worker.sh",
 )
 
 
@@ -81,28 +81,6 @@ def test_retained_suite_and_wrapper_scripts_are_executable():
 def test_retained_ega_sweep_scripts_are_executable():
     for name in RETAINED_EGA_SWEEPS:
         _assert_executable(name)
-
-
-def test_formal_suite_script_exists_and_lists_all_requested_runs():
-    content = _assert_executable("run_formal_centralized_fedavg_qint8_suite.sh")
-    for marker in (
-        "centralized",
-        "fedavg_single_sync",
-        "fedavg_single_async",
-        "fedavg_grpc_sync",
-        "fedavg_grpc_async",
-        "qint8_single_sync",
-        "qint8_single_async",
-        "qint8_grpc_sync",
-        "qint8_grpc_async",
-        "configs/fedavg.yaml",
-        "configs/secure_quantized_fedavg.yaml",
-        "federated.quantization_dtype=int8",
-        "-m fedlab.entrypoints.train",
-        "-m fedlab.entrypoints.server",
-        "-m fedlab.entrypoints.client",
-    ):
-        assert marker in content
 
 
 def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
@@ -154,6 +132,7 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'TRAIN_OPTIMIZER=adam TRAIN_LR=0.001 bash SCRIPT --modes centralized,single_sync',
         'EVAL_MODE=protocol SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync',
         'FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync',
+        'RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync',
         'EGA_DOWNLOAD_METHOD=dense EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync',
     ):
         assert marker in content
@@ -181,6 +160,11 @@ def test_oracle_gpu_wrappers_call_generic_suite_without_duplicate_attackfreq5_ru
     assert "RUN_TAG=oracle_attackfreq5 " not in gpu1_batch
     assert "RUN_TAG=oracle_attackfreq5 TRACKING_TAG=oracle-attackfreq5" in gpu0_fast
     assert "RUN_TAG=oracle_attackfreq5 TRACKING_TAG=oracle-attackfreq5" in gpu1_fast
+    assert "GPU_ID=" not in gpu0_batch
+    assert "GPU_ID=" not in gpu1_batch
+    assert "GPU_ID=" not in gpu0_fast
+    assert "GPU_ID=" not in gpu1_fast
+    assert "CUDA_VISIBLE_DEVICES" not in (SCRIPT_DIR / "run_oracle_suite.sh").read_text(encoding="utf-8")
 
 
 def test_removed_legacy_scripts_are_absent():

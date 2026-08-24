@@ -4,7 +4,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
-GPU_ID="${GPU_ID:-0}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
 RUN_TAG="${RUN_TAG:-oracle_attackfreq5}"
 TRACKING_TAG="${TRACKING_TAG:-oracle-attackfreq5}"
@@ -88,6 +87,7 @@ Examples:
   TRAIN_OPTIMIZER=adam TRAIN_LR=0.001 bash SCRIPT --modes centralized,single_sync
   EVAL_MODE=protocol SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync
   FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync
+  RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   EGA_DOWNLOAD_METHOD=dense EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   SELECT_MODES=single_async,grpc_async bash SCRIPT
 USAGE
@@ -449,7 +449,7 @@ run_single() {
   cmd+=("$@")
 
   log "starting ${run_name}"
-  CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${cmd[@]}"
+  PYTHONPATH=. "${cmd[@]}"
   log "finished ${run_name}"
 }
 
@@ -488,7 +488,7 @@ run_grpc() {
   server_cmd+=("$@")
 
   log "starting ${run_name} on ${address}"
-  CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${server_cmd[@]}" > "${outdir}/server.log" 2>&1 &
+  PYTHONPATH=. "${server_cmd[@]}" > "${outdir}/server.log" 2>&1 &
   server_pid=$!
   sleep "${STARTUP_WAIT_SECONDS}"
 
@@ -513,7 +513,7 @@ run_grpc() {
     done < <(federated_common_args)
     client_cmd+=("$@")
 
-    CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${client_cmd[@]}" > "${outdir}/client_${client_id}.log" 2>&1 &
+    PYTHONPATH=. "${client_cmd[@]}" > "${outdir}/client_${client_id}.log" 2>&1 &
     client_pids+=("$!")
   done
 
@@ -569,14 +569,14 @@ run_centralized() {
   cmd+=("$@")
 
   log "starting ${run_name}"
-  CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${cmd[@]}"
+  PYTHONPATH=. "${cmd[@]}"
   log "finished ${run_name}"
 }
 
 main() {
   mkdir -p "${BASE_OUTPUT}"
   log "output root: ${BASE_OUTPUT}"
-  log "gpu=${GPU_ID} device=${RUNTIME_DEVICE} project=${PROJECT_NAME}"
+  log "device=${RUNTIME_DEVICE} project=${PROJECT_NAME}"
   log "federated_algorithms=${FEDERATED_ALGORITHMS}"
 
   if [[ "${RUN_CENTRALIZED}" == "true" ]] && mode_enabled centralized; then
