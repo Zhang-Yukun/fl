@@ -15,6 +15,8 @@ RETAINED_WRAPPERS = (
     "run_oracle_gpu1_fast.sh",
     "run_oracle_gpu0_batch_adam.sh",
     "run_oracle_gpu1_batch_adam.sh",
+    "run_oracle_noattack_mse_adam_shortlist.sh",
+    "run_oracle_noattack_mae_adam_shortlist.sh",
 )
 
 RETAINED_EGA_SWEEPS = (
