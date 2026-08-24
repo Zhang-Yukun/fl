@@ -14,14 +14,14 @@ BASE_PORT="${BASE_PORT:-58000}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-5}"
 POLL_SECONDS="${POLL_SECONDS:-1.0}"
 RUN_CENTRALIZED="${RUN_CENTRALIZED:-true}"
-ROUNDS="${ROUNDS:-500}"
+ROUNDS="${ROUNDS:-}"
 PATIENCE="${PATIENCE:-50}"
 LOSS_NAME="${LOSS_NAME:-mse}"
 LOSS_TAG="${LOSS_TAG:-${LOSS_NAME}}"
 ATTACK_ENABLED="${ATTACK_ENABLED:-true}"
 ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-5}"
-ATTACK_CLIENT_SELECTION="${ATTACK_CLIENT_SELECTION:-all}"
-ATTACK_CLIENTS_PER_ROUND="${ATTACK_CLIENTS_PER_ROUND:-3}"
+ATTACK_CLIENT_SELECTION="${ATTACK_CLIENT_SELECTION:-}"
+ATTACK_CLIENTS_PER_ROUND="${ATTACK_CLIENTS_PER_ROUND:-}"
 ATTACK_MAX_SAMPLES="${ATTACK_MAX_SAMPLES:-}"
 TRAIN_LR="${TRAIN_LR:-}"
 TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-}"
@@ -29,8 +29,8 @@ TRAIN_MOMENTUM="${TRAIN_MOMENTUM:-}"
 TRAIN_WEIGHT_DECAY="${TRAIN_WEIGHT_DECAY:-}"
 TRAIN_OPTIMIZER_EPS="${TRAIN_OPTIMIZER_EPS:-}"
 EVAL_MODE="${EVAL_MODE:-protocol}"
-SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-false}"
-MODEL_DROPOUT="${MODEL_DROPOUT:-0.0}"
+SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-true}"
+MODEL_DROPOUT="${MODEL_DROPOUT:-0.1}"
 ATTACK_LR="${ATTACK_LR:-}"
 ATTACK_OPTIMIZER="${ATTACK_OPTIMIZER:-}"
 FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"
@@ -202,7 +202,7 @@ runtime.seed=2026
 --override
 runtime.deterministic=true
 --override
-runtime.num_threads=1
+runtime.num_threads=4
 --override
 runtime.num_interop_threads=1
 --override
@@ -377,11 +377,17 @@ attack.async_enabled=false
   if [[ "${ATTACK_ENABLED}" == "true" ]]; then
     printf -- '--override
 attack.frequency_rounds=%s
---override
+' "${ATTACK_FREQUENCY_ROUNDS}"
+    if [[ -n "${ATTACK_CLIENT_SELECTION}" ]]; then
+      printf -- '--override
 attack.client_selection=%s
---override
+' "${ATTACK_CLIENT_SELECTION}"
+    fi
+    if [[ -n "${ATTACK_CLIENTS_PER_ROUND}" ]]; then
+      printf -- '--override
 attack.clients_per_round=%s
-' "${ATTACK_FREQUENCY_ROUNDS}" "${ATTACK_CLIENT_SELECTION}" "${ATTACK_CLIENTS_PER_ROUND}"
+' "${ATTACK_CLIENTS_PER_ROUND}"
+    fi
     if [[ -n "${ATTACK_MAX_SAMPLES}" ]]; then
       printf -- '--override
 attack.max_samples=%s
