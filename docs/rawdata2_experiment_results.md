@@ -4,7 +4,7 @@ Run date: 2026-07-31
 
 ## Scope
 
-This note now keeps only the experiment entry points that still have retained configs in the repository:
+This note keeps historical result snapshots for the retained algorithm set:
 
 - `centralized`
 - `fedavg`
@@ -16,21 +16,11 @@ This note now keeps only the experiment entry points that still have retained co
 - `secure_quantized_fedavg`
 - `ega`
 
-Historical notes for removed config presets were intentionally dropped from this file to avoid pointing to deleted configuration files.
+## Launcher note
 
-## Example Commands
-
-```bash
-bash scripts/run_rawdata2_centralized.sh
-bash scripts/run_rawdata2_fedavg.sh
-bash scripts/run_rawdata2_fedlab_topk.sh
-bash scripts/run_rawdata2_qsgd.sh
-bash scripts/run_rawdata2_randomk.sh
-bash scripts/run_rawdata2_sign.sh
-bash scripts/run_rawdata2_adaptive_clipped_rdp_fedavg_deterministic.sh
-bash scripts/run_rawdata2_secure_quantized_fedavg.sh
-bash scripts/run_rawdata2_ega.sh
-```
+The repository no longer keeps the older per-algorithm `run_rawdata2_*.sh` launchers.
+Current experiments should be started through the suite scripts in `scripts/` or directly via
+`python -m fedlab.entrypoints.train` / `server` / `client`.
 
 ## Historical Result Snapshots
 
