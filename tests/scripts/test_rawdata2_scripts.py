@@ -78,11 +78,13 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
 
     path = SCRIPT_DIR / "run_oracle_suite.sh"
     assert path.exists()
+    assert path.stat().st_mode & 0o111
     content = path.read_text(encoding="utf-8")
     fedavg_pos = content.index('"fedavg_${mode}_uupdate_dmodel_${RUN_TAG}"')
     ega_pos = content.index('local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"')
     topk_pos = content.index('"topk_${mode}_uupdate_dmodel_${RUN_TAG}"')
     assert fedavg_pos < ega_pos < topk_pos
+    assert '--algorithms fedavg,topk,ega' in content
     for marker in (
         'RUN_TAG="${RUN_TAG:-oracle_attackfreq5}"',
         'TRACKING_TAG="${TRACKING_TAG:-oracle-attackfreq5}"',
@@ -91,12 +93,45 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'ATTACK_MAX_SAMPLES="${ATTACK_MAX_SAMPLES:-}"',
         'LOSS_NAME="${LOSS_NAME:-mse}"',
         'LOSS_TAG="${LOSS_TAG:-${LOSS_NAME}}"',
+        'TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-}"',
+        'TRAIN_MOMENTUM="${TRAIN_MOMENTUM:-}"',
+        'TRAIN_WEIGHT_DECAY="${TRAIN_WEIGHT_DECAY:-}"',
+        'TRAIN_OPTIMIZER_EPS="${TRAIN_OPTIMIZER_EPS:-}"',
+        'EVAL_MODE="${EVAL_MODE:-oracle_full_update}"',
+        'SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-false}"',
+        'MODEL_DROPOUT="${MODEL_DROPOUT:-0.0}"',
+        'FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"',
+        'TOPK_FRACTION="${TOPK_FRACTION:-}"',
+        'QSGD_LEVELS="${QSGD_LEVELS:-}"',
+        'RANDOMK_FRACTION="${RANDOMK_FRACTION:-}"',
+        'QINT8_DTYPE="${QINT8_DTYPE:-}"',
+        'EGA_DOWNLOAD_METHOD="${EGA_DOWNLOAD_METHOD:-}"',
+        'EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-}"',
+        'emit_optional_override() {',
         'attack.enabled=%s',
         'attack.max_samples=%s',
         'training.loss=%s',
+        'training.optimizer=%s',
+        'training.momentum=%s',
+        'training.weight_decay=%s',
+        'training.optimizer_eps=%s',
+        'evaluation.mode=%s',
+        'data.shuffle_train=%s',
+        'model.dropout=%s',
+        'federated.topk_fraction',
+        'federated.qsgd_levels',
+        'federated.quantization_dtype',
+        'ega.download_method',
+        'TRAIN_OPTIMIZER=adam TRAIN_LR=0.001 bash SCRIPT --modes centralized,single_sync',
+        'EVAL_MODE=protocol SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync',
+        'FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync',
+        'EGA_DOWNLOAD_METHOD=dense EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync',
     ):
         assert marker in content
-    assert 'ega.artifact_path' not in content
+    assert 'ega.download_method=ega' not in content
+    assert 'topk10-' not in content
+    assert 'qsgd63-' not in content
+    assert 'ega.artifact_path' in content
     assert 'rm -f "${ega_artifact}"' not in content
 
 
@@ -106,10 +141,13 @@ def test_oracle_gpu_wrappers_call_generic_suite_without_duplicate_attackfreq5_ru
         "run_oracle_gpu1_batch.sh",
         "run_oracle_gpu0_fast.sh",
         "run_oracle_gpu1_fast.sh",
+        "run_oracle_gpu0_batch_adam.sh",
+        "run_oracle_gpu1_batch_adam.sh",
     )
     for name in wrappers:
         content = (SCRIPT_DIR / name).read_text(encoding="utf-8")
         assert "run_oracle_suite.sh" in content
+        assert "run_oracle_suite_param.sh" not in content
         assert "_mae.sh" not in content
         assert "LOSS_NAME=mse LOSS_TAG=mse" in content or "LOSS_NAME=mae LOSS_TAG=mae" in content
 

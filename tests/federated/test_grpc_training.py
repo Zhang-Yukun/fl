@@ -195,7 +195,10 @@ def test_grpc_coordinator_aggregates_one_round_and_saves_summary(tmp_path):
     assert metrics[0]["total_transport_upload_bytes"] >= metrics[0]["total_parameter_upload_bytes"]
     assert summary["transport"] == "grpc"
     assert summary["rounds"] == 1
+    assert summary["last_parameter_download_compression_ratio"] == 1.0
     assert summary["last_parameter_upload_compression_ratio"] == 1.0
+    assert metrics[0]["parameter_download_compression_ratio"] == 1.0
+    assert metrics[0]["parameter_upload_compression_ratio"] == 1.0
     assert summary["total_parameter_bytes"] == metrics[0]["total_parameter_bytes"]
     assert summary["total_transport_bytes"] == metrics[0]["total_transport_bytes"]
 

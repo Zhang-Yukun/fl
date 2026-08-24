@@ -30,10 +30,11 @@ ega:
   encoded_dtype: int8
   encoded_stochastic_rounding: false
   encoded_noise_std: 0.0
-  download_dtype: int8
+  download_dtype: float32
   download_method: dense
+  download_predictive_coding: false
   download_stochastic_rounding: false
-  download_trainable_only: true
+  download_trainable_only: false
   download_encoded_dtype: int8
   error_feedback: true
   pretrain:

@@ -24,20 +24,73 @@ ATTACK_CLIENT_SELECTION="${ATTACK_CLIENT_SELECTION:-all}"
 ATTACK_CLIENTS_PER_ROUND="${ATTACK_CLIENTS_PER_ROUND:-3}"
 ATTACK_MAX_SAMPLES="${ATTACK_MAX_SAMPLES:-}"
 TRAIN_LR="${TRAIN_LR:-}"
+TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-}"
+TRAIN_MOMENTUM="${TRAIN_MOMENTUM:-}"
+TRAIN_WEIGHT_DECAY="${TRAIN_WEIGHT_DECAY:-}"
+TRAIN_OPTIMIZER_EPS="${TRAIN_OPTIMIZER_EPS:-}"
+EVAL_MODE="${EVAL_MODE:-oracle_full_update}"
+SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-false}"
+MODEL_DROPOUT="${MODEL_DROPOUT:-0.0}"
 ATTACK_LR="${ATTACK_LR:-}"
 ATTACK_OPTIMIZER="${ATTACK_OPTIMIZER:-}"
+FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"
+TOPK_FRACTION="${TOPK_FRACTION:-}"
+QSGD_LEVELS="${QSGD_LEVELS:-}"
+RANDOMK_FRACTION="${RANDOMK_FRACTION:-}"
+RANDOMK_SEED="${RANDOMK_SEED:-}"
+ADAPTIVE_RDP_SEED="${ADAPTIVE_RDP_SEED:-}"
+QINT8_DTYPE="${QINT8_DTYPE:-}"
+QINT8_STOCHASTIC_ROUNDING="${QINT8_STOCHASTIC_ROUNDING:-}"
+QINT8_SEED="${QINT8_SEED:-}"
+QINT8_NOISE_MULTIPLIER="${QINT8_NOISE_MULTIPLIER:-}"
+EGA_TRACKING_LABEL="${EGA_TRACKING_LABEL:-ega}"
+EGA_ARTIFACT_PATH="${EGA_ARTIFACT_PATH:-}"
+EGA_ENCODED_DIM="${EGA_ENCODED_DIM:-}"
+EGA_HIDDEN_DIM="${EGA_HIDDEN_DIM:-}"
+EGA_RESIDUAL_BLOCKS="${EGA_RESIDUAL_BLOCKS:-}"
+EGA_QUANTIZATION_LEVEL="${EGA_QUANTIZATION_LEVEL:-}"
+EGA_NORMALIZATION="${EGA_NORMALIZATION:-}"
+EGA_INITIAL_NORMALIZATION="${EGA_INITIAL_NORMALIZATION:-}"
+EGA_MIN_NORMALIZATION="${EGA_MIN_NORMALIZATION:-}"
+EGA_NORMALIZATION_STRATEGY="${EGA_NORMALIZATION_STRATEGY:-}"
+EGA_NORMALIZATION_EMA="${EGA_NORMALIZATION_EMA:-}"
+EGA_ENCODED_DTYPE="${EGA_ENCODED_DTYPE:-}"
+EGA_ENCODED_STOCHASTIC_ROUNDING="${EGA_ENCODED_STOCHASTIC_ROUNDING:-}"
+EGA_ENCODED_NOISE_STD="${EGA_ENCODED_NOISE_STD:-}"
+EGA_DOWNLOAD_METHOD="${EGA_DOWNLOAD_METHOD:-}"
+EGA_DOWNLOAD_DTYPE="${EGA_DOWNLOAD_DTYPE:-}"
+EGA_DOWNLOAD_ENCODED_DTYPE="${EGA_DOWNLOAD_ENCODED_DTYPE:-}"
+EGA_DOWNLOAD_ENCODED_STOCHASTIC_ROUNDING="${EGA_DOWNLOAD_ENCODED_STOCHASTIC_ROUNDING:-}"
+EGA_DOWNLOAD_TRAINABLE_ONLY="${EGA_DOWNLOAD_TRAINABLE_ONLY:-}"
+EGA_DOWNLOAD_QUANTIZATION_LEVEL="${EGA_DOWNLOAD_QUANTIZATION_LEVEL:-}"
+EGA_DOWNLOAD_MIN_NORMALIZATION="${EGA_DOWNLOAD_MIN_NORMALIZATION:-}"
+EGA_DOWNLOAD_PREDICTIVE_CODING="${EGA_DOWNLOAD_PREDICTIVE_CODING:-}"
+EGA_DOWNLOAD_STOCHASTIC_ROUNDING="${EGA_DOWNLOAD_STOCHASTIC_ROUNDING:-}"
+EGA_ERROR_FEEDBACK="${EGA_ERROR_FEEDBACK:-}"
+EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-}"
+EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS:-}"
+EGA_PRETRAIN_PATIENCE="${EGA_PRETRAIN_PATIENCE:-}"
+EGA_PRETRAIN_MIN_DELTA="${EGA_PRETRAIN_MIN_DELTA:-}"
+EGA_PRETRAIN_BATCH_SIZE="${EGA_PRETRAIN_BATCH_SIZE:-}"
+EGA_PRETRAIN_LR="${EGA_PRETRAIN_LR:-}"
+EGA_PRETRAIN_TRAIN_GROUPS="${EGA_PRETRAIN_TRAIN_GROUPS:-}"
+EGA_PRETRAIN_VAL_GROUPS="${EGA_PRETRAIN_VAL_GROUPS:-}"
+EGA_PRETRAIN_SEED="${EGA_PRETRAIN_SEED:-}"
 
 SELECT_MODES="${SELECT_MODES:-}"
 
 usage() {
-  cat <<'EOF'
-Usage: bash SCRIPT [--modes centralized,single_sync,single_async,grpc_sync,grpc_async]
+  cat <<'USAGE'
+Usage: bash SCRIPT [--modes centralized,single_sync,single_async,grpc_sync,grpc_async] [--algorithms fedavg,topk,ega]
 
 Examples:
   bash SCRIPT --modes single_sync
-  bash SCRIPT --modes single_sync,grpc_sync
+  TRAIN_OPTIMIZER=adam TRAIN_LR=0.001 bash SCRIPT --modes centralized,single_sync
+  EVAL_MODE=protocol SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync
+  FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync
+  EGA_DOWNLOAD_METHOD=dense EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   SELECT_MODES=single_async,grpc_async bash SCRIPT
-EOF
+USAGE
 }
 
 parse_args() {
@@ -49,6 +102,14 @@ parse_args() {
           exit 1
         fi
         SELECT_MODES="$2"
+        shift 2
+        ;;
+      --algorithms)
+        if [[ $# -lt 2 ]]; then
+          echo "--algorithms requires a comma-separated value" >&2
+          exit 1
+        fi
+        FEDERATED_ALGORITHMS="$2"
         shift 2
         ;;
       --help|-h)
@@ -84,6 +145,25 @@ mode_enabled() {
   return 1
 }
 
+algo_enabled() {
+  local target="$1"
+  if [[ -z "${FEDERATED_ALGORITHMS}" ]]; then
+    return 0
+  fi
+  local raw
+  IFS=',' read -r -a raw <<< "${FEDERATED_ALGORITHMS}"
+  local algorithm
+  for algorithm in "${raw[@]}"; do
+    algorithm="${algorithm// /}"
+    if [[ -z "${algorithm}" ]]; then
+      continue
+    fi
+    if [[ "${algorithm}" == "all" || "${algorithm}" == "${target}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -126,10 +206,137 @@ runtime.num_threads=1
 --override
 runtime.num_interop_threads=1
 --override
-data.shuffle_train=false
+data.shuffle_train=%s
 --override
-model.dropout=0.0
-' "${RUNTIME_DEVICE}"
+model.dropout=%s
+' "${RUNTIME_DEVICE}" "${SHUFFLE_TRAIN}" "${MODEL_DROPOUT}"
+}
+
+training_args() {
+  if [[ -n "${TRAIN_OPTIMIZER}" ]]; then
+    printf -- '--override
+training.optimizer=%s
+' "${TRAIN_OPTIMIZER}"
+  fi
+  if [[ -n "${TRAIN_LR}" ]]; then
+    printf -- '--override
+training.lr=%s
+' "${TRAIN_LR}"
+  fi
+  if [[ -n "${TRAIN_MOMENTUM}" ]]; then
+    printf -- '--override
+training.momentum=%s
+' "${TRAIN_MOMENTUM}"
+  fi
+  if [[ -n "${TRAIN_WEIGHT_DECAY}" ]]; then
+    printf -- '--override
+training.weight_decay=%s
+' "${TRAIN_WEIGHT_DECAY}"
+  fi
+  if [[ -n "${TRAIN_OPTIMIZER_EPS}" ]]; then
+    printf -- '--override
+training.optimizer_eps=%s
+' "${TRAIN_OPTIMIZER_EPS}"
+  fi
+}
+
+emit_optional_override() {
+  local key="$1"
+  local value="${2:-}"
+  if [[ -n "${value}" ]]; then
+    printf -- '--override
+%s=%s
+' "${key}" "${value}"
+  fi
+}
+
+fedavg_args() {
+  printf -- '--override
+federated.algorithm=fedavg
+'
+}
+
+topk_args() {
+  printf -- '--override
+federated.algorithm=sparse_fedavg
+'
+  emit_optional_override 'federated.topk_fraction' "${TOPK_FRACTION}"
+}
+
+qsgd_args() {
+  printf -- '--override
+federated.algorithm=qsgd_fedavg
+'
+  emit_optional_override 'federated.qsgd_levels' "${QSGD_LEVELS}"
+}
+
+randomk_args() {
+  printf -- '--override
+federated.algorithm=randomk_fedavg
+'
+  emit_optional_override 'federated.topk_fraction' "${RANDOMK_FRACTION}"
+  emit_optional_override 'federated.randomk_seed' "${RANDOMK_SEED}"
+}
+
+sign_args() {
+  printf -- '--override
+federated.algorithm=sign_fedavg
+'
+}
+
+adaptive_args() {
+  printf -- '--override
+federated.algorithm=adaptive_clipped_rdp_fedavg
+'
+  emit_optional_override 'adaptive_clipped_rdp.seed' "${ADAPTIVE_RDP_SEED}"
+}
+
+qint8_args() {
+  printf -- '--override
+federated.algorithm=secure_quantized_fedavg
+'
+  emit_optional_override 'federated.quantization_dtype' "${QINT8_DTYPE}"
+  emit_optional_override 'federated.quantization_stochastic_rounding' "${QINT8_STOCHASTIC_ROUNDING}"
+  emit_optional_override 'federated.quantization_seed' "${QINT8_SEED}"
+  emit_optional_override 'privacy.noise_multiplier' "${QINT8_NOISE_MULTIPLIER}"
+}
+
+ega_args() {
+  printf -- '--override
+federated.algorithm=ega_fedavg
+'
+  emit_optional_override 'ega.artifact_path' "${EGA_ARTIFACT_PATH}"
+  emit_optional_override 'ega.encoded_dim' "${EGA_ENCODED_DIM}"
+  emit_optional_override 'ega.hidden_dim' "${EGA_HIDDEN_DIM}"
+  emit_optional_override 'ega.residual_blocks' "${EGA_RESIDUAL_BLOCKS}"
+  emit_optional_override 'ega.quantization_level' "${EGA_QUANTIZATION_LEVEL}"
+  emit_optional_override 'ega.normalization' "${EGA_NORMALIZATION}"
+  emit_optional_override 'ega.initial_normalization' "${EGA_INITIAL_NORMALIZATION}"
+  emit_optional_override 'ega.min_normalization' "${EGA_MIN_NORMALIZATION}"
+  emit_optional_override 'ega.normalization_strategy' "${EGA_NORMALIZATION_STRATEGY}"
+  emit_optional_override 'ega.normalization_ema' "${EGA_NORMALIZATION_EMA}"
+  emit_optional_override 'ega.encoded_dtype' "${EGA_ENCODED_DTYPE}"
+  emit_optional_override 'ega.encoded_stochastic_rounding' "${EGA_ENCODED_STOCHASTIC_ROUNDING}"
+  emit_optional_override 'ega.encoded_noise_std' "${EGA_ENCODED_NOISE_STD}"
+  emit_optional_override 'ega.download_method' "${EGA_DOWNLOAD_METHOD}"
+  emit_optional_override 'ega.download_dtype' "${EGA_DOWNLOAD_DTYPE}"
+  emit_optional_override 'ega.download_encoded_dtype' "${EGA_DOWNLOAD_ENCODED_DTYPE}"
+  emit_optional_override 'ega.download_encoded_stochastic_rounding' "${EGA_DOWNLOAD_ENCODED_STOCHASTIC_ROUNDING}"
+  emit_optional_override 'ega.download_trainable_only' "${EGA_DOWNLOAD_TRAINABLE_ONLY}"
+  emit_optional_override 'ega.download_quantization_level' "${EGA_DOWNLOAD_QUANTIZATION_LEVEL}"
+  emit_optional_override 'ega.download_min_normalization' "${EGA_DOWNLOAD_MIN_NORMALIZATION}"
+  emit_optional_override 'ega.download_predictive_coding' "${EGA_DOWNLOAD_PREDICTIVE_CODING}"
+  emit_optional_override 'ega.download_stochastic_rounding' "${EGA_DOWNLOAD_STOCHASTIC_ROUNDING}"
+  emit_optional_override 'ega.error_feedback' "${EGA_ERROR_FEEDBACK}"
+  emit_optional_override 'ega.pretrain.device' "${EGA_PRETRAIN_DEVICE}"
+  emit_optional_override 'ega.pretrain.epochs' "${EGA_PRETRAIN_EPOCHS}"
+  emit_optional_override 'ega.pretrain.patience' "${EGA_PRETRAIN_PATIENCE}"
+  emit_optional_override 'ega.pretrain.min_delta' "${EGA_PRETRAIN_MIN_DELTA}"
+  emit_optional_override 'ega.pretrain.batch_size' "${EGA_PRETRAIN_BATCH_SIZE}"
+  emit_optional_override 'ega.pretrain.lr' "${EGA_PRETRAIN_LR}"
+  emit_optional_override 'ega.pretrain.train_groups' "${EGA_PRETRAIN_TRAIN_GROUPS}"
+  emit_optional_override 'ega.pretrain.val_groups' "${EGA_PRETRAIN_VAL_GROUPS}"
+  emit_optional_override 'ega.pretrain.seed' "${EGA_PRETRAIN_SEED}"
 }
 
 centralized_round_args() {
@@ -145,11 +352,9 @@ training.patience=%s
 training.min_delta=0.0
 ' "${PATIENCE}"
   fi
-  if [[ -n "${TRAIN_LR}" ]]; then
-    printf -- '--override
-training.lr=%s
-' "${TRAIN_LR}"
-  fi
+  while IFS= read -r line; do
+    printf '%s\n' "${line}"
+  done < <(training_args)
   printf -- '--override
 training.loss=%s
 ' "${LOSS_NAME}"
@@ -163,12 +368,12 @@ transport.upload_mode=update
 --override
 transport.download_mode=model
 --override
-evaluation.mode=oracle_full_update
+evaluation.mode=%s
 --override
 attack.enabled=%s
 --override
 attack.async_enabled=false
-' "${ATTACK_ENABLED}"
+' "${EVAL_MODE}" "${ATTACK_ENABLED}"
   if [[ "${ATTACK_ENABLED}" == "true" ]]; then
     printf -- '--override
 attack.frequency_rounds=%s
@@ -205,6 +410,9 @@ training.patience=%s
 training.min_delta=0.0
 ' "${PATIENCE}"
   fi
+  while IFS= read -r line; do
+    printf '%s\n' "${line}"
+  done < <(training_args)
   printf -- '--override
 training.loss=%s
 ' "${LOSS_NAME}"
@@ -363,6 +571,7 @@ main() {
   mkdir -p "${BASE_OUTPUT}"
   log "output root: ${BASE_OUTPUT}"
   log "gpu=${GPU_ID} device=${RUNTIME_DEVICE} project=${PROJECT_NAME}"
+  log "federated_algorithms=${FEDERATED_ALGORITHMS}"
 
   if [[ "${RUN_CENTRALIZED}" == "true" ]] && mode_enabled centralized; then
     run_centralized \
@@ -379,198 +588,118 @@ main() {
       continue
     fi
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc \
-        "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_fedavg.yaml \
-        "${port}" \
-        --override federated.algorithm=fedavg
-      port=$((port + 1))
+      if algo_enabled fedavg; then
+        local -a fedavg_override_args=()
+        mapfile -t fedavg_override_args < <(fedavg_args)
+        run_grpc "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_fedavg.yaml "${port}" "${fedavg_override_args[@]}"
+        port=$((port + 1))
+      fi
 
-      local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"
-      run_grpc \
-        "${ega_run_name}" \
-        "ega-ed128-dm-ega-pcq127-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_ega.yaml \
-        "${port}" \
-        --override federated.algorithm=ega_fedavg \
-        --override ega.encoded_dim=128 \
-        --override ega.hidden_dim=1024 \
-        --override ega.residual_blocks=2 \
-        --override ega.download_method=ega \
-        --override ega.download_dtype=float32 \
-        --override ega.download_encoded_dtype=int8 \
-        --override ega.download_encoded_stochastic_rounding=false \
-        --override ega.download_trainable_only=true \
-        --override ega.download_quantization_level=127 \
-        --override ega.download_min_normalization=1e-6 \
-        --override ega.download_predictive_coding=true \
-        --override ega.normalization_strategy=ema_reported_client_max_abs \
-        --override ega.normalization_ema=0.9 \
-        --override ega.quantization_level=127 \
-        --override ega.encoded_dtype=int8 \
-        --override ega.encoded_stochastic_rounding=false \
-        --override ega.error_feedback=true \
-        --override ega.pretrain.device="${RUNTIME_DEVICE}"
-      port=$((port + 1))
+      if algo_enabled ega; then
+        local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"
+        local -a ega_override_args=()
+        mapfile -t ega_override_args < <(ega_args)
+        run_grpc "${ega_run_name}" "${EGA_TRACKING_LABEL}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_ega.yaml "${port}" "${ega_override_args[@]}"
+        port=$((port + 1))
+      fi
 
-      run_grpc \
-        "topk_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "topk10-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_fedlab_topk.yaml \
-        "${port}" \
-        --override federated.algorithm=sparse_fedavg \
-        --override federated.topk_fraction=0.10
-      port=$((port + 1))
+      if algo_enabled topk; then
+        local -a topk_override_args=()
+        mapfile -t topk_override_args < <(topk_args)
+        run_grpc "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_fedlab_topk.yaml "${port}" "${topk_override_args[@]}"
+        port=$((port + 1))
+      fi
 
-      run_grpc \
-        "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "qsgd63-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_qsgd.yaml \
-        "${port}" \
-        --override federated.algorithm=qsgd_fedavg \
-        --override federated.qsgd_levels=63
-      port=$((port + 1))
+      if algo_enabled qsgd; then
+        local -a qsgd_override_args=()
+        mapfile -t qsgd_override_args < <(qsgd_args)
+        run_grpc "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_qsgd.yaml "${port}" "${qsgd_override_args[@]}"
+        port=$((port + 1))
+      fi
 
-      run_grpc \
-        "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "randomk10-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_randomk.yaml \
-        "${port}" \
-        --override federated.algorithm=randomk_fedavg \
-        --override federated.topk_fraction=0.10 \
-        --override federated.randomk_seed=2026
-      port=$((port + 1))
+      if algo_enabled randomk; then
+        local -a randomk_override_args=()
+        mapfile -t randomk_override_args < <(randomk_args)
+        run_grpc "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_randomk.yaml "${port}" "${randomk_override_args[@]}"
+        port=$((port + 1))
+      fi
 
-      run_grpc \
-        "sign_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_sign.yaml \
-        "${port}" \
-        --override federated.algorithm=sign_fedavg
-      port=$((port + 1))
+      if algo_enabled sign; then
+        local -a sign_override_args=()
+        mapfile -t sign_override_args < <(sign_args)
+        run_grpc "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_sign.yaml "${port}" "${sign_override_args[@]}"
+        port=$((port + 1))
+      fi
 
-      run_grpc \
-        "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml \
-        "${port}" \
-        --override federated.algorithm=adaptive_clipped_rdp_fedavg \
-        --override adaptive_clipped_rdp.seed=2026
-      port=$((port + 1))
+      if algo_enabled adaptive; then
+        local -a adaptive_override_args=()
+        mapfile -t adaptive_override_args < <(adaptive_args)
+        run_grpc "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml "${port}" "${adaptive_override_args[@]}"
+        port=$((port + 1))
+      fi
 
-      run_grpc \
-        "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "qint8-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_secure_quantized_fedavg.yaml \
-        "${port}" \
-        --override federated.algorithm=secure_quantized_fedavg \
-        --override federated.quantization_dtype=int8 \
-        --override federated.quantization_stochastic_rounding=false \
-        --override federated.quantization_seed=2026 \
-        --override privacy.noise_multiplier=0.0
-      port=$((port + 1))
+      if algo_enabled qint8; then
+        local -a qint8_override_args=()
+        mapfile -t qint8_override_args < <(qint8_args)
+        run_grpc "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_secure_quantized_fedavg.yaml "${port}" "${qint8_override_args[@]}"
+        port=$((port + 1))
+      fi
     else
       local async_flag=false
-      local async_workers=()
+      local -a async_workers=()
       if [[ "${mode}" == "single_async" ]]; then
         async_flag=true
         async_workers=(--override attack.async_workers=1)
       fi
 
-      run_single \
-        "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_fedavg.yaml \
-        --override federated.algorithm=fedavg \
-        --override attack.async_enabled=${async_flag} \
-        "${async_workers[@]}"
+      if algo_enabled fedavg; then
+        local -a fedavg_override_args=()
+        mapfile -t fedavg_override_args < <(fedavg_args)
+        run_single "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_fedavg.yaml "${fedavg_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+      fi
 
-      local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"
-      run_single \
-        "${ega_run_name}" \
-        "ega-ed128-dm-ega-pcq127-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_ega.yaml \
-        --override federated.algorithm=ega_fedavg \
-        --override ega.encoded_dim=128 \
-        --override ega.hidden_dim=1024 \
-        --override ega.residual_blocks=2 \
-        --override ega.download_method=ega \
-        --override ega.download_dtype=float32 \
-        --override ega.download_encoded_dtype=int8 \
-        --override ega.download_encoded_stochastic_rounding=false \
-        --override ega.download_trainable_only=true \
-        --override ega.download_quantization_level=127 \
-        --override ega.download_min_normalization=1e-6 \
-        --override ega.download_predictive_coding=true \
-        --override ega.normalization_strategy=ema_reported_client_max_abs \
-        --override ega.normalization_ema=0.9 \
-        --override ega.quantization_level=127 \
-        --override ega.encoded_dtype=int8 \
-        --override ega.encoded_stochastic_rounding=false \
-        --override ega.error_feedback=true \
-        --override ega.pretrain.device="${RUNTIME_DEVICE}" \
-        --override attack.async_enabled=${async_flag} \
-        "${async_workers[@]}"
+      if algo_enabled ega; then
+        local ega_run_name="ega_${mode}_uupdate_dmodel_${RUN_TAG}"
+        local -a ega_override_args=()
+        mapfile -t ega_override_args < <(ega_args)
+        run_single "${ega_run_name}" "${EGA_TRACKING_LABEL}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_ega.yaml "${ega_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+      fi
 
-      run_single \
-        "topk_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "topk10-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_fedlab_topk.yaml \
-        --override federated.algorithm=sparse_fedavg \
-        --override federated.topk_fraction=0.10 \
-        --override attack.async_enabled=${async_flag} \
-        "${async_workers[@]}"
-        
-      run_single \
-        "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "qsgd63-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_qsgd.yaml \
-        --override federated.algorithm=qsgd_fedavg \
-        --override federated.qsgd_levels=63 \
-        --override attack.async_enabled=${async_flag} \
-        "${async_workers[@]}"
+      if algo_enabled topk; then
+        local -a topk_override_args=()
+        mapfile -t topk_override_args < <(topk_args)
+        run_single "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_fedlab_topk.yaml "${topk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+      fi
 
-      run_single \
-        "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "randomk10-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_randomk.yaml \
-        --override federated.algorithm=randomk_fedavg \
-        --override federated.topk_fraction=0.10 \
-        --override federated.randomk_seed=2026 \
-        --override attack.async_enabled=${async_flag} \
-        "${async_workers[@]}"
+      if algo_enabled qsgd; then
+        local -a qsgd_override_args=()
+        mapfile -t qsgd_override_args < <(qsgd_args)
+        run_single "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_qsgd.yaml "${qsgd_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+      fi
 
-      run_single \
-        "sign_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_sign.yaml \
-        --override federated.algorithm=sign_fedavg \
-        --override attack.async_enabled=${async_flag} \
-        "${async_workers[@]}"
+      if algo_enabled randomk; then
+        local -a randomk_override_args=()
+        mapfile -t randomk_override_args < <(randomk_args)
+        run_single "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_randomk.yaml "${randomk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+      fi
 
-      run_single \
-        "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml \
-        --override federated.algorithm=adaptive_clipped_rdp_fedavg \
-        --override adaptive_clipped_rdp.seed=2026 \
-        --override attack.async_enabled=${async_flag} \
-        "${async_workers[@]}"
+      if algo_enabled sign; then
+        local -a sign_override_args=()
+        mapfile -t sign_override_args < <(sign_args)
+        run_single "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_sign.yaml "${sign_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+      fi
 
-      run_single \
-        "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" \
-        "qint8-${mode}-uupdate-dmodel-${TRACKING_TAG}" \
-        configs/rawdata2_secure_quantized_fedavg.yaml \
-        --override federated.algorithm=secure_quantized_fedavg \
-        --override federated.quantization_dtype=int8 \
-        --override federated.quantization_stochastic_rounding=false \
-        --override federated.quantization_seed=2026 \
-        --override privacy.noise_multiplier=0.0 \
-        --override attack.async_enabled=${async_flag} \
-        "${async_workers[@]}"
+      if algo_enabled adaptive; then
+        local -a adaptive_override_args=()
+        mapfile -t adaptive_override_args < <(adaptive_args)
+        run_single "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml "${adaptive_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+      fi
 
-      
+      if algo_enabled qint8; then
+        local -a qint8_override_args=()
+        mapfile -t qint8_override_args < <(qint8_args)
+        run_single "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rawdata2_secure_quantized_fedavg.yaml "${qint8_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+      fi
     fi
   done
 

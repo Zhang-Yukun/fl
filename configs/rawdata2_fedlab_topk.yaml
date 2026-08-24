@@ -15,6 +15,6 @@ evaluation:
   mode: oracle_full_update
 
 attack:
-  reference_metric: reconstruction_mse
+  reference_metric: nearest_client_train_mse
   client_selection: round_robin
   clients_per_round: 1

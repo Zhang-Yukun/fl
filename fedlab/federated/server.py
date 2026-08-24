@@ -113,11 +113,15 @@ class RoundRecord:
     total_transport_bytes: int
     total_transport_download_overhead_bytes: int
     total_transport_upload_overhead_bytes: int
+    fedavg_reference_download_bytes: int
+    fedavg_reference_download_parameters: int
     fedavg_reference_upload_bytes: int
     fedavg_reference_upload_parameters: int
     fedavg_reference_total_bytes: int
+    parameter_download_compression_ratio: float
     parameter_upload_compression_ratio: float
     parameter_total_communication_ratio: float
+    transport_download_compression_ratio: float
     transport_upload_compression_ratio: float
     transport_total_communication_ratio: float
     privacy_accountant: str | None = None
@@ -409,12 +413,15 @@ class FederatedServer:
         total_upload_parameters = total_parameter_upload_parameters
         fedavg_reference_download_bytes = sum(result.dense_download_reference_bytes for result in results)
         fedavg_reference_upload_bytes = sum(result.dense_bytes for result in results)
+        fedavg_reference_download_parameters = sum(result.dense_download_reference_parameters for result in results)
         fedavg_reference_upload_parameters = sum(result.dense_parameters for result in results)
         fedavg_reference_total_bytes = fedavg_reference_download_bytes + fedavg_reference_upload_bytes
         total_parameter_bytes = total_parameter_download_bytes + total_parameter_upload_bytes
         total_transport_bytes = total_transport_download_bytes + total_transport_upload_bytes
+        download_ratio = fedavg_reference_download_bytes / max(total_parameter_download_bytes, 1)
         upload_ratio = fedavg_reference_upload_bytes / max(total_parameter_upload_bytes, 1)
         total_ratio = fedavg_reference_total_bytes / max(total_parameter_bytes, 1)
+        transport_download_ratio = fedavg_reference_download_bytes / max(total_transport_download_bytes, 1)
         transport_upload_ratio = fedavg_reference_upload_bytes / max(total_transport_upload_bytes, 1)
         transport_total_ratio = fedavg_reference_total_bytes / max(total_transport_bytes, 1)
         client_records = [
@@ -473,11 +480,15 @@ class FederatedServer:
             total_transport_bytes=total_transport_bytes,
             total_transport_download_overhead_bytes=total_transport_download_overhead_bytes,
             total_transport_upload_overhead_bytes=total_transport_upload_overhead_bytes,
+            fedavg_reference_download_bytes=fedavg_reference_download_bytes,
+            fedavg_reference_download_parameters=fedavg_reference_download_parameters,
             fedavg_reference_upload_bytes=fedavg_reference_upload_bytes,
             fedavg_reference_upload_parameters=fedavg_reference_upload_parameters,
             fedavg_reference_total_bytes=fedavg_reference_total_bytes,
+            parameter_download_compression_ratio=download_ratio,
             parameter_upload_compression_ratio=upload_ratio,
             parameter_total_communication_ratio=total_ratio,
+            transport_download_compression_ratio=transport_download_ratio,
             transport_upload_compression_ratio=transport_upload_ratio,
             transport_total_communication_ratio=transport_total_ratio,
             privacy_accountant=None if self.last_privacy_step is None else "adaptive_clipped_rdp",
@@ -512,19 +523,20 @@ class FederatedServer:
         cumulative_transport_download_bytes = sum(item.total_transport_download_bytes for item in self.history)
         if not silent:
             logger.info(
-                "Round {} algorithm={} val_mse={:.6f} time={:.2f}s parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({}) parameter_upload_ratio={:.2f} parameter_total_ratio={:.2f}",
+                "Round {} algorithm={} val_mse={:.6f} time={:.2f}s parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({}) parameter_download_ratio={:.2f} parameter_upload_ratio={:.2f} parameter_total_ratio={:.2f}",
                 round_index,
                 record.algorithm,
                 record.val_mse,
                 record.round_time_seconds,
-                record.total_upload_bytes,
-                _format_num_bytes(record.total_upload_bytes),
-                record.total_download_bytes,
-                _format_num_bytes(record.total_download_bytes),
+                record.total_parameter_upload_bytes,
+                _format_num_bytes(record.total_parameter_upload_bytes),
+                record.total_parameter_download_bytes,
+                _format_num_bytes(record.total_parameter_download_bytes),
                 record.total_transport_upload_bytes,
                 _format_num_bytes(record.total_transport_upload_bytes),
                 record.total_transport_download_bytes,
                 _format_num_bytes(record.total_transport_download_bytes),
+                record.parameter_download_compression_ratio,
                 record.parameter_upload_compression_ratio,
                 record.parameter_total_communication_ratio,
             )

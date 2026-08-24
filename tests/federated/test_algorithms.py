@@ -41,6 +41,7 @@ def test_one_round_federated_run(tmp_path):
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
     assert result["rounds"] == 1
+    assert result["last_parameter_download_compression_ratio"] == 1.0
     assert result["last_parameter_upload_compression_ratio"] >= 6.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     assert metrics[0]["total_upload_bytes"] > 0
@@ -100,6 +101,8 @@ def test_wandb_cumulative_communication_payload_uses_history_totals(tmp_path):
     record = RoundRecord(**metrics[0])
     payload = _wandb_cumulative_communication_payload([record])
 
+    assert payload["cumulative/last_parameter_download_compression_ratio"] == metrics[0]["parameter_download_compression_ratio"]
+    assert payload["cumulative/last_transport_download_compression_ratio"] == metrics[0]["transport_download_compression_ratio"]
     assert payload["cumulative/total_parameter_upload_bytes"] == metrics[0]["total_parameter_upload_bytes"]
     assert payload["cumulative/total_parameter_download_bytes"] == metrics[0]["total_parameter_download_bytes"]
     assert payload["cumulative/total_transport_bytes"] == metrics[0]["total_transport_bytes"]
@@ -138,9 +141,13 @@ def test_standard_fedavg_uses_dense_updates(tmp_path):
     assert result["last_parameter_upload_compression_ratio"] == 1.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     assert all(client["aggregation_payload_kind"] == "dense_update" for client in metrics[0]["clients"])
+    assert metrics[0]["total_download_bytes"] == metrics[0]["fedavg_reference_download_bytes"]
     assert metrics[0]["total_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
+    assert metrics[0]["total_parameter_download_bytes"] == metrics[0]["fedavg_reference_download_bytes"]
     assert metrics[0]["total_parameter_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
+    assert metrics[0]["parameter_download_compression_ratio"] == 1.0
     assert metrics[0]["parameter_upload_compression_ratio"] == 1.0
+    assert 0.0 < metrics[0]["transport_download_compression_ratio"] < 1.0
     assert 0.0 < metrics[0]["transport_upload_compression_ratio"] < 1.0
 
 
@@ -166,7 +173,9 @@ def test_fedavg_dense_update_bytes_remain_exact_after_first_round(tmp_path):
     assert result["last_parameter_upload_compression_ratio"] == 1.0
     assert len(metrics) == 2
     for round_metrics in metrics:
+        assert round_metrics["total_parameter_download_bytes"] == round_metrics["fedavg_reference_download_bytes"]
         assert round_metrics["total_parameter_upload_bytes"] == round_metrics["fedavg_reference_upload_bytes"]
+        assert round_metrics["parameter_download_compression_ratio"] == 1.0
         assert round_metrics["parameter_upload_compression_ratio"] == 1.0
         for client in round_metrics["clients"]:
             assert client["parameter_upload_bytes"] == client["dense_upload_reference_bytes"]
