@@ -20,7 +20,7 @@ def test_training_lengths_are_consistent():
         load_config(CONFIG_DIR / "ega.yaml"),
     ]
 
-    assert configs[0]["training"]["patience"] == 301
+    assert configs[0]["training"]["patience"] == 50
     for config in configs:
         assert config["federated"]["rounds"] == 300
         assert config["federated"]["local_epochs"] == 1

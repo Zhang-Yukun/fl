@@ -21,10 +21,10 @@ _RUNTIME_DEFAULTS = {
     },
     "training": {
         "lr": 1e-3,
-        "patience": 5,
+        "patience": 50,
         "min_delta": 0.0,
         "loss": "mse",
-        "optimizer": "sgd",
+        "optimizer": "adam",
         "optimizer_eps": 1e-8,
         "weight_decay": 0.0,
         "momentum": 0.0,

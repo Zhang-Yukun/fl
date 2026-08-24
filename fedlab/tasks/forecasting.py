@@ -13,7 +13,7 @@ FORECASTING_TASK = TaskSpec(
     build_federated_loaders=build_federated_loaders,
     default_loss="mse",
     default_metrics=("mse", "mae", "mape"),
-    default_optimizer="sgd",
+    default_optimizer="adam",
     primary_metric="mse",
     primary_metric_mode="min",
 )
