@@ -241,7 +241,7 @@ EGA has a larger dedicated config surface. Use the active `configs/*ega*.yaml` f
 | `summary.json` | Final run summary. |
 | `metrics.json` | Per-round detailed records. |
 | `run.log` | Text logs written by loguru. |
-| `model.pt` / `centralized_model.pt` | Best-validation model used for final testing. |
+| `model.pt` / `model.pt` | Best-validation model used for final testing. |
 | `oracle_model.pt` | Saved only for federated runs with oracle evaluation. |
 | `attack_results.json` | One JSON record per DLG/iDLG attack. Empty or missing when attacks are disabled. |
 | `attack_artifacts/` | Raw tensor artifacts for attack reconstruction outputs. |

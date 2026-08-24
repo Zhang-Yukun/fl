@@ -1839,7 +1839,7 @@ def test_centralized_run_restores_best_validation_checkpoint(tmp_path, monkeypat
     result = run_centralized(config)
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    saved_state = torch.load(tmp_path / "centralized_model.pt", map_location="cpu")
+    saved_state = torch.load(tmp_path / "model.pt", map_location="cpu")
 
     assert result["mse"] == 10.0
     assert summary["best_round"] == 0

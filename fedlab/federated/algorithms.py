@@ -1163,7 +1163,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
             break
     model.load_state_dict(best_state)
     logger.info("Restored best centralized checkpoint from round {} for final test", best_round)
-    torch.save(model.state_dict(), output_dir / "centralized_model.pt")
+    torch.save(model.state_dict(), output_dir / "model.pt")
     test_metrics = evaluate(model, test_loader, device)
     final_test_step = max(len(history), best_round + 1)
     total_elapsed = time.perf_counter() - start_time
