@@ -1,2 +1,3 @@
 evaluation:
   mode: protocol
+  metrics: [mse, mae, mape]

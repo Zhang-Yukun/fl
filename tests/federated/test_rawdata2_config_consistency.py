@@ -63,6 +63,7 @@ def test_centralized_rounds_do_not_override_federated_rounds():
     fedavg = load_config(CONFIG_DIR / "fedavg.yaml")
 
     assert centralized.get("centralized", {}).get("rounds") == 500
+    assert centralized.get("training", {}).get("patience") == 50
     assert "epochs" not in centralized.get("training", {})
     assert fedavg.get("centralized", {}).get("rounds") == 10
     assert fedavg["federated"]["rounds"] == 300

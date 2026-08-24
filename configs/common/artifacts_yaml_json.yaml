@@ -1,2 +1,3 @@
 artifacts:
   config_formats: [yaml, json]
+  save_every_rounds: 0

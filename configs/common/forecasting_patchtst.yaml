@@ -9,3 +9,6 @@ includes:
   - artifacts_yaml_json.yaml
   - grpc_default.yaml
 
+transport:
+  upload_mode: update
+  download_mode: model

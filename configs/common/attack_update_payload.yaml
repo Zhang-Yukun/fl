@@ -20,4 +20,11 @@ attack:
   success_rate_threshold: 0.03
   data_range: 1.0
   model_mode: eval
+  local_optimizer: adam
+  local_lr: 0.001
+  local_optimizer_eps: 1.0e-8
+  async_enabled: false
+  async_workers: 1
+  async_max_pending_rounds: 5
+  device: same
   seed: 2026
