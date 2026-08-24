@@ -127,7 +127,7 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'EVAL_MODE="${EVAL_MODE:-protocol}"',
         'SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-true}"',
         'MODEL_DROPOUT="${MODEL_DROPOUT:-0.1}"',
-        'runtime.num_threads=4',
+        'runtime.num_threads=1',
         'runtime.num_interop_threads=1',
         'FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"',
         'TOPK_FRACTION="${TOPK_FRACTION:-}"',

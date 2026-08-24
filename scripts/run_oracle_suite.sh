@@ -202,7 +202,7 @@ runtime.seed=2026
 --override
 runtime.deterministic=true
 --override
-runtime.num_threads=4
+runtime.num_threads=1
 --override
 runtime.num_interop_threads=1
 --override
