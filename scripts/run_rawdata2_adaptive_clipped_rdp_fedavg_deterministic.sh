@@ -19,9 +19,18 @@ if [[ -n "${ATTACK_FREQUENCY}" ]]; then
 fi
 
 CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.entrypoints.train \
-  --config configs/adaptive_clipped_rdp_fedavg_deterministic.yaml \
+  --config configs/adaptive_clipped_rdp_fedavg.yaml \
   --mode federated \
   --override "experiment.output_dir=${OUTPUT_DIR}" \
   --override "runtime.device=${RUNTIME_DEVICE}" \
+  --override "runtime.seed=2026" \
+  --override "runtime.deterministic=true" \
+  --override "runtime.num_threads=1" \
+  --override "runtime.num_interop_threads=1" \
+  --override "data.shuffle_train=false" \
+  --override "model.dropout=0.0" \
+  --override "attack.seed=2026" \
+  --override "attack.async_enabled=false" \
+  --override "adaptive_clipped_rdp.seed=2026" \
   "${EXTRA_OVERRIDES[@]}" \
   "$@"

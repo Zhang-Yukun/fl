@@ -2,10 +2,21 @@
 set -euo pipefail
 
 GPU_ID="${GPU_ID:-0}"
-CONFIG="${CONFIG:-configs/fedavg_small_deterministic.yaml}"
+CONFIG="${CONFIG:-configs/fedavg.yaml}"
 BASE_OUTPUT="${BASE_OUTPUT:-outputs/fedavg_consistency}"
 PORT_BASE="${PORT_BASE:-55100}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+
+COMMON_OVERRIDES=(
+  --override "runtime.device=cuda:0"
+  --override "runtime.seed=2026"
+  --override "runtime.deterministic=true"
+  --override "runtime.num_threads=1"
+  --override "runtime.num_interop_threads=1"
+  --override "data.shuffle_train=false"
+  --override "model.dropout=0.0"
+  --override "attack.seed=2026"
+)
 
 run_single() {
   local name="$1"
@@ -14,7 +25,7 @@ run_single() {
     --config "${CONFIG}" \
     --mode federated \
     --override "experiment.output_dir=${BASE_OUTPUT}/${name}" \
-    --override "runtime.device=cuda:0" \
+    "${COMMON_OVERRIDES[@]}" \
     --override "attack.async_enabled=${async_flag}" \
     --override "attack.device=cuda:0"
 }
@@ -29,7 +40,7 @@ run_grpc() {
   CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.entrypoints.server \
     --config "${CONFIG}" \
     --override "experiment.output_dir=${outdir}" \
-    --override "runtime.device=cuda:0" \
+    "${COMMON_OVERRIDES[@]}" \
     --override "attack.async_enabled=${async_flag}" \
     --override "attack.device=cuda:0" \
     --override "grpc.address=${address}" \
@@ -44,7 +55,7 @@ run_grpc() {
       --client-id "${client_id}" \
       --config "${CONFIG}" \
       --override "experiment.output_dir=${outdir}" \
-      --override "runtime.device=cuda:0" \
+      "${COMMON_OVERRIDES[@]}" \
       --override "attack.async_enabled=${async_flag}" \
       --override "attack.device=cuda:0" \
       --override "grpc.address=${address}" \

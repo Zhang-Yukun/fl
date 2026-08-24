@@ -1,6 +1,7 @@
 includes:
   - common/forecasting_patchtst.yaml
   - common/federated.yaml
+  - common/evaluation_protocol.yaml
 
 experiment:
   name: sign
@@ -9,6 +10,3 @@ experiment:
 
 federated:
   algorithm: sign_fedavg
-
-evaluation:
-  mode: protocol

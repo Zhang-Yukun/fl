@@ -13,7 +13,7 @@ conda run -n torch_env python -m pytest tests
 
 The default smoke config uses compressed FedAvg with top-k sparse updates. The
 main rawdata2 comparison scripts are now separated into centralized training,
-standard FedAvg, and a simple compression-plus-security DP-TopK baseline.
+standard FedAvg, the retained sparse Top-k baseline, and the rest of the active eight federated algorithm configs.
 
 For a fuller Chinese usage guide covering configuration, algorithms, gRPC,
 artifacts, and extension points, see
@@ -94,19 +94,19 @@ and early stopping patience 50:
 ```bash
 bash scripts/run_rawdata2_centralized.sh
 bash scripts/run_rawdata2_fedavg.sh
-bash scripts/run_rawdata2_soteriafl.sh
-bash scripts/run_rawdata2_dp_topk.sh
-bash scripts/run_rawdata2_secure_quantized_fedavg.sh
-bash scripts/run_rawdata2_adaptive_clipped_rdp_fedavg_deterministic.sh
+bash scripts/run_rawdata2_fedlab_topk.sh
+bash scripts/run_rawdata2_qsgd.sh
 bash scripts/run_rawdata2_randomk.sh
 bash scripts/run_rawdata2_sign.sh
-bash scripts/run_rawdata2_qsgd.sh
+bash scripts/run_rawdata2_adaptive_clipped_rdp_fedavg_deterministic.sh
+bash scripts/run_rawdata2_secure_quantized_fedavg.sh
+bash scripts/run_rawdata2_ega.sh
 ```
 
 Extra overrides can be appended to any script, for example
 `--override federated.rounds=30`. Generated data is stored under
 `../data/rare_earth_rawdata2`; experiment artifacts are stored under the
-corresponding `outputs/<algorithm>` directory. `configs/dp_topk.yaml` is the simple default compression/privacy comparison config; `configs/soteriafl.yaml` remains available as a random-k local-DP baseline, and `configs/fedaware.yaml` remains available as a supplementary adaptive aggregation baseline.
+corresponding `outputs/<algorithm>` directory. The retained federated algorithm configs are `configs/fedavg.yaml`, `configs/topk.yaml`, `configs/qsgd.yaml`, `configs/randomk.yaml`, `configs/sign.yaml`, `configs/adaptive_clipped_rdp_fedavg.yaml`, `configs/secure_quantized_fedavg.yaml`, and `configs/ega.yaml`. 
 
 ## Reproduce
 

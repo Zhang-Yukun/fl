@@ -1,6 +1,7 @@
 includes:
   - common/forecasting_patchtst.yaml
   - common/federated.yaml
+  - common/evaluation_protocol.yaml
 
 experiment:
   name: adaptive_clipped_rdp_fedavg
@@ -9,9 +10,6 @@ experiment:
 
 federated:
   algorithm: adaptive_clipped_rdp_fedavg
-
-evaluation:
-  mode: protocol
 
 adaptive_clipped_rdp:
   noise_multiplier: 0.001

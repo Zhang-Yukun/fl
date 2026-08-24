@@ -9,6 +9,3 @@ includes:
   - artifacts_yaml_json.yaml
   - grpc_default.yaml
 
-evaluation:
-  mode: protocol
-

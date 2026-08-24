@@ -1,6 +1,7 @@
 includes:
   - common/forecasting_patchtst.yaml
   - common/federated.yaml
+  - common/evaluation_protocol.yaml
 
 experiment:
   name: topk
@@ -10,9 +11,6 @@ experiment:
 federated:
   algorithm: sparse_fedavg
   topk_fraction: 0.10
-
-evaluation:
-  mode: protocol
 
 attack:
   reference_metric: nearest_client_train_mse

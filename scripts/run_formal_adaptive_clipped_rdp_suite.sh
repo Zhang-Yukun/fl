@@ -46,7 +46,7 @@ run_single() {
 
   log "starting ${name}"
   CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.entrypoints.train \
-    --config configs/adaptive_clipped_rdp_fedavg_deterministic.yaml \
+    --config configs/adaptive_clipped_rdp_fedavg.yaml \
     --mode federated \
     --override "experiment.output_dir=${outdir}" \
     --override "runtime.device=${RUNTIME_DEVICE}" \
@@ -69,7 +69,7 @@ run_grpc() {
   log "starting ${name} on ${address}"
 
   CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.entrypoints.server \
-    --config configs/adaptive_clipped_rdp_fedavg_deterministic.yaml \
+    --config configs/adaptive_clipped_rdp_fedavg.yaml \
     --override "experiment.output_dir=${outdir}" \
     --override "runtime.device=${RUNTIME_DEVICE}" \
     --override "grpc.address=${address}" \
@@ -85,7 +85,7 @@ run_grpc() {
   for client_id in Nd2O3 CeO2 La2O3; do
     CUDA_VISIBLE_DEVICES="${GPU_ID}" PYTHONPATH=. "${PYTHON_BIN}" -m fedlab.entrypoints.client \
       --client-id "${client_id}" \
-      --config configs/adaptive_clipped_rdp_fedavg_deterministic.yaml \
+      --config configs/adaptive_clipped_rdp_fedavg.yaml \
       --override "experiment.output_dir=${outdir}" \
       --override "runtime.device=${RUNTIME_DEVICE}" \
       --override "grpc.address=${address}" \

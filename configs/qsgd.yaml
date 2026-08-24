@@ -1,6 +1,7 @@
 includes:
   - common/forecasting_patchtst.yaml
   - common/federated.yaml
+  - common/evaluation_protocol.yaml
 
 experiment:
   name: qsgd
@@ -11,6 +12,3 @@ federated:
   algorithm: qsgd_fedavg
   qsgd_levels: 63
   quantization_seed: 2026
-
-evaluation:
-  mode: protocol

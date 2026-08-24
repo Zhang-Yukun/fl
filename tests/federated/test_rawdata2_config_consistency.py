@@ -7,21 +7,21 @@ CONFIG_DIR = Path(__file__).parents[2] / "configs"
 
 
 def test_training_lengths_are_consistent():
-    """Algorithm configs share the agreed training/round budgets."""
+    """Retained algorithm configs share the agreed training/round budgets."""
 
-    base = load_config(CONFIG_DIR / "fedavg.yaml")
-    fedaware = load_config(CONFIG_DIR / "fedaware.yaml")
-    secure_quantized = load_config(CONFIG_DIR / "secure_quantized_fedavg.yaml")
-    dp_topk = load_config(CONFIG_DIR / "dp_topk.yaml")
-    topk = load_config(CONFIG_DIR / "topk.yaml")
-    soteriafl = load_config(CONFIG_DIR / "soteriafl.yaml")
-    randomk = load_config(CONFIG_DIR / "randomk.yaml")
-    sign = load_config(CONFIG_DIR / "sign.yaml")
-    qsgd = load_config(CONFIG_DIR / "qsgd.yaml")
-    ega = load_config(CONFIG_DIR / "ega.yaml")
+    configs = [
+        load_config(CONFIG_DIR / "fedavg.yaml"),
+        load_config(CONFIG_DIR / "topk.yaml"),
+        load_config(CONFIG_DIR / "qsgd.yaml"),
+        load_config(CONFIG_DIR / "randomk.yaml"),
+        load_config(CONFIG_DIR / "sign.yaml"),
+        load_config(CONFIG_DIR / "adaptive_clipped_rdp_fedavg.yaml"),
+        load_config(CONFIG_DIR / "secure_quantized_fedavg.yaml"),
+        load_config(CONFIG_DIR / "ega.yaml"),
+    ]
 
-    assert base["training"]["patience"] == 301
-    for config in (base, fedaware, secure_quantized, dp_topk, topk, soteriafl, randomk, sign, qsgd, ega):
+    assert configs[0]["training"]["patience"] == 301
+    for config in configs:
         assert config["federated"]["rounds"] == 300
         assert config["federated"]["local_epochs"] == 1
 
@@ -31,39 +31,30 @@ def test_shared_configs_do_not_define_compression_only_parameters():
 
     base = load_config(CONFIG_DIR / "fedavg.yaml")
     default = load_config(CONFIG_DIR / "default.yaml")
-    dp_topk = load_config(CONFIG_DIR / "dp_topk.yaml")
     topk = load_config(CONFIG_DIR / "topk.yaml")
-    soteriafl = load_config(CONFIG_DIR / "soteriafl.yaml")
     randomk = load_config(CONFIG_DIR / "randomk.yaml")
 
     assert "topk_fraction" not in base["federated"]
     assert "topk_fraction" not in default["federated"]
-    assert dp_topk["federated"]["topk_fraction"] == 0.50
     assert topk["federated"]["topk_fraction"] == 0.10
-    assert soteriafl["federated"]["topk_fraction"] == 0.10
     assert randomk["federated"]["topk_fraction"] == 0.10
 
 
 def test_all_algorithm_configs_default_to_protocol_evaluation():
     """All algorithm configs default to protocol evaluation unless explicitly overridden."""
 
-    fedavg = load_config(CONFIG_DIR / "fedavg.yaml")
-    fedaware = load_config(CONFIG_DIR / "fedaware.yaml")
-    approximate = [
+    configs = [
+        load_config(CONFIG_DIR / "fedavg.yaml"),
         load_config(CONFIG_DIR / "adaptive_clipped_rdp_fedavg.yaml"),
-        load_config(CONFIG_DIR / "dp_topk.yaml"),
         load_config(CONFIG_DIR / "ega.yaml"),
         load_config(CONFIG_DIR / "topk.yaml"),
         load_config(CONFIG_DIR / "qsgd.yaml"),
         load_config(CONFIG_DIR / "randomk.yaml"),
         load_config(CONFIG_DIR / "secure_quantized_fedavg.yaml"),
         load_config(CONFIG_DIR / "sign.yaml"),
-        load_config(CONFIG_DIR / "soteriafl.yaml"),
     ]
 
-    assert fedavg.get("evaluation", {}).get("mode", "protocol") == "protocol"
-    assert fedaware.get("evaluation", {}).get("mode", "protocol") == "protocol"
-    for config in approximate:
+    for config in configs:
         assert config.get("evaluation", {}).get("mode", "protocol") == "protocol"
 
 
@@ -84,7 +75,7 @@ def test_algorithm_configs_do_not_carry_unrelated_blocks():
     ega = load_config(CONFIG_DIR / "ega.yaml")
 
     assert "privacy" not in fedavg
-    assert "fedaware" not in secure_quantized
+    assert "privacy" in secure_quantized
     assert "adaptive_clipped_rdp" not in secure_quantized
     assert "ega" not in secure_quantized
     assert "privacy" not in adaptive

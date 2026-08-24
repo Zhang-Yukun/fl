@@ -634,7 +634,7 @@ main() {
       if algo_enabled adaptive; then
         local -a adaptive_override_args=()
         mapfile -t adaptive_override_args < <(adaptive_args)
-        run_grpc "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/adaptive_clipped_rdp_fedavg_deterministic.yaml "${port}" "${adaptive_override_args[@]}"
+        run_grpc "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/adaptive_clipped_rdp_fedavg.yaml "${port}" "${adaptive_override_args[@]}"
         port=$((port + 1))
       fi
 
@@ -692,7 +692,7 @@ main() {
       if algo_enabled adaptive; then
         local -a adaptive_override_args=()
         mapfile -t adaptive_override_args < <(adaptive_args)
-        run_single "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/adaptive_clipped_rdp_fedavg_deterministic.yaml "${adaptive_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/adaptive_clipped_rdp_fedavg.yaml "${adaptive_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled qint8; then

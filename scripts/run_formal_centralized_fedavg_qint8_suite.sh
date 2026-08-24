@@ -237,7 +237,7 @@ main() {
 
   run_single \
     adaptive_clipped_rdp_single_sync \
-    configs/adaptive_clipped_rdp_fedavg_deterministic.yaml \
+    configs/adaptive_clipped_rdp_fedavg.yaml \
     federated \
     --override experiment.mode=federated \
     --override attack.async_enabled=false \

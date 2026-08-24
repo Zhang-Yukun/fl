@@ -1,6 +1,7 @@
 includes:
   - common/forecasting_patchtst.yaml
   - common/federated.yaml
+  - common/evaluation_protocol.yaml
 
 experiment:
   name: ega
@@ -10,9 +11,6 @@ experiment:
 federated:
   algorithm: ega_fedavg
   quantization_seed: 2026
-
-evaluation:
-  mode: protocol
 
 ega:
   artifact_path: artifacts/ega/ega_h240_v1.pt

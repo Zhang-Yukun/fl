@@ -10,14 +10,12 @@ def test_rawdata2_run_scripts_are_separate_and_executable():
     expected = {
         "run_rawdata2_centralized.sh": ["--mode centralized", "outputs/centralized"],
         "run_rawdata2_fedavg.sh": ["--mode federated", "federated.algorithm=fedavg"],
-        "run_rawdata2_soteriafl.sh": ["configs/soteriafl.yaml"],
-        "run_rawdata2_dp_topk.sh": ["configs/dp_topk.yaml"],
-        "run_rawdata2_secure_quantized_fedavg.sh": ["configs/secure_quantized_fedavg.yaml"],
-        "run_rawdata2_fedaware.sh": ["configs/fedaware.yaml"],
         "run_rawdata2_fedlab_topk.sh": ["configs/topk.yaml"],
+        "run_rawdata2_qsgd.sh": ["configs/qsgd.yaml"],
         "run_rawdata2_randomk.sh": ["configs/randomk.yaml"],
         "run_rawdata2_sign.sh": ["configs/sign.yaml"],
-        "run_rawdata2_qsgd.sh": ["configs/qsgd.yaml"],
+        "run_rawdata2_adaptive_clipped_rdp_fedavg_deterministic.sh": ["configs/adaptive_clipped_rdp_fedavg.yaml"],
+        "run_rawdata2_secure_quantized_fedavg.sh": ["configs/secure_quantized_fedavg.yaml"],
         "run_rawdata2_ega.sh": ["configs/ega.yaml"],
     }
     for name, markers in expected.items():
@@ -40,7 +38,7 @@ def test_rawdata2_all_script_runs_each_entrypoint():
     for script_name in (
         "scripts/run_rawdata2_centralized.sh",
         "scripts/run_rawdata2_fedavg.sh",
-        "scripts/run_rawdata2_dp_topk.sh",
+        "scripts/run_rawdata2_fedlab_topk.sh",
     ):
         assert script_name in content
     assert 'bash "${run_script}" "$@"' in content

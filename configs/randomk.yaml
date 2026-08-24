@@ -1,6 +1,7 @@
 includes:
   - common/forecasting_patchtst.yaml
   - common/federated.yaml
+  - common/evaluation_protocol.yaml
 
 experiment:
   name: randomk
@@ -11,6 +12,3 @@ federated:
   algorithm: randomk_fedavg
   topk_fraction: 0.10
   randomk_seed: 2026
-
-evaluation:
-  mode: protocol
