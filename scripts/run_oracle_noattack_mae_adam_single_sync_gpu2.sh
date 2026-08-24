@@ -3,46 +3,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-BASE_OUTPUT_ROOT="${BASE_OUTPUT_ROOT:-outputs/oracle_noattack_mae_adam_shortlist_$(date +%Y%m%d_%H%M%S)}"
-COMMON_PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-oracle-noattack-shortlist-adam}"
+BASE_OUTPUT_ROOT="${BASE_OUTPUT_ROOT:-outputs/oracle_noattack_mae_adam_single_sync_$(date +%Y%m%d_%H%M%S)}"
+COMMON_PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-oracle-noattack-single_sync-adam}"
+SUITE_SEED="${SUITE_SEED:-2026}"
 COMMON_BASE_OUTPUT="${BASE_OUTPUT_ROOT}/noattack_mae"
-
-# Non-EGA baselines plus centralized.
-BASE_OUTPUT="${COMMON_BASE_OUTPUT}" \
-PROJECT_NAME="${COMMON_PROJECT_NAME}" \
-RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}" \
-RUN_TAG=oracle_noattack \
-TRACKING_TAG=oracle-noattack \
-ATTACK_ENABLED=false \
-LOSS_NAME=mae \
-LOSS_TAG=mae \
-TRAIN_OPTIMIZER=adam \
-EVAL_MODE=protocol \
-SHUFFLE_TRAIN=true \
-MODEL_DROPOUT=0.1 \
-FEDERATED_ALGORITHMS=fedavg,topk,qsgd,randomk,sign,adaptive,qint8 \
-bash scripts/run_oracle_suite.sh --modes centralized,single_sync
-
-# Default EGA config.
-BASE_OUTPUT="${COMMON_BASE_OUTPUT}" \
-PROJECT_NAME="${COMMON_PROJECT_NAME}" \
-RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}" \
-RUN_TAG=oracle_noattack \
-TRACKING_TAG=oracle-noattack \
-RUN_CENTRALIZED=false \
-ATTACK_ENABLED=false \
-LOSS_NAME=mae \
-LOSS_TAG=mae \
-TRAIN_OPTIMIZER=adam \
-EVAL_MODE=protocol \
-SHUFFLE_TRAIN=true \
-MODEL_DROPOUT=0.1 \
-FEDERATED_ALGORITHMS=ega \
-EGA_PRETRAIN_DEVICE="${RUNTIME_DEVICE:-cuda:0}" \
-bash scripts/run_oracle_suite.sh --modes single_sync
 
 # Shortlisted EGA config 1.
 BASE_OUTPUT="${COMMON_BASE_OUTPUT}" \
+SUITE_SEED="${SUITE_SEED}" \
 PROJECT_NAME="${COMMON_PROJECT_NAME}" \
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}" \
 RUN_TAG=oracle_noattack \
@@ -69,6 +37,7 @@ bash scripts/run_oracle_suite.sh --modes single_sync
 
 # Shortlisted EGA config 2.
 BASE_OUTPUT="${COMMON_BASE_OUTPUT}" \
+SUITE_SEED="${SUITE_SEED}" \
 PROJECT_NAME="${COMMON_PROJECT_NAME}" \
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}" \
 RUN_TAG=oracle_noattack \
@@ -95,6 +64,7 @@ bash scripts/run_oracle_suite.sh --modes single_sync
 
 # Shortlisted EGA config 3.
 BASE_OUTPUT="${COMMON_BASE_OUTPUT}" \
+SUITE_SEED="${SUITE_SEED}" \
 PROJECT_NAME="${COMMON_PROJECT_NAME}" \
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}" \
 RUN_TAG=oracle_noattack \
@@ -115,6 +85,8 @@ EGA_RESIDUAL_BLOCKS=3 \
 EGA_QUANTIZATION_LEVEL=127 \
 EGA_NORMALIZATION_EMA=0.98 \
 EGA_PRETRAIN_EPOCHS=180 \
-EGA_PRETRAIN_PATIENCE=30 \
-EGA_PRETRAIN_LR=0.0003 \
+EGA_PRETRAIN_PATIENCE=36 \
+EGA_PRETRAIN_LR=0.00025 \
+EGA_PRETRAIN_TRAIN_GROUPS=40000 \
+EGA_PRETRAIN_VAL_GROUPS=20000 \
 bash scripts/run_oracle_suite.sh --modes single_sync
