@@ -36,7 +36,6 @@ ega:
   download_encoded_dtype: int8
   error_feedback: true
   pretrain:
-    device: cuda:0
     epochs: 100
     patience: 20
     min_delta: 0.0
