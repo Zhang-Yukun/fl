@@ -215,7 +215,7 @@ main() {
   local -a modes=()
   if [[ "${WORKER_KIND}" == sync ]]; then
     modes=("${sync_modes[@]}")
-    run_centralized centralized cen configs/rawdata2_centralized.yaml
+    run_centralized centralized cen configs/centralized.yaml
   else
     modes=("${async_modes[@]}")
   fi
@@ -223,52 +223,52 @@ main() {
   local mode
   for mode in "${modes[@]}"; do
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc "fedavg_${mode}" "fa-${mode}" configs/rawdata2_fedavg.yaml "${port}" --override federated.algorithm=fedavg --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_grpc "fedavg_${mode}" "fa-${mode}" configs/fedavg.yaml "${port}" --override federated.algorithm=fedavg --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
       port=$((port + 1))
     else
-      run_single "fedavg_${mode}" "fa-${mode}" configs/rawdata2_fedavg.yaml --override federated.algorithm=fedavg --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_single "fedavg_${mode}" "fa-${mode}" configs/fedavg.yaml --override federated.algorithm=fedavg --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
     fi
 
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc "topk_${mode}" "tk-${mode}" configs/rawdata2_fedlab_topk.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_grpc "topk_${mode}" "tk-${mode}" configs/topk.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
       port=$((port + 1))
     else
-      run_single "topk_${mode}" "tk-${mode}" configs/rawdata2_fedlab_topk.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_single "topk_${mode}" "tk-${mode}" configs/topk.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
     fi
 
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc "qint8_${mode}" "qi-${mode}" configs/rawdata2_secure_quantized_fedavg.yaml "${port}" --override federated.rounds=${ROUNDS} --override federated.quantization_dtype=int8 --override federated.quantization_stochastic_rounding=false --override privacy.noise_multiplier=0.0 --override data.shuffle_train=false
+      run_grpc "qint8_${mode}" "qi-${mode}" configs/secure_quantized_fedavg.yaml "${port}" --override federated.rounds=${ROUNDS} --override federated.quantization_dtype=int8 --override federated.quantization_stochastic_rounding=false --override privacy.noise_multiplier=0.0 --override data.shuffle_train=false
       port=$((port + 1))
     else
-      run_single "qint8_${mode}" "qi-${mode}" configs/rawdata2_secure_quantized_fedavg.yaml --override federated.rounds=${ROUNDS} --override federated.quantization_dtype=int8 --override federated.quantization_stochastic_rounding=false --override privacy.noise_multiplier=0.0 --override data.shuffle_train=false
+      run_single "qint8_${mode}" "qi-${mode}" configs/secure_quantized_fedavg.yaml --override federated.rounds=${ROUNDS} --override federated.quantization_dtype=int8 --override federated.quantization_stochastic_rounding=false --override privacy.noise_multiplier=0.0 --override data.shuffle_train=false
     fi
 
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc "randomk_${mode}" "rk-${mode}" configs/rawdata2_randomk.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_grpc "randomk_${mode}" "rk-${mode}" configs/randomk.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
       port=$((port + 1))
     else
-      run_single "randomk_${mode}" "rk-${mode}" configs/rawdata2_randomk.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_single "randomk_${mode}" "rk-${mode}" configs/randomk.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
     fi
 
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc "sign_${mode}" "sg-${mode}" configs/rawdata2_sign.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_grpc "sign_${mode}" "sg-${mode}" configs/sign.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
       port=$((port + 1))
     else
-      run_single "sign_${mode}" "sg-${mode}" configs/rawdata2_sign.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_single "sign_${mode}" "sg-${mode}" configs/sign.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
     fi
 
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc "qsgd_${mode}" "qg-${mode}" configs/rawdata2_qsgd.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_grpc "qsgd_${mode}" "qg-${mode}" configs/qsgd.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
       port=$((port + 1))
     else
-      run_single "qsgd_${mode}" "qg-${mode}" configs/rawdata2_qsgd.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
+      run_single "qsgd_${mode}" "qg-${mode}" configs/qsgd.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false
     fi
 
     if [[ "${mode}" == grpc_* ]]; then
-      run_grpc "adaptive_${mode}" "ac-${mode}" configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false --override adaptive_clipped_rdp.seed=2026
+      run_grpc "adaptive_${mode}" "ac-${mode}" configs/adaptive_clipped_rdp_fedavg_deterministic.yaml "${port}" --override federated.rounds=${ROUNDS} --override data.shuffle_train=false --override adaptive_clipped_rdp.seed=2026
       port=$((port + 1))
     else
-      run_single "adaptive_${mode}" "ac-${mode}" configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false --override adaptive_clipped_rdp.seed=2026
+      run_single "adaptive_${mode}" "ac-${mode}" configs/adaptive_clipped_rdp_fedavg_deterministic.yaml --override federated.rounds=${ROUNDS} --override data.shuffle_train=false --override adaptive_clipped_rdp.seed=2026
     fi
   done
   log "worker finished"

@@ -1,0 +1,8 @@
+includes:
+  - common/forecasting_patchtst.yaml
+  - common/centralized.yaml
+
+experiment:
+  name: centralized
+  mode: centralized
+  output_dir: outputs/centralized

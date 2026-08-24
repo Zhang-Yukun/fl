@@ -142,12 +142,12 @@ def test_resolve_ega_artifact_path_defaults_to_experiment_output_dir():
 def test_resolve_ega_artifact_path_resolves_relative_configured_path_under_output_dir():
     config = {
         "experiment": {"output_dir": "outputs/demo_run", "name": "demo"},
-        "ega": {"artifact_path": "artifacts/ega/rawdata2_ega_h240_v1.pt"},
+        "ega": {"artifact_path": "artifacts/ega/ega_h240_v1.pt"},
     }
 
     path = resolve_ega_artifact_path(config, num_clients=3)
 
-    assert path == Path("outputs/demo_run/artifacts/ega/rawdata2_ega_h240_v1.pt")
+    assert path == Path("outputs/demo_run/artifacts/ega/ega_h240_v1.pt")
 
 
 def test_resolve_ega_artifact_path_preserves_absolute_configured_path():

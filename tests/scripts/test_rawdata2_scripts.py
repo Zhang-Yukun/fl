@@ -5,20 +5,20 @@ SCRIPT_DIR = Path(__file__).parents[2] / "scripts"
 
 
 def test_rawdata2_run_scripts_are_separate_and_executable():
-    """Rawdata2 default runs expose separate bash entry points."""
+    """Default example runs expose separate bash entry points."""
 
     expected = {
-        "run_rawdata2_centralized.sh": ["--mode centralized", "rawdata2_centralized"],
+        "run_rawdata2_centralized.sh": ["--mode centralized", "outputs/centralized"],
         "run_rawdata2_fedavg.sh": ["--mode federated", "federated.algorithm=fedavg"],
-        "run_rawdata2_soteriafl.sh": ["configs/rawdata2_soteriafl.yaml"],
-        "run_rawdata2_dp_topk.sh": ["configs/rawdata2_dp_topk.yaml"],
-        "run_rawdata2_secure_quantized_fedavg.sh": ["configs/rawdata2_secure_quantized_fedavg.yaml"],
-        "run_rawdata2_fedaware.sh": ["configs/rawdata2_fedaware.yaml"],
-        "run_rawdata2_fedlab_topk.sh": ["configs/rawdata2_fedlab_topk.yaml"],
-        "run_rawdata2_randomk.sh": ["configs/rawdata2_randomk.yaml"],
-        "run_rawdata2_sign.sh": ["configs/rawdata2_sign.yaml"],
-        "run_rawdata2_qsgd.sh": ["configs/rawdata2_qsgd.yaml"],
-        "run_rawdata2_ega.sh": ["configs/rawdata2_ega.yaml"],
+        "run_rawdata2_soteriafl.sh": ["configs/soteriafl.yaml"],
+        "run_rawdata2_dp_topk.sh": ["configs/dp_topk.yaml"],
+        "run_rawdata2_secure_quantized_fedavg.sh": ["configs/secure_quantized_fedavg.yaml"],
+        "run_rawdata2_fedaware.sh": ["configs/fedaware.yaml"],
+        "run_rawdata2_fedlab_topk.sh": ["configs/topk.yaml"],
+        "run_rawdata2_randomk.sh": ["configs/randomk.yaml"],
+        "run_rawdata2_sign.sh": ["configs/sign.yaml"],
+        "run_rawdata2_qsgd.sh": ["configs/qsgd.yaml"],
+        "run_rawdata2_ega.sh": ["configs/ega.yaml"],
     }
     for name, markers in expected.items():
         path = SCRIPT_DIR / name
@@ -31,7 +31,7 @@ def test_rawdata2_run_scripts_are_separate_and_executable():
 
 
 def test_rawdata2_all_script_runs_each_entrypoint():
-    """The aggregate rawdata2 script invokes the default three experiment scripts."""
+    """The aggregate example script invokes the default three experiment scripts."""
 
     path = SCRIPT_DIR / "run_rawdata2_all.sh"
     assert path.exists()
@@ -63,8 +63,8 @@ def test_formal_suite_script_exists_and_lists_all_requested_runs():
         "qint8_single_async",
         "qint8_grpc_sync",
         "qint8_grpc_async",
-        "configs/rawdata2_fedavg.yaml",
-        "configs/rawdata2_secure_quantized_fedavg.yaml",
+        "configs/fedavg.yaml",
+        "configs/secure_quantized_fedavg.yaml",
         "federated.quantization_dtype=int8",
         "-m fedlab.entrypoints.train",
         "-m fedlab.entrypoints.server",
@@ -97,7 +97,7 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'TRAIN_MOMENTUM="${TRAIN_MOMENTUM:-}"',
         'TRAIN_WEIGHT_DECAY="${TRAIN_WEIGHT_DECAY:-}"',
         'TRAIN_OPTIMIZER_EPS="${TRAIN_OPTIMIZER_EPS:-}"',
-        'EVAL_MODE="${EVAL_MODE:-oracle_full_update}"',
+        'EVAL_MODE="${EVAL_MODE:-protocol}"',
         'SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-false}"',
         'MODEL_DROPOUT="${MODEL_DROPOUT:-0.0}"',
         'FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"',

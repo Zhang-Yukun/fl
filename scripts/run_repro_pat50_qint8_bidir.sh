@@ -7,7 +7,7 @@ GPU_ID="${GPU_ID:-0}"
 OUTPUT_DIR="${OUTPUT_DIR:-outputs/repro_pat50/secure_qint8_bidir_seed2026_pat50_payloadv1}"
 
 CUDA_VISIBLE_DEVICES="${GPU_ID}" python -m fedlab.entrypoints.train \
-  --config configs/rawdata2_secure_quantized_fedavg.yaml \
+  --config configs/secure_quantized_fedavg.yaml \
   --mode federated \
   --override "experiment.output_dir=${OUTPUT_DIR}" \
   --override runtime.device=cuda:0 \

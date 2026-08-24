@@ -8,7 +8,7 @@ Run date: 2026-07-31
 bash scripts/run_rawdata2_centralized.sh
 bash scripts/run_rawdata2_fedavg.sh
 bash scripts/run_rawdata2_soteriafl.sh
-conda run -n torch_env bash scripts/run_rawdata2_soteriafl.sh --override experiment.output_dir=outputs/rawdata2_soteriafl_smoke --override federated.rounds=2 --override training.patience=2 --override attack.frequency_rounds=1 --override attack.steps=1 --override attack.max_samples=1
+conda run -n torch_env bash scripts/run_rawdata2_soteriafl.sh --override experiment.output_dir=outputs/soteriafl_smoke --override federated.rounds=2 --override training.patience=2 --override attack.frequency_rounds=1 --override attack.steps=1 --override attack.max_samples=1
 ```
 
 The repository's default comparison set is now:
@@ -21,7 +21,7 @@ The repository's default comparison set is now:
 
 ## Full PatchTST Centralized
 
-Output directory: `outputs/rawdata2_centralized/`
+Output directory: `outputs/centralized/`
 
 - Model parameters: 6,269,448
 - Model bytes: 25,077,796
@@ -35,7 +35,7 @@ Output directory: `outputs/rawdata2_centralized/`
 
 ## Full PatchTST FedAvg
 
-Output directory: `outputs/rawdata2_fedavg/`
+Output directory: `outputs/fedavg/`
 
 - Model parameters: 6,269,448
 - Model bytes: 25,077,796
@@ -70,7 +70,7 @@ New full runs should be compared against this stronger attack setting, not again
 A one-round FedAvg smoke run verified the strengthened attack path on `cuda:0` with full PatchTST and `attack.steps=300`:
 
 ```bash
-conda run -n torch_env python -m fedlab.entrypoints.train --config configs/rawdata2_fedavg.yaml --override experiment.output_dir=outputs/rawdata2_patchtst_gpu_attack_smoke --override experiment.mode=federated --override federated.rounds=1 --override training.patience=1 --override attack.frequency_rounds=1
+conda run -n torch_env python -m fedlab.entrypoints.train --config configs/fedavg.yaml --override experiment.output_dir=outputs/fedavg_gpu_attack_smoke --override experiment.mode=federated --override federated.rounds=1 --override training.patience=1 --override attack.frequency_rounds=1
 ```
 
 - Attack runtime: 18.7609 seconds
@@ -82,7 +82,7 @@ This confirms the prior zero success rate was not caused by a broken attack pipe
 
 ## SoteriaFL Smoke
 
-Output directory: `outputs/rawdata2_soteriafl_smoke/`
+Output directory: `outputs/soteriafl_smoke/`
 
 - Algorithm: SoteriaFL-style local-DP random-k sparse uploads
 - Rounds completed: 2
@@ -109,10 +109,10 @@ These runs use full PatchTST on `cuda:0`, evaluate DLG and iDLG every federated 
 Command:
 
 ```bash
-conda run -n torch_env python -m fedlab.entrypoints.train --config configs/rawdata2_fedlab_topk.yaml --override experiment.output_dir=outputs/rawdata2_fedlab_topk_attack5 --override federated.rounds=5 --override training.patience=5
+conda run -n torch_env python -m fedlab.entrypoints.train --config configs/topk.yaml --override experiment.output_dir=outputs/topk_attack5 --override federated.rounds=5 --override training.patience=5
 ```
 
-Output directory: `outputs/rawdata2_fedlab_topk_attack5/`
+Output directory: `outputs/topk_attack5/`
 
 - Algorithm: `sparse_fedavg` with Top-k update upload
 - Top-k fraction: 0.05
@@ -133,10 +133,10 @@ Output directory: `outputs/rawdata2_fedlab_topk_attack5/`
 Command:
 
 ```bash
-conda run -n torch_env python -m fedlab.entrypoints.train --config configs/rawdata2_fedlab_topk.yaml --override experiment.output_dir=outputs/rawdata2_fedlab_topk_attack30
+conda run -n torch_env python -m fedlab.entrypoints.train --config configs/topk.yaml --override experiment.output_dir=outputs/topk_attack30
 ```
 
-Output directory: `outputs/rawdata2_fedlab_topk_attack30/`
+Output directory: `outputs/topk_attack30/`
 
 - Algorithm: `sparse_fedavg` with Top-k update upload
 - Top-k fraction: 0.05
@@ -160,10 +160,10 @@ Output directory: `outputs/rawdata2_fedlab_topk_attack30/`
 Command:
 
 ```bash
-conda run -n torch_env python -m fedlab.entrypoints.train --config configs/rawdata2_soteriafl.yaml --override experiment.output_dir=outputs/rawdata2_soteriafl_attack5 --override federated.rounds=5 --override training.patience=5
+conda run -n torch_env python -m fedlab.entrypoints.train --config configs/soteriafl.yaml --override experiment.output_dir=outputs/soteriafl_attack5 --override federated.rounds=5 --override training.patience=5
 ```
 
-Output directory: `outputs/rawdata2_soteriafl_attack5/`
+Output directory: `outputs/soteriafl_attack5/`
 
 - Algorithm: `soteriafl` with clipped/noisy update and unbiased random-k upload
 - Top-k/random-k fraction: 0.05

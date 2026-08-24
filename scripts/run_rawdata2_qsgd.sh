@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PYTHONPATH=. python -m fedlab.entrypoints.train \
-  --config configs/rawdata2_qsgd.yaml \
+  --config configs/qsgd.yaml \
   --mode federated \
-  --override experiment.output_dir=outputs/rawdata2_qsgd \
+  --override experiment.output_dir=outputs/qsgd \
   "$@"

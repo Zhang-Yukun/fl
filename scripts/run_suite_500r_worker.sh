@@ -89,38 +89,38 @@ run_train() {
 }
 
 if [[ "${WORKER_KIND}" == "gpu0" ]]; then
-  run_train centralized configs/rawdata2_centralized.yaml centralized_500r_pat50 cen-500r-pat50 \
+  run_train centralized configs/centralized.yaml centralized_500r_pat50 cen-500r-pat50 \
     --override "centralized.rounds=${ROUNDS}"
 
-  run_train federated configs/rawdata2_fedavg.yaml fedavg_single_sync_500r_pat50 fedavg-single-sync-500r-pat50 \
+  run_train federated configs/fedavg.yaml fedavg_single_sync_500r_pat50 fedavg-single-sync-500r-pat50 \
     --override "federated.algorithm=fedavg" \
     --override "federated.rounds=${ROUNDS}"
 
-  run_train federated configs/rawdata2_fedlab_topk.yaml topk_single_sync_500r_pat50 topk-single-sync-500r-pat50 \
+  run_train federated configs/topk.yaml topk_single_sync_500r_pat50 topk-single-sync-500r-pat50 \
     --override "federated.algorithm=sparse_fedavg" \
     --override "federated.rounds=${ROUNDS}" \
     $(emit_optional_override 'federated.topk_fraction' "${TOPK_FRACTION}")
 
-  run_train federated configs/rawdata2_qsgd.yaml qsgd_single_sync_500r_pat50 qsgd-single-sync-500r-pat50 \
+  run_train federated configs/qsgd.yaml qsgd_single_sync_500r_pat50 qsgd-single-sync-500r-pat50 \
     --override "federated.algorithm=qsgd_fedavg" \
     --override "federated.rounds=${ROUNDS}" \
     $(emit_optional_override 'federated.qsgd_levels' "${QSGD_LEVELS}")
 
-  run_train federated configs/rawdata2_randomk.yaml randomk_single_sync_500r_pat50 randomk-single-sync-500r-pat50 \
+  run_train federated configs/randomk.yaml randomk_single_sync_500r_pat50 randomk-single-sync-500r-pat50 \
     --override "federated.algorithm=randomk_fedavg" \
     --override "federated.rounds=${ROUNDS}" \
     $(emit_optional_override 'federated.topk_fraction' "${RANDOMK_FRACTION}") \
     $(emit_optional_override 'federated.randomk_seed' "${RANDOMK_SEED}")
 else
-  run_train federated configs/rawdata2_sign.yaml sign_single_sync_500r_pat50 sign-single-sync-500r-pat50 \
+  run_train federated configs/sign.yaml sign_single_sync_500r_pat50 sign-single-sync-500r-pat50 \
     --override "federated.algorithm=sign_fedavg" \
     --override "federated.rounds=${ROUNDS}"
 
-  run_train federated configs/rawdata2_adaptive_clipped_rdp_fedavg.yaml adaptive_single_sync_500r_pat50 adaptive-single-sync-500r-pat50 \
+  run_train federated configs/adaptive_clipped_rdp_fedavg.yaml adaptive_single_sync_500r_pat50 adaptive-single-sync-500r-pat50 \
     --override "federated.algorithm=adaptive_clipped_rdp_fedavg" \
     --override "federated.rounds=${ROUNDS}"
 
-  run_train federated configs/rawdata2_secure_quantized_fedavg.yaml qint8_single_sync_500r_pat50 secure-quantized-single-sync-500r-pat50 \
+  run_train federated configs/secure_quantized_fedavg.yaml qint8_single_sync_500r_pat50 secure-quantized-single-sync-500r-pat50 \
     --override "federated.algorithm=secure_quantized_fedavg" \
     --override "federated.rounds=${ROUNDS}" \
     $(emit_optional_override 'federated.quantization_dtype' "${QINT8_DTYPE}") \
@@ -128,7 +128,7 @@ else
     $(emit_optional_override 'federated.quantization_seed' "${QINT8_SEED}") \
     $(emit_optional_override 'privacy.noise_multiplier' "${QINT8_NOISE_MULTIPLIER}")
 
-  run_train federated configs/rawdata2_ega.yaml ega_single_sync_500r_pat50 ${EGA_TRACKING_LABEL}-single-sync-500r-pat50 \
+  run_train federated configs/ega.yaml ega_single_sync_500r_pat50 ${EGA_TRACKING_LABEL}-single-sync-500r-pat50 \
     --override "federated.algorithm=ega_fedavg" \
     --override "federated.rounds=${ROUNDS}" \
     $(emit_optional_override 'ega.artifact_path' "${EGA_ARTIFACT_PATH}") \

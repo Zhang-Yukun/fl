@@ -1,11 +1,11 @@
 includes:
-  - common/rawdata2_patchtst_base.yaml
-  - common/federated_sync_300.yaml
+  - common/forecasting_patchtst.yaml
+  - common/federated.yaml
 
 experiment:
-  name: rawdata2_secure_quantized_fedavg
+  name: secure_quantized_fedavg
   mode: federated
-  output_dir: outputs/rawdata2_secure_quantized_fedavg
+  output_dir: outputs/secure_quantized_fedavg
 
 federated:
   algorithm: secure_quantized_fedavg
@@ -14,7 +14,7 @@ federated:
   quantization_seed: 2026
 
 evaluation:
-  mode: oracle_full_update
+  mode: protocol
 
 privacy:
   clip_norm: 10.0

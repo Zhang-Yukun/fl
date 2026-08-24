@@ -1,17 +1,17 @@
 includes:
-  - common/rawdata2_patchtst_base.yaml
-  - common/federated_sync_300.yaml
+  - common/forecasting_patchtst.yaml
+  - common/federated.yaml
 
 experiment:
-  name: rawdata2_adaptive_clipped_rdp_fedavg
+  name: adaptive_clipped_rdp_fedavg
   mode: federated
-  output_dir: outputs/rawdata2_adaptive_clipped_rdp_fedavg
+  output_dir: outputs/adaptive_clipped_rdp_fedavg
 
 federated:
   algorithm: adaptive_clipped_rdp_fedavg
 
 evaluation:
-  mode: oracle_full_update
+  mode: protocol
 
 adaptive_clipped_rdp:
   noise_multiplier: 0.001

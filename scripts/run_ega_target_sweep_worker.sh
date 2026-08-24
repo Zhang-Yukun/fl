@@ -16,7 +16,7 @@ run_case() {
   local outdir="${BASE_OUTPUT}/${run_name}"
   echo "[$(date '+%F %T')] start ${run_name} on gpu ${GPU_ID}"
   PYTHONPATH=. ${PYTHON_BIN} -m fedlab.entrypoints.train \
-    --config configs/rawdata2_ega.yaml \
+    --config configs/ega.yaml \
     --mode federated \
     --override "experiment.output_dir=${outdir}" \
     --override "experiment.name=${run_name}" \

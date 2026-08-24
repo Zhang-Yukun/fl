@@ -1,9 +1,9 @@
 includes:
-  - common/rawdata2_patchtst_base.yaml
+  - common/forecasting_patchtst.yaml
   - common/runtime_deterministic_single_thread.yaml
 
 experiment:
-  name: rawdata2_fedavg_small_deterministic
+  name: fedavg_small_deterministic
   mode: federated
   output_dir: outputs/fedavg_consistency/single_sync
 

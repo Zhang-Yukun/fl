@@ -4,6 +4,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 conda run -n torch_env python -m fedlab.entrypoints.train \
-  --config configs/rawdata2_fedlab_topk.yaml \
+  --config configs/topk.yaml \
   --mode federated \
   "$@"

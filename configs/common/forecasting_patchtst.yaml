@@ -1,10 +1,14 @@
 includes:
   - task_forecasting.yaml
   - runtime_gpu.yaml
-  - data_rawdata2_split.yaml
+  - rare_earth_data.yaml
   - model_patchtst.yaml
   - training_patchtst.yaml
   - attack_update_payload.yaml
   - tracking_offline.yaml
   - artifacts_yaml_json.yaml
   - grpc_default.yaml
+
+evaluation:
+  mode: protocol
+

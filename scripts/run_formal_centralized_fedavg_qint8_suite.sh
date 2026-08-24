@@ -146,14 +146,14 @@ main() {
 
   run_single \
     centralized \
-    configs/rawdata2_fedavg.yaml \
+    configs/fedavg.yaml \
     centralized \
     --override experiment.mode=centralized \
     "${CENTRALIZED_OVERRIDES[@]}"
 
   run_single \
     fedavg_single_sync \
-    configs/rawdata2_fedavg.yaml \
+    configs/fedavg.yaml \
     federated \
     --override experiment.mode=federated \
     --override federated.algorithm=fedavg \
@@ -162,7 +162,7 @@ main() {
 
   run_single \
     fedavg_single_async \
-    configs/rawdata2_fedavg.yaml \
+    configs/fedavg.yaml \
     federated \
     --override experiment.mode=federated \
     --override federated.algorithm=fedavg \
@@ -173,7 +173,7 @@ main() {
 
   run_grpc \
     fedavg_grpc_sync \
-    configs/rawdata2_fedavg.yaml \
+    configs/fedavg.yaml \
     "${BASE_PORT}" \
     --override experiment.mode=federated \
     --override federated.algorithm=fedavg \
@@ -182,7 +182,7 @@ main() {
 
   run_grpc \
     fedavg_grpc_async \
-    configs/rawdata2_fedavg.yaml \
+    configs/fedavg.yaml \
     "$((BASE_PORT + 1))" \
     --override experiment.mode=federated \
     --override federated.algorithm=fedavg \
@@ -193,7 +193,7 @@ main() {
 
   run_single \
     qint8_single_sync \
-    configs/rawdata2_secure_quantized_fedavg.yaml \
+    configs/secure_quantized_fedavg.yaml \
     federated \
     --override experiment.mode=federated \
     --override federated.quantization_dtype=int8 \
@@ -203,7 +203,7 @@ main() {
 
   run_single \
     qint8_single_async \
-    configs/rawdata2_secure_quantized_fedavg.yaml \
+    configs/secure_quantized_fedavg.yaml \
     federated \
     --override experiment.mode=federated \
     --override federated.quantization_dtype=int8 \
@@ -215,7 +215,7 @@ main() {
 
   run_grpc \
     qint8_grpc_sync \
-    configs/rawdata2_secure_quantized_fedavg.yaml \
+    configs/secure_quantized_fedavg.yaml \
     "$((BASE_PORT + 2))" \
     --override experiment.mode=federated \
     --override federated.quantization_dtype=int8 \
@@ -225,7 +225,7 @@ main() {
 
   run_grpc \
     qint8_grpc_async \
-    configs/rawdata2_secure_quantized_fedavg.yaml \
+    configs/secure_quantized_fedavg.yaml \
     "$((BASE_PORT + 3))" \
     --override experiment.mode=federated \
     --override federated.quantization_dtype=int8 \
@@ -237,7 +237,7 @@ main() {
 
   run_single \
     adaptive_clipped_rdp_single_sync \
-    configs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic.yaml \
+    configs/adaptive_clipped_rdp_fedavg_deterministic.yaml \
     federated \
     --override experiment.mode=federated \
     --override attack.async_enabled=false \

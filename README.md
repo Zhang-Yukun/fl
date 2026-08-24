@@ -106,7 +106,7 @@ bash scripts/run_rawdata2_qsgd.sh
 Extra overrides can be appended to any script, for example
 `--override federated.rounds=30`. Generated data is stored under
 `../data/rare_earth_rawdata2`; experiment artifacts are stored under the
-corresponding `outputs/rawdata2_*` directory. `configs/rawdata2_dp_topk.yaml` is the simple default compression/privacy comparison config; `configs/rawdata2_soteriafl.yaml` remains available as a random-k local-DP baseline, and `configs/rawdata2_fedaware.yaml` remains available as a supplementary adaptive aggregation baseline.
+corresponding `outputs/<algorithm>` directory. `configs/dp_topk.yaml` is the simple default compression/privacy comparison config; `configs/soteriafl.yaml` remains available as a random-k local-DP baseline, and `configs/fedaware.yaml` remains available as a supplementary adaptive aggregation baseline.
 
 ## Reproduce
 

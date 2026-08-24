@@ -7,7 +7,7 @@ GPU_ID="${GPU_ID:-0}"
 OUTPUT_DIR="${OUTPUT_DIR:-outputs/repro_pat50/topk_fedavg_seed2026_pat50_payloadv1}"
 
 CUDA_VISIBLE_DEVICES="${GPU_ID}" python -m fedlab.entrypoints.train \
-  --config configs/rawdata2_fedlab_topk.yaml \
+  --config configs/topk.yaml \
   --mode federated \
   --override experiment.mode=federated \
   --override "experiment.output_dir=${OUTPUT_DIR}" \

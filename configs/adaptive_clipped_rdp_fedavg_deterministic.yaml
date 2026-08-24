@@ -1,10 +1,10 @@
 includes:
   - common/runtime_deterministic_single_thread.yaml
-  - rawdata2_adaptive_clipped_rdp_fedavg.yaml
+  - adaptive_clipped_rdp_fedavg.yaml
 
 experiment:
-  name: rawdata2_adaptive_clipped_rdp_fedavg_deterministic
-  output_dir: outputs/rawdata2_adaptive_clipped_rdp_fedavg_deterministic
+  name: adaptive_clipped_rdp_fedavg_deterministic
+  output_dir: outputs/adaptive_clipped_rdp_fedavg_deterministic
 
 data:
   shuffle_train: false
