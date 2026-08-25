@@ -162,6 +162,36 @@ def predict_first_batch_for_state(
     return predict_first_batch(model, loader, device, max_samples=max_samples)
 
 
+def _select_loader_samples(
+    loader: Iterable,
+    max_samples: int | None = None,
+    batch_index: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return one selected batch or a concatenated prefix of subsequent batches."""
+
+    iterator = iter(loader)
+    x = y = None
+    for _ in range(max(0, int(batch_index)) + 1):
+        x, y = next(iterator)
+    if max_samples is None:
+        return x, y
+    target_count = max(1, int(max_samples))
+    x_parts = [x]
+    y_parts = [y]
+    total = int(x.shape[0])
+    while total < target_count:
+        try:
+            next_x, next_y = next(iterator)
+        except StopIteration:
+            break
+        x_parts.append(next_x)
+        y_parts.append(next_y)
+        total += int(next_x.shape[0])
+    merged_x = torch.cat(x_parts, dim=0)
+    merged_y = torch.cat(y_parts, dim=0)
+    return merged_x[:target_count], merged_y[:target_count]
+
+
 def first_batch_sample(
     loader: Iterable,
     device: torch.device,
@@ -175,13 +205,7 @@ def first_batch_sample(
         fetches the third batch for payload-based inversion experiments.
     """
 
-    iterator = iter(loader)
-    x = y = None
-    for _ in range(max(0, int(batch_index)) + 1):
-        x, y = next(iterator)
-    if max_samples is not None:
-        x = x[:max_samples]
-        y = y[:max_samples]
+    x, y = _select_loader_samples(loader, max_samples=max_samples, batch_index=batch_index)
     return x.to(device), y.to(device)
 
 
@@ -205,13 +229,7 @@ def first_batch_gradient(
     else:
         model.train()
     criterion = _loss_fn(model)
-    iterator = iter(loader)
-    x = y = None
-    for _ in range(max(0, int(batch_index)) + 1):
-        x, y = next(iterator)
-    if max_samples is not None:
-        x = x[:max_samples]
-        y = y[:max_samples]
+    x, y = _select_loader_samples(loader, max_samples=max_samples, batch_index=batch_index)
     x = x.to(device)
     y = y.to(device)
     model.zero_grad(set_to_none=True)

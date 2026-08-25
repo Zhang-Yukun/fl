@@ -781,6 +781,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
             "attack.target_type=update_payload",
             "attack.frequency_rounds=1",
             "attack.max_samples=1",
+            "attack.max_samples_cap=8",
             "attack.sample_count=1",
             "attack.steps=1",
             "attack.optimizer=adam",
@@ -834,6 +835,21 @@ def test_federated_run_supports_legacy_gradient_attacks(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["target_type"] for entry in attack_results} == {"gradient"}
     assert result["attack_target_type"] == "gradient"
+
+
+def test_attack_auto_sampling_defaults_to_one_reconstruction_with_capped_multi_sample_batches():
+    attack_cfg = {
+        "sample_count": "auto",
+        "sample_count_cap": 8,
+        "max_samples": "auto",
+        "max_samples_cap": 8,
+    }
+
+    assert algorithms_module._resolve_attack_sample_count(attack_cfg, available_batches=32) == 1
+    assert algorithms_module._resolve_attack_max_samples(attack_cfg, available_samples=18000) == 8
+    assert algorithms_module._resolve_attack_max_samples({"max_samples": "auto", "max_samples_cap": 32}, available_samples=20) == 20
+    assert algorithms_module._resolve_attack_max_samples({"max_samples": 3}, available_samples=18000) == 3
+
 
 
 def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():

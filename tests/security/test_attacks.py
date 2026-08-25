@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from fedlab.modeling import build_model
-from fedlab.engine.training import first_batch_gradient
+from fedlab.engine.training import first_batch_gradient, first_batch_sample
 from fedlab.security.attacks import AttackResult, apply_set_recovery_metrics, dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
 from fedlab.utils.serialization import serialize_model, subtract_state
 
@@ -159,6 +159,22 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     assert summary["overall_avg_nearest_client_train_mse"] is not None
     assert summary["overall_avg_objective_mse"] is not None
     assert summary["clients"]["Nd2O3"]["methods"]["DLG"]["target_type"] == "update_payload"
+
+
+def test_first_batch_sample_can_span_multiple_batches_when_max_samples_exceeds_batch_size():
+    device = torch.device("cpu")
+    loader = [
+        (torch.tensor([[0.0], [1.0]]), torch.tensor([0, 1])),
+        (torch.tensor([[2.0], [3.0]]), torch.tensor([2, 3])),
+        (torch.tensor([[4.0], [5.0]]), torch.tensor([4, 5])),
+    ]
+
+    x, y = first_batch_sample(loader, device, max_samples=5, batch_index=0)
+
+    assert x.shape[0] == 5
+    assert torch.equal(x.squeeze(-1).cpu(), torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0]))
+    assert torch.equal(y.cpu(), torch.tensor([0, 1, 2, 3, 4]))
+
 
 
 def test_attack_gradient_sampling_supports_eval_mode():

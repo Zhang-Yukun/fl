@@ -687,12 +687,65 @@ def _resolve_attack_sample_count(attack_cfg: dict[str, Any], available_batches: 
 
     configured = attack_cfg.get("sample_count", "auto")
     if configured is None or str(configured).strip().lower() == "auto":
-        count = max(1, int(attack_cfg.get("sample_count_cap", 8)))
+        count = 1
     else:
         count = max(1, int(configured))
     if available_batches is not None:
         count = min(count, max(1, int(available_batches)))
     return count
+
+
+def _client_attack_available_batches(client: FederatedClient) -> int | None:
+    """Best-effort batch count used by attack sampling defaults."""
+
+    train_loader = getattr(client, "train_loader", None)
+    if train_loader is None:
+        return None
+    try:
+        return int(len(train_loader))
+    except Exception:
+        return None
+
+
+def _client_attack_available_samples(client: FederatedClient) -> int | None:
+    """Best-effort training-sample count used by attack sampling defaults."""
+
+    getter = getattr(client, "train_num_samples", None)
+    if callable(getter):
+        try:
+            return int(getter())
+        except Exception:
+            pass
+    reference_getter = getattr(client, "train_reference_inputs", None)
+    if callable(reference_getter):
+        try:
+            reference_inputs = reference_getter()
+            return int(reference_inputs.shape[0])
+        except Exception:
+            pass
+    train_loader = getattr(client, "train_loader", None)
+    dataset = getattr(train_loader, "dataset", None) if train_loader is not None else None
+    if dataset is None:
+        return None
+    try:
+        return int(len(dataset))
+    except Exception:
+        return None
+
+
+def _resolve_attack_max_samples(attack_cfg: dict[str, Any], available_samples: int | None) -> int | None:
+    """Resolve how many samples each attack reconstruction should include."""
+
+    configured = attack_cfg.get("max_samples", 1)
+    if configured is None:
+        return None
+    if str(configured).strip().lower() == "auto":
+        count = None if available_samples is None else max(1, int(available_samples))
+        cap = attack_cfg.get("max_samples_cap")
+        if count is not None and cap is not None:
+            count = min(count, max(1, int(cap)))
+        return count
+    return max(1, int(configured))
 
 
 def _capture_round_update_records(
@@ -710,7 +763,6 @@ def _capture_round_update_records(
     if not _should_capture_update_payload(config, round_index, max_rounds):
         return []
     attack_cfg = config.get("attack", {})
-    max_samples = int(attack_cfg.get("max_samples", 1))
     round_context = round_context or {}
     results_by_client = {result.client_id: result for result in results}
     records: list[dict[str, Any]] = []
@@ -731,7 +783,8 @@ def _capture_round_update_records(
         reference_target_getter = getattr(client, "train_reference_targets", None)
         reference_targets = reference_target_getter() if callable(reference_target_getter) else None
         samples = []
-        sample_count = _resolve_attack_sample_count(attack_cfg, len(client.train_loader))
+        sample_count = _resolve_attack_sample_count(attack_cfg, _client_attack_available_batches(client))
+        max_samples = _resolve_attack_max_samples(attack_cfg, _client_attack_available_samples(client))
         for sample_index in range(sample_count):
             real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
             samples.append(
@@ -891,7 +944,7 @@ def _build_attack_round_task(
     if not _should_run_attack(config, round_index, max_rounds):
         return None
     attack_cfg = config.get("attack", {})
-    max_samples = int(attack_cfg.get("max_samples", 1))
+    max_samples = None
     selected_clients = _select_attack_clients(clients, config, round_index)
     round_context = round_context or {}
     results_by_client = {result.client_id: result for result in results}
@@ -899,7 +952,8 @@ def _build_attack_round_task(
     evaluations_per_client = 0
     for client_index, client in enumerate(selected_clients):
         result = results_by_client[client.client_id]
-        sample_count = _resolve_attack_sample_count(attack_cfg, len(client.train_loader))
+        sample_count = _resolve_attack_sample_count(attack_cfg, _client_attack_available_batches(client))
+        max_samples = _resolve_attack_max_samples(attack_cfg, _client_attack_available_samples(client))
         evaluations_per_client = max(evaluations_per_client, sample_count)
         for sample_index in range(sample_count):
             reference_inputs = None

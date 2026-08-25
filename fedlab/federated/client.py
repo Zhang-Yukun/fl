@@ -309,6 +309,12 @@ class FederatedClient:
 
         return first_batch_sample(self.train_loader, self.device, max_samples=max_samples, batch_index=batch_index)
 
+    def train_num_samples(self) -> int:
+        """Return the number of local training samples."""
+
+        dataset = self.train_loader.dataset
+        return int(len(dataset))
+
     def train_reference_inputs(self) -> torch.Tensor:
         """Return all normalized input windows from this client training dataset.
 

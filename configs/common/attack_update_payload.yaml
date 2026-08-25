@@ -8,7 +8,9 @@ attack:
   recovery_success_metric: mse
   recovery_success_objective: auto
   frequency_rounds: 5
-  max_samples: 1
+  sample_count: auto
+  max_samples: auto
+  max_samples_cap: 8
   steps: 300
   lr: 0.001
   optimizer: adam
