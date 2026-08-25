@@ -116,12 +116,21 @@ def _normalize_report_metrics(config: dict[str, Any], target_type: str) -> set[s
     return set(items)
 
 
+def _attack_loss(config: dict[str, Any], pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Return the task-aware loss used by DLG/iDLG, including soft labels."""
+
+    if pred.ndim >= 2 and target.ndim == 2 and target.shape == pred.shape and torch.is_floating_point(target):
+        probabilities = torch.softmax(target, dim=1)
+        return torch.mean(torch.sum(-probabilities * torch.log_softmax(pred, dim=1), dim=1))
+    criterion = create_loss(config)
+    return criterion(pred, target)
+
+
 def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_grads: list[torch.Tensor], config: dict[str, Any]) -> torch.Tensor:
     """Compute squared distance between dummy and intercepted gradients."""
 
-    criterion = create_loss(config)
     pred = model(x)
-    loss = criterion(pred, y)
+    loss = _attack_loss(config, pred, y)
     trainable_parameters = tuple(parameter for parameter in model.parameters() if parameter.requires_grad)
     grads = torch.autograd.grad(loss, trainable_parameters, create_graph=True)
     return sum(torch.mean((grad - target.to(grad.device)) ** 2) for grad, target in zip(grads, target_grads))
@@ -130,9 +139,8 @@ def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, targe
 def _predicted_trainable_update(model: nn.Module, x: torch.Tensor, y: torch.Tensor, config: dict[str, Any]) -> OrderedDict[str, torch.Tensor]:
     """Approximate the transmitted one-step local update for one dummy batch."""
 
-    criterion = create_loss(config)
     pred = model(x)
-    loss = criterion(pred, y)
+    loss = _attack_loss(config, pred, y)
     named_parameters = [(name, parameter) for name, parameter in model.named_parameters() if parameter.requires_grad]
     grads = torch.autograd.grad(loss, tuple(parameter for _, parameter in named_parameters), create_graph=True, allow_unused=True)
     attack_cfg = config.get("attack", {})
@@ -412,7 +420,14 @@ def _attack_loop(
             model = _prepare_attack_model(config, state, device)
             dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
             if optimize_y:
-                dummy_y = torch.randn_like(real_y, device=device, requires_grad=True)
+                if real_y.ndim == 1 and not torch.is_floating_point(real_y):
+                    num_classes = int(config.get("data", {}).get("num_classes", 0))
+                    if num_classes <= 0:
+                        with torch.no_grad():
+                            num_classes = int(model(dummy_x.detach()).shape[1])
+                    dummy_y = torch.randn(real_y.shape[0], num_classes, device=device, requires_grad=True)
+                else:
+                    dummy_y = torch.randn_like(real_y, device=device, requires_grad=True)
                 variables = [dummy_x, dummy_y]
             else:
                 dummy_y = real_y.to(device)
@@ -481,6 +496,7 @@ def _attack_loop(
         ssim_threshold,
         resolved_target_type,
         reference_inputs=reference_inputs,
+        reference_targets=reference_targets,
         reference_metric=resolved_reference_metric,
         report_metrics=report_metrics,
     )

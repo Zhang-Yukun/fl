@@ -83,3 +83,47 @@ def test_plot_attack_reconstructions_hides_idlg_target_by_default():
     assert module.should_plot_reconstructed_y(record, show_idlg_y=True) is True
     assert module.should_plot_real_y({"name": "DLG"}) is True
     assert module.should_plot_reconstructed_y({"name": "DLG"}) is True
+
+
+def test_plot_attack_reconstructions_supports_image_artifacts(tmp_path):
+    run_dir = tmp_path / "run_image"
+    artifacts = run_dir / "attack_artifacts" / "round_0001" / "client1" / "sample_0000"
+    artifacts.mkdir(parents=True)
+    artifact_path = artifacts / "dlg_00000.pt"
+    torch.save(
+        {
+            "name": "DLG",
+            "client_id": "client1",
+            "round_index": 1,
+            "sample_index": 0,
+            "target_type": "update_payload",
+            "primary_metric_name": "nearest_client_train_mse",
+            "reference_x": torch.rand(1, 1, 4, 4),
+            "reference_y": torch.tensor([2]),
+            "reference_label": "nearest_client_train",
+            "reconstructed_x": torch.rand(1, 1, 4, 4),
+            "reconstructed_y": torch.randn(1, 3),
+        },
+        artifact_path,
+    )
+    (run_dir / "attack_results.json").write_text(
+        json.dumps(
+            [
+                {
+                    "name": "DLG",
+                    "client_id": "client1",
+                    "round_index": 1,
+                    "sample_index": 0,
+                    "artifact_path": "attack_artifacts/round_0001/client1/sample_0000/dlg_00000.pt",
+                    "primary_metric_value": 0.08,
+                    "primary_metric_name": "nearest_client_train_mse",
+                }
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    output_path = module.plot_one_artifact(run_dir, module.load_json(run_dir / "attack_results.json")[0], run_dir / "plots")
+    assert output_path.exists()

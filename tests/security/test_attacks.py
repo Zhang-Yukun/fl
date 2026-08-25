@@ -1,6 +1,6 @@
 import torch
 
-from fedlab.modeling.forecasting import build_model
+from fedlab.modeling import build_model
 from fedlab.engine.training import first_batch_gradient
 from fedlab.security.attacks import dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
 from fedlab.utils.serialization import serialize_model, subtract_state
@@ -42,6 +42,34 @@ def _tiny_patchtst_config(target_type: str = "update_payload"):
             "local_lr": 0.001,
             "seed": 7,
         },
+    }
+
+
+def _tiny_classification_config(target_type: str = "update_payload"):
+    return {
+        "runtime": {"device": "cpu"},
+        "task": {"type": "classification"},
+        "data": {"image_shape": [1, 4, 4], "num_classes": 3, "dataset_name": "mnist"},
+        "training": {"lr": 0.01, "loss": "cross_entropy", "optimizer": "adam"},
+        "model": {"name": "small_cnn", "hidden_channels": 4, "dropout": 0.0},
+        "attack": {
+            "target_type": target_type,
+            "report_metrics": "auto",
+            "steps": 2,
+            "lr": 0.05,
+            "optimizer": "adam",
+            "restarts": 1,
+            "input_clip": 5.0,
+            "target_clip": 5.0,
+            "success_mse_threshold": 0.5,
+            "success_rate_threshold": 0.03,
+            "data_range": 1.0,
+            "model_mode": "eval",
+            "local_optimizer": "adam",
+            "local_lr": 0.01,
+            "seed": 7,
+        },
+        "evaluation": {"metrics": ["cross_entropy", "accuracy"]},
     }
 
 
@@ -179,3 +207,58 @@ def test_attack_artifacts_persist_reconstructions(tmp_path):
     assert payload["reference_label"] is not None
     assert payload["reconstructed_x"].shape == x.shape
     assert payload["reconstructed_y"] is not None
+
+
+def test_classification_attacks_support_integer_labels_and_logits():
+    config = _tiny_classification_config(target_type="gradient")
+    device = torch.device("cpu")
+    model = build_model(config).to(device)
+    x = torch.randn(1, 1, 4, 4)
+    y = torch.tensor([2], dtype=torch.long)
+    loss = torch.nn.functional.cross_entropy(model(x), y)
+    grads = torch.autograd.grad(loss, tuple(model.parameters()))
+    state = serialize_model(model)
+
+    dlg = dlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
+    idlg = idlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
+
+    assert dlg.reconstructed_x.shape == x.shape
+    assert dlg.reconstructed_y.shape == (1, 3)
+    assert idlg.reconstructed_y.shape == y.shape
+    assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
+    assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
+
+
+def test_classification_update_payload_attacks_keep_reference_labels():
+    config = _tiny_classification_config(target_type="update_payload")
+    device = torch.device("cpu")
+    model = build_model(config).to(device)
+    x = torch.randn(1, 1, 4, 4)
+    y = torch.tensor([1], dtype=torch.long)
+    state = serialize_model(model)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["lr"])
+    optimizer.zero_grad(set_to_none=True)
+    loss = torch.nn.functional.cross_entropy(model(x), y)
+    loss.backward()
+    optimizer.step()
+    target_update = subtract_state(serialize_model(model), state)
+
+    reference_inputs = torch.cat([x, x + 0.5], dim=0)
+    reference_targets = torch.tensor([1, 2], dtype=torch.long)
+    dlg = dlg_attack(
+        config,
+        state,
+        target_update,
+        x,
+        y,
+        device,
+        target_type="update_payload",
+        reference_inputs=reference_inputs,
+        reference_targets=reference_targets,
+    )
+
+    assert dlg.metric_name == "nearest_client_train_mse"
+    assert dlg.reference_label == "nearest_client_train"
+    assert dlg.reference_x.shape == x.shape
+    assert torch.equal(dlg.reference_y, torch.tensor([1]))
+    assert dlg.reconstructed_y is not None

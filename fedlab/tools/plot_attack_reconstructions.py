@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import matplotlib
@@ -17,6 +18,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
+
+from fedlab.utils.tracking import _attack_reconstruction_figure
 
 
 def load_json(path: Path) -> Any:
@@ -77,19 +80,14 @@ def should_plot_reconstructed_y(record: dict[str, Any], show_idlg_y: bool = Fals
         return False
     return True
 
-def _flatten_first_channel(tensor: torch.Tensor | None) -> list[float] | None:
-    """Convert one saved tensor artifact into a 1D series for plotting."""
+def _artifact_tensor(payload: dict[str, Any], *names: str):
+    """Return the first available tensor payload from a saved artifact."""
 
-    if tensor is None:
-        return None
-    data = tensor.detach().cpu().float()
-    if data.ndim == 3:
-        return data[0, :, 0].tolist()
-    if data.ndim == 2:
-        return data[0, :].tolist()
-    if data.ndim == 1:
-        return data.tolist()
-    raise ValueError(f"Unsupported tensor shape for plotting: {tuple(data.shape)}")
+    for name in names:
+        value = payload.get(name)
+        if value is not None:
+            return value
+    return None
 
 
 def plot_one_artifact(
@@ -106,37 +104,32 @@ def plot_one_artifact(
         raise ValueError("Attack record does not include artifact_path")
     artifact = torch.load(run_dir / artifact_rel, map_location="cpu", weights_only=False)
 
-    real_x = _flatten_first_channel(artifact.get("plot_reference_x") if artifact.get("plot_reference_x") is not None else (artifact.get("plot_real_x") if artifact.get("plot_real_x") is not None else (artifact.get("reference_x") if artifact.get("reference_x") is not None else artifact.get("real_x"))))
-    recon_x = _flatten_first_channel(artifact.get("plot_reconstructed_x") if artifact.get("plot_reconstructed_x") is not None else artifact.get("reconstructed_x"))
-    real_y = _flatten_first_channel(artifact.get("plot_reference_y") if artifact.get("plot_reference_y") is not None else (artifact.get("plot_real_y") if artifact.get("plot_real_y") is not None else (artifact.get("reference_y") if artifact.get("reference_y") is not None else artifact.get("real_y"))))
-    recon_y = _flatten_first_channel(artifact.get("plot_reconstructed_y") if artifact.get("plot_reconstructed_y") is not None else artifact.get("reconstructed_y"))
+    real_x = _artifact_tensor(artifact, "plot_reference_x", "plot_real_x", "reference_x", "real_x")
+    recon_x = _artifact_tensor(artifact, "plot_reconstructed_x", "reconstructed_x")
+    real_y = _artifact_tensor(artifact, "plot_reference_y", "plot_real_y", "reference_y", "real_y")
+    recon_y = _artifact_tensor(artifact, "plot_reconstructed_y", "reconstructed_y")
 
     if real_x is None or recon_x is None:
         raise ValueError(f"Missing x tensors in {artifact_rel}")
 
-    x_axis = list(range(len(real_x)))
-    y_axis = list(range(len(real_x), len(real_x) + (len(real_y) if real_y is not None else 0)))
-
-    reference_label = artifact.get("reference_label") or record.get("reference_label") or "reference"
-    plt.figure(figsize=(16, 5))
-    plt.plot(x_axis, real_x, label=f"{reference_label}_x", linewidth=1.8)
-    plt.plot(x_axis, recon_x, label="reconstructed_x", linewidth=1.5)
-    if real_y is not None and should_plot_real_y(record, show_idlg_y=show_idlg_y):
-        label = f"{reference_label}_y" if str(record.get("name", "")).lower() != "idlg" else f"{reference_label}_y (forced)"
-        plt.plot(y_axis, real_y, label=label, linewidth=1.8)
-    if recon_y is not None and should_plot_reconstructed_y(record, show_idlg_y=show_idlg_y):
-        label = "reconstructed_y" if str(record.get("name", "")).lower() != "idlg" else "reconstructed_y (forced)"
-        plt.plot(y_axis, recon_y, label=label, linewidth=1.5)
-    plt.axvline(len(real_x) - 1, color="gray", linestyle="--", linewidth=1.0)
-    plt.title(
-        f"{record.get('name')} client={record.get('client_id')} round={record.get('round_index')} sample={record.get('sample_index')} "
-        f"metric={record.get('primary_metric_name', record.get('metric_name'))} value={record.get('primary_metric_value', record.get('mse'))}"
+    result = SimpleNamespace(
+        name=record.get('name', artifact.get('name', 'attack')),
+        client_id=record.get('client_id', artifact.get('client_id')),
+        round_index=record.get('round_index', artifact.get('round_index')),
+        sample_index=record.get('sample_index', artifact.get('sample_index')),
+        reference_label=artifact.get('reference_label') or record.get('reference_label') or 'reference',
+        plot_reference_x=real_x,
+        plot_reconstructed_x=recon_x,
+        plot_reference_y=real_y if should_plot_real_y(record, show_idlg_y=show_idlg_y) else None,
+        plot_reconstructed_y=recon_y if should_plot_reconstructed_y(record, show_idlg_y=show_idlg_y) else None,
+        reference_x=real_x,
+        reconstructed_x=recon_x,
+        reference_y=real_y,
+        reconstructed_y=recon_y,
     )
-    plt.xlabel("Time Step")
-    plt.ylabel("Value")
-    plt.grid(True, alpha=0.25)
-    plt.legend()
-    plt.tight_layout()
+    figure = _attack_reconstruction_figure(result)
+    if figure is None:
+        raise ValueError(f"Could not render attack artifact {artifact_rel}")
 
     filename = (
         f"round_{int(record.get('round_index', 0)):04d}_"
@@ -146,8 +139,8 @@ def plot_one_artifact(
     )
     output_path = output_dir / filename
     output_dir.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=180)
-    plt.close()
+    figure.savefig(output_path, dpi=180)
+    plt.close(figure)
     return output_path
 
 

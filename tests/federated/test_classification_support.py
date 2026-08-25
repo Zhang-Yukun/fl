@@ -56,3 +56,52 @@ def test_federated_run_supports_classification_task(tmp_path):
     assert 'accuracy' in summary['test']
     assert 'cross_entropy' in summary['test']
     assert summary['attack_evaluations'] == 0
+
+
+def test_federated_run_supports_classification_attacks(tmp_path):
+    _prepare_classification_split_dir(tmp_path)
+    output_dir = tmp_path / 'output_attack'
+    config = {
+        'experiment': {'output_dir': str(output_dir), 'mode': 'federated'},
+        'runtime': {'device': 'cpu', 'log_level': 'INFO', 'deterministic': True, 'seed': 2026},
+        'task': {'type': 'classification'},
+        'data': {
+            'split_dir': str(tmp_path),
+            'clients': ['client1', 'client2', 'client3'],
+            'batch_size': 2,
+            'shuffle_train': False,
+            'num_workers': 0,
+            'image_shape': [1, 4, 4],
+            'num_classes': 3,
+        },
+        'model': {'name': 'small_cnn', 'hidden_channels': 4, 'dropout': 0.0},
+        'training': {'lr': 0.001, 'optimizer': 'adam', 'loss': 'cross_entropy', 'patience': 1, 'min_delta': 0.0},
+        'centralized': {'rounds': 1},
+        'federated': {'algorithm': 'fedavg', 'rounds': 1, 'local_epochs': 1},
+        'transport': {'upload_mode': 'update', 'download_mode': 'model'},
+        'attack': {
+            'enabled': True,
+            'target_type': 'update_payload',
+            'frequency_rounds': 1,
+            'sample_count': 1,
+            'max_samples': 1,
+            'clients_per_round': 1,
+            'client_selection': 'first',
+            'steps': 1,
+            'optimizer': 'adam',
+            'local_optimizer': 'adam',
+            'async_enabled': False,
+            'device': 'cpu',
+        },
+        'tracking': {'enabled': False},
+        'evaluation': {'metrics': ['cross_entropy', 'accuracy']},
+        'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},
+    }
+
+    summary = run_federated(config)
+
+    assert summary['attack_evaluations'] == 2
+    assert summary['attack_target_type'] == 'update_payload'
+    assert summary['attack_primary_metric_name'] == 'nearest_client_train_mse'
+    assert (output_dir / 'attack_results.json').exists()
+    assert sorted((output_dir / 'attack_artifacts').rglob('*.pt'))

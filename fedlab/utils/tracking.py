@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import torch
 from loguru import logger
 
 from fedlab.datasets.rare_earth import inverse_transform_tensor
@@ -59,6 +60,13 @@ class Tracker:
         """Log one image artifact when wandb is active."""
 
         if self.run is None or self.wandb is None:
+            if hasattr(image, "savefig"):
+                try:
+                    import matplotlib.pyplot as plt
+
+                    plt.close(image)
+                except Exception:
+                    pass
             return
         payload = {key: self.wandb.Image(image, caption=caption)}
         self.log(payload, step=step)
@@ -163,6 +171,127 @@ def _prediction_figure(input_series, prediction, target, title: str | None = Non
     return figure
 
 
+def _first_sample_tensor(tensor):
+    """Return the first sample from a batch-like tensor on CPU."""
+
+    if tensor is None:
+        return None
+    data = tensor.detach().cpu()
+    if data.ndim >= 4:
+        return data[0]
+    if data.ndim >= 1 and data.shape[0] == 1 and data.ndim >= 3:
+        return data[0]
+    return data
+
+
+def _image_tensor(tensor):
+    """Return one image tensor in CHW/HW form when the payload looks image-like."""
+
+    sample = _first_sample_tensor(tensor)
+    if sample is None:
+        return None
+    if sample.ndim == 2 and min(sample.shape) >= 2:
+        return sample.to(torch.float32)
+    if sample.ndim != 3 or sample.shape[0] not in (1, 3):
+        return None
+    height, width = int(sample.shape[1]), int(sample.shape[2])
+    if min(height, width) < 2:
+        return None
+    aspect_ratio = max(height, width) / max(1, min(height, width))
+    if aspect_ratio > 4.0:
+        return None
+    return sample.to(torch.float32)
+
+
+def _render_image(axis, tensor, title: str) -> None:
+    """Render one grayscale or RGB tensor on a matplotlib axis."""
+
+    image = _image_tensor(tensor)
+    if image is None:
+        axis.text(0.5, 0.5, 'image unavailable', ha='center', va='center')
+        axis.set_axis_off()
+        axis.set_title(title)
+        return
+    if image.ndim == 2:
+        axis.imshow(image.numpy(), cmap='gray')
+    elif image.shape[0] == 1:
+        axis.imshow(image[0].numpy(), cmap='gray')
+    else:
+        axis.imshow(image.permute(1, 2, 0).clamp(0.0, 1.0).numpy())
+    axis.set_title(title)
+    axis.set_axis_off()
+
+
+def _classification_label_text(tensor) -> str | None:
+    """Return a readable class-label summary for one target tensor."""
+
+    if tensor is None:
+        return None
+    data = tensor.detach().cpu()
+    if torch.is_floating_point(data):
+        return None
+    if data.ndim == 0:
+        return str(int(data.item()))
+    if data.ndim == 1:
+        return ', '.join(str(int(value)) for value in data.tolist())
+    if data.ndim >= 2 and data.shape[0] == 1:
+        flattened = data.reshape(-1).tolist()
+        return ', '.join(str(int(value)) for value in flattened)
+    return None
+
+
+def _classification_probabilities(tensor) -> torch.Tensor | None:
+    """Return one probability vector for classification logits/probabilities."""
+
+    if tensor is None:
+        return None
+    data = tensor.detach().cpu().to(torch.float32)
+    if data.ndim == 0:
+        return None
+    if data.ndim == 1 and data.numel() > 1:
+        return torch.softmax(data, dim=0)
+    if data.ndim >= 2:
+        sample = data.reshape(data.shape[0], -1) if data.ndim > 2 else data
+        if sample.shape[-1] > 1:
+            return torch.softmax(sample[0], dim=0)
+    return None
+
+
+def _render_target_panel(axis, tensor, title: str, reference_label: int | None = None) -> None:
+    """Render one target tensor either as class text, probability bars, or a line plot."""
+
+    label_text = _classification_label_text(tensor)
+    probabilities = _classification_probabilities(tensor)
+    if probabilities is not None and probabilities.numel() <= 32:
+        values = probabilities.tolist()
+        colors = ['tab:blue'] * len(values)
+        if reference_label is not None and 0 <= reference_label < len(colors):
+            colors[reference_label] = 'tab:orange'
+        axis.bar(list(range(len(values))), values, color=colors, alpha=0.85)
+        axis.set_ylim(0.0, 1.0)
+        axis.set_xlabel('class')
+        axis.set_ylabel('probability')
+        axis.set_title(title)
+        axis.grid(True, axis='y', alpha=0.25)
+        if reference_label is not None:
+            axis.text(0.98, 0.95, f'ref={reference_label}', ha='right', va='top', transform=axis.transAxes)
+        return
+    if label_text is not None:
+        axis.text(0.5, 0.5, f'class: {label_text}', ha='center', va='center')
+        axis.set_title(title)
+        axis.set_axis_off()
+        return
+    series = _to_series(tensor)
+    if series:
+        axis.plot(series, linewidth=2.0)
+        axis.set_title(title)
+        axis.grid(True, alpha=0.3)
+        return
+    axis.text(0.5, 0.5, 'target unavailable', ha='center', va='center')
+    axis.set_title(title)
+    axis.set_axis_off()
+
+
 def _attack_reconstruction_figure(result):
     """Return a matplotlib figure for attack reconstruction diagnostics."""
 
@@ -183,21 +312,41 @@ def _attack_reconstruction_figure(result):
         real_y = getattr(result, "plot_real_y", getattr(result, "reference_y", getattr(result, "real_y", None)))
     reconstructed_y = getattr(result, "plot_reconstructed_y", getattr(result, "reconstructed_y", None))
     reference_label = getattr(result, "reference_label", None) or "reference"
-    figure, axes = plt.subplots(1, 2, figsize=(12, 3))
-    axes[0].plot(_to_series(real_x), label=f"{reference_label}_x", linewidth=2.0)
-    axes[0].plot(_to_series(reconstructed_x), label="reconstructed_x", linewidth=2.0)
-    axes[0].set_title("Input reconstruction")
-    axes[0].grid(True, alpha=0.3)
-    axes[0].legend(loc="best")
-    y_real_series = _to_series(real_y)
-    y_recon_series = _to_series(reconstructed_y)
-    if y_real_series:
-        axes[1].plot(y_real_series, label=f"{reference_label}_y", linewidth=2.0)
-    if y_recon_series:
-        axes[1].plot(y_recon_series, label="reconstructed_y", linewidth=2.0)
-    axes[1].set_title("Target reconstruction")
-    axes[1].grid(True, alpha=0.3)
-    if y_real_series or y_recon_series:
-        axes[1].legend(loc="best")
+    title = (
+        f"{getattr(result, 'name', 'attack')} client={getattr(result, 'client_id', 'na')} "
+        f"round={getattr(result, 'round_index', 'na')} sample={getattr(result, 'sample_index', 'na')}"
+    )
+
+    if _image_tensor(real_x) is not None and _image_tensor(reconstructed_x) is not None:
+        figure, axes = plt.subplots(2, 2, figsize=(8, 6), height_ratios=[3, 2])
+        _render_image(axes[0, 0], real_x, f"{reference_label}_x")
+        _render_image(axes[0, 1], reconstructed_x, 'reconstructed_x')
+        reference_class = None
+        real_label_text = _classification_label_text(real_y)
+        if real_label_text is not None and ',' not in real_label_text:
+            try:
+                reference_class = int(real_label_text)
+            except ValueError:
+                reference_class = None
+        _render_target_panel(axes[1, 0], real_y, f"{reference_label}_y")
+        _render_target_panel(axes[1, 1], reconstructed_y, 'reconstructed_y', reference_label=reference_class)
+    else:
+        figure, axes = plt.subplots(1, 2, figsize=(12, 3))
+        axes[0].plot(_to_series(real_x), label=f"{reference_label}_x", linewidth=2.0)
+        axes[0].plot(_to_series(reconstructed_x), label='reconstructed_x', linewidth=2.0)
+        axes[0].set_title('Input reconstruction')
+        axes[0].grid(True, alpha=0.3)
+        axes[0].legend(loc='best')
+        y_real_series = _to_series(real_y)
+        y_recon_series = _to_series(reconstructed_y)
+        if y_real_series:
+            axes[1].plot(y_real_series, label=f"{reference_label}_y", linewidth=2.0)
+        if y_recon_series:
+            axes[1].plot(y_recon_series, label='reconstructed_y', linewidth=2.0)
+        axes[1].set_title('Target reconstruction')
+        axes[1].grid(True, alpha=0.3)
+        if y_real_series or y_recon_series:
+            axes[1].legend(loc='best')
+    figure.suptitle(title)
     figure.tight_layout()
     return figure

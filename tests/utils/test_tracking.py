@@ -1,7 +1,7 @@
 import numpy as np
 
 from fedlab.datasets.rare_earth import Standardizer
-from fedlab.utils.tracking import Tracker, _prediction_figure, _to_series
+from fedlab.utils.tracking import Tracker, _attack_reconstruction_figure, _prediction_figure, _to_series
 
 
 class _FakeRun:
@@ -148,3 +148,25 @@ def test_prediction_figure_can_restore_original_scale_with_scaler():
     assert list(input_line.get_ydata()) == [10.0, 11.0]
     assert list(target_line.get_ydata()) == [13.0, 15.0]
     assert list(prediction_line.get_ydata()) == [12.0, 14.0]
+
+
+def test_attack_reconstruction_figure_supports_image_classification_payloads():
+    torch = __import__("torch")
+    result = type("AttackResultStub", (), {
+        "name": "DLG",
+        "client_id": "client1",
+        "round_index": 0,
+        "sample_index": 0,
+        "reference_label": "nearest_client_train",
+        "reference_x": torch.rand(1, 1, 4, 4),
+        "reconstructed_x": torch.rand(1, 1, 4, 4),
+        "reference_y": torch.tensor([2]),
+        "reconstructed_y": torch.randn(1, 3),
+    })()
+
+    figure = _attack_reconstruction_figure(result)
+
+    assert figure is not None
+    assert len(figure.axes) == 4
+    assert figure.axes[0].images
+    assert figure.axes[1].images
