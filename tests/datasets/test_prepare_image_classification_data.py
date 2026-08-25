@@ -15,6 +15,7 @@ spec.loader.exec_module(module)
 build_client_split_payloads = module.build_client_split_payloads
 save_client_split_payloads = module.save_client_split_payloads
 reset_output_dir = module.reset_output_dir
+_default_client_ids = module._default_client_ids
 
 
 def test_build_client_split_payloads_is_deterministic_and_complete():
@@ -23,10 +24,10 @@ def test_build_client_split_payloads_is_deterministic_and_complete():
     test_images = torch.arange(12, dtype=torch.float32).reshape(3, 1, 2, 2) / 12.0
     test_labels = torch.tensor([2, 1, 0], dtype=torch.long)
 
-    first = build_client_split_payloads(train_images, train_labels, test_images, test_labels, num_clients=3, val_ratio=0.5, seed=2026)
-    second = build_client_split_payloads(train_images, train_labels, test_images, test_labels, num_clients=3, val_ratio=0.5, seed=2026)
+    first = build_client_split_payloads(train_images, train_labels, test_images, test_labels, dataset_name='mnist', num_clients=3, val_ratio=0.5, seed=2026)
+    second = build_client_split_payloads(train_images, train_labels, test_images, test_labels, dataset_name='mnist', num_clients=3, val_ratio=0.5, seed=2026)
 
-    assert set(first) == {"client1", "client2", "client3"}
+    assert set(first) == {'m1', 'm2', 'm3'}
     for client_id in first:
         for split_name in ("train", "val", "test"):
             assert torch.equal(first[client_id][split_name]["images"], second[client_id][split_name]["images"])
@@ -39,17 +40,17 @@ def test_build_client_split_payloads_is_deterministic_and_complete():
 
 def test_save_client_split_payloads_writes_expected_layout(tmp_path):
     payloads = {
-        "client1": {
+        "m1": {
             "train": {"images": torch.zeros(2, 1, 2, 2), "labels": torch.tensor([0, 1])},
             "val": {"images": torch.zeros(1, 1, 2, 2), "labels": torch.tensor([1])},
             "test": {"images": torch.zeros(1, 1, 2, 2), "labels": torch.tensor([0])},
         },
-        "client2": {
+        "m2": {
             "train": {"images": torch.ones(2, 1, 2, 2), "labels": torch.tensor([2, 2])},
             "val": {"images": torch.ones(1, 1, 2, 2), "labels": torch.tensor([2])},
             "test": {"images": torch.ones(1, 1, 2, 2), "labels": torch.tensor([1])},
         },
-        "client3": {
+        "m3": {
             "train": {"images": torch.full((2, 1, 2, 2), 2.0), "labels": torch.tensor([0, 0])},
             "val": {"images": torch.full((1, 1, 2, 2), 2.0), "labels": torch.tensor([1])},
             "test": {"images": torch.full((1, 1, 2, 2), 2.0), "labels": torch.tensor([2])},
@@ -66,19 +67,19 @@ def test_save_client_split_payloads_writes_expected_layout(tmp_path):
         class_names=[str(index) for index in range(3)],
     )
 
-    assert (tmp_path / "clients" / "client1" / "train.pt").exists()
-    assert (tmp_path / "clients" / "client2" / "val.pt").exists()
-    assert (tmp_path / "clients" / "client3" / "test.pt").exists()
-    loaded = torch.load(tmp_path / "clients" / "client2" / "train.pt", map_location="cpu", weights_only=False)
+    assert (tmp_path / 'clients' / 'm1' / 'train.pt').exists()
+    assert (tmp_path / 'clients' / 'm2' / 'val.pt').exists()
+    assert (tmp_path / 'clients' / 'm3' / 'test.pt').exists()
+    loaded = torch.load(tmp_path / 'clients' / 'm2' / 'train.pt', map_location="cpu", weights_only=False)
     assert torch.equal(loaded["labels"], torch.tensor([2, 2]))
     saved_summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert saved_summary["dataset"] == "mnist"
-    assert saved_summary["clients"]["client1"]["train"]["rows"] == 2
+    assert saved_summary['clients']['m1']['train']['rows'] == 2
     assert summary["image_shape"] == [1, 2, 2]
 
 
 def test_reset_output_dir_removes_generated_client_tree(tmp_path):
-    client_dir = tmp_path / "clients" / "client1"
+    client_dir = tmp_path / 'clients' / 'm1'
     client_dir.mkdir(parents=True)
     (client_dir / "train.pt").write_bytes(b"stale")
     (tmp_path / "summary.json").write_text("{}", encoding="utf-8")
@@ -86,3 +87,9 @@ def test_reset_output_dir_removes_generated_client_tree(tmp_path):
     reset_output_dir(tmp_path)
 
     assert not tmp_path.exists()
+
+
+
+def test_default_client_ids_follow_dataset_prefixes():
+    assert _default_client_ids('mnist', 3) == ['m1', 'm2', 'm3']
+    assert _default_client_ids('cifar10', 3) == ['c1', 'c2', 'c3']

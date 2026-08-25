@@ -15,7 +15,7 @@ def _write_client_split(root: Path, client_id: str, split: str, count: int, valu
 
 
 def test_build_image_classification_loaders_from_split_dir(tmp_path):
-    for client_index, client_id in enumerate(['client1', 'client2', 'client3'], start=1):
+    for client_index, client_id in enumerate(['m1', 'm2', 'm3'], start=1):
         _write_client_split(tmp_path, client_id, 'train', 6, float(client_index))
         _write_client_split(tmp_path, client_id, 'val', 3, float(client_index + 10))
         _write_client_split(tmp_path, client_id, 'test', 3, float(client_index + 20))
@@ -25,15 +25,15 @@ def test_build_image_classification_loaders_from_split_dir(tmp_path):
         'task': {'type': 'classification'},
         'data': {
             'split_dir': str(tmp_path),
-            'clients': ['client1', 'client2', 'client3'],
+            'clients': ['m1', 'm2', 'm3'],
             'batch_size': 2,
             'shuffle_train': False,
         },
     }
     train_loaders, val_loader, test_loader = build_federated_loaders(config)
 
-    assert set(train_loaders) == {'client1', 'client2', 'client3'}
-    x, y = next(iter(train_loaders['client1']))
+    assert set(train_loaders) == {'m1', 'm2', 'm3'}
+    x, y = next(iter(train_loaders['m1']))
     assert x.shape == (2, 1, 4, 4)
     assert y.dtype == torch.long
     assert len(val_loader) > 0

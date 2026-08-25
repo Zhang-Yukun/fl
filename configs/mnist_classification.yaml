@@ -19,8 +19,8 @@ task:
 
 data:
   dataset_name: mnist
-  split_dir: ../data/mnist_3clients
-  clients: [client1, client2, client3]
+  split_dir: ../data/mnist
+  clients: [m1, m2, m3]
   image_shape: [1, 28, 28]
   num_classes: 10
   batch_size: 64

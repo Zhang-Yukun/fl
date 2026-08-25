@@ -18,6 +18,11 @@ _DATASET_BUILDERS = {
     "cifar10": datasets.CIFAR10,
 }
 
+_DATASET_CLIENT_PREFIX = {
+    'mnist': 'm',
+    'cifar10': 'c',
+}
+
 
 def reset_output_dir(output_dir: Path) -> None:
     """Remove stale generated client artifacts from a previous preparation run."""
@@ -45,12 +50,23 @@ def _partition_indices(num_items: int, num_parts: int, generator: torch.Generato
     return parts
 
 
+def _default_client_ids(dataset_name: str, num_clients: int) -> list[str]:
+    """Return the persisted client ids for one prepared image dataset."""
+
+    dataset_key = str(dataset_name).lower()
+    prefix = _DATASET_CLIENT_PREFIX.get(dataset_key)
+    if prefix is None:
+        raise ValueError(f'Unsupported dataset: {dataset_name}')
+    return [f'{prefix}{index}' for index in range(1, int(num_clients) + 1)]
+
+
 def build_client_split_payloads(
     train_images: torch.Tensor,
     train_labels: torch.Tensor,
     test_images: torch.Tensor,
     test_labels: torch.Tensor,
     *,
+    dataset_name: str,
     num_clients: int = 3,
     val_ratio: float = 0.1,
     seed: int = 2026,
@@ -67,9 +83,9 @@ def build_client_split_payloads(
     generator = torch.Generator().manual_seed(int(seed))
     train_parts = _partition_indices(int(train_images.shape[0]), int(num_clients), generator)
     test_parts = _partition_indices(int(test_images.shape[0]), int(num_clients), generator)
+    client_ids = _default_client_ids(dataset_name, num_clients)
     payloads: dict[str, dict[str, dict[str, torch.Tensor]]] = {}
-    for client_offset, (train_indices, test_indices) in enumerate(zip(train_parts, test_parts), start=1):
-        client_id = f"client{client_offset}"
+    for client_id, train_indices, test_indices in zip(client_ids, train_parts, test_parts):
         val_count = max(1, int(round(train_indices.numel() * float(val_ratio))))
         if train_indices.numel() - val_count < 1:
             raise ValueError(f"Client {client_id} does not have enough train samples after validation split")
@@ -194,6 +210,7 @@ def prepare_image_classification_dataset(
         train_labels,
         test_images,
         test_labels,
+        dataset_name=dataset_key,
         num_clients=num_clients,
         val_ratio=val_ratio,
         seed=seed,
@@ -229,7 +246,7 @@ def main() -> None:
         summary[dataset_name] = prepare_image_classification_dataset(
             dataset_name,
             raw_root / dataset_name,
-            output_root / f"{dataset_name}_3clients",
+            output_root / dataset_name,
             num_clients=args.num_clients,
             val_ratio=args.val_ratio,
             seed=args.seed,
