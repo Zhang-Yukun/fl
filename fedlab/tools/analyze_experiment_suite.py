@@ -174,6 +174,12 @@ def _bar_color(label: str) -> str:
     return BAR_COLORS.get(_label_family(label), '#9c755f')
 
 
+def _bubble_size_from_ratio(ratio: float | None) -> float:
+    if ratio is None or ratio <= 0.0:
+        return 180.0
+    return 180.0 + 120.0 * ratio
+
+
 def _resolve_attack_info(summary: dict[str, Any]) -> dict[str, Any]:
     attack_summary = summary.get('attack_summary') or {}
     target_type = summary.get('attack_target_type')
@@ -600,6 +606,42 @@ def plot_test_mse_bar(rows: list[dict[str, Any]], output_path: Path, title: str 
     return output_path
 
 
+
+def plot_test_mse_vs_upload_bubble(rows: list[dict[str, Any]], output_path: Path, title: str = 'Test MSE vs Upload Communication') -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plot_rows = [row for row in rows if row.get('test_mse') is not None and row.get('total_upload_bytes') is not None]
+
+    plt.figure(figsize=(12, 6))
+    ax = plt.gca()
+    if not plot_rows:
+        ax.text(0.5, 0.5, 'No runs with test MSE and upload communication', ha='center', va='center', transform=ax.transAxes)
+    else:
+        for row in plot_rows:
+            label = str(row['label'])
+            x_value = float(row['total_upload_bytes'])
+            y_value = float(row['test_mse'])
+            ratio = row.get('fedavg_upload_compression_ratio')
+            bubble_size = _bubble_size_from_ratio(float(ratio)) if ratio is not None else _bubble_size_from_ratio(None)
+            ax.scatter(
+                x_value,
+                y_value,
+                s=bubble_size,
+                color=_bar_color(label),
+                alpha=0.72,
+                edgecolors='black',
+                linewidths=0.8,
+                label=label,
+            )
+            ax.annotate(label, (x_value, y_value), textcoords='offset points', xytext=(6, 6), fontsize=9)
+    ax.set_xlabel('Total Upload Bytes')
+    ax.set_ylabel('Test MSE')
+    ax.set_title(title)
+    ax.grid(True, alpha=0.25)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180)
+    plt.close()
+    return output_path
+
 def plot_aggregated_val_mse_vs_round(curves: list[AggregatedCurve], output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(12, 6))
@@ -681,6 +723,46 @@ def plot_aggregated_test_mse_bar(rows: list[dict[str, Any]], output_path: Path) 
     return output_path
 
 
+
+def plot_aggregated_test_mse_vs_upload_bubble(rows: list[dict[str, Any]], output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plot_rows = [row for row in rows if row.get('test_mse_mean') is not None and row.get('total_upload_bytes_mean') is not None]
+
+    plt.figure(figsize=(12, 6))
+    ax = plt.gca()
+    if not plot_rows:
+        ax.text(0.5, 0.5, 'No runs with test MSE and upload communication', ha='center', va='center', transform=ax.transAxes)
+    else:
+        for row in plot_rows:
+            label = str(row['label'])
+            x_value = float(row['total_upload_bytes_mean'])
+            y_value = float(row['test_mse_mean'])
+            x_error = float(row.get('total_upload_bytes_std') or 0.0)
+            y_error = float(row.get('test_mse_std') or 0.0)
+            ratio = row.get('fedavg_upload_compression_ratio_mean')
+            bubble_size = _bubble_size_from_ratio(float(ratio)) if ratio is not None else _bubble_size_from_ratio(None)
+            ax.scatter(
+                x_value,
+                y_value,
+                s=bubble_size,
+                color=_bar_color(label),
+                alpha=0.72,
+                edgecolors='black',
+                linewidths=0.8,
+                label=label,
+            )
+            if x_error > 0.0 or y_error > 0.0:
+                ax.errorbar(x_value, y_value, xerr=x_error, yerr=y_error, fmt='none', ecolor=_bar_color(label), alpha=0.55, capsize=4)
+            ax.annotate(label, (x_value, y_value), textcoords='offset points', xytext=(6, 6), fontsize=9)
+    ax.set_xlabel('Total Upload Bytes')
+    ax.set_ylabel('Test MSE')
+    ax.set_title('Test MSE vs Upload Communication (mean +- std)')
+    ax.grid(True, alpha=0.25)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180)
+    plt.close()
+    return output_path
+
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='Summarize and plot selected experiment-suite results.')
     parser.add_argument('root_dir', nargs='+', type=Path, help='One or more suite root directories or one noattack_* subdirectory per seed')
@@ -704,12 +786,14 @@ def summarize_single_suite(root_dir: Path, loss: str, algorithms: tuple[str, ...
     round_plot = plot_val_mse_vs_round(records, output_dir / 'val_mse_vs_round.png')
     upload_plot = plot_val_mse_vs_upload(records, output_dir / 'val_mse_vs_cumulative_upload.png')
     test_plot = plot_test_mse_bar(rows, output_dir / 'test_mse_bar.png')
+    bubble_plot = plot_test_mse_vs_upload_bubble(rows, output_dir / 'test_mse_vs_upload_bubble.png')
 
     print(f'Saved {csv_path}')
     print(f'Saved {md_path}')
     print(f'Saved {round_plot}')
     print(f'Saved {upload_plot}')
     print(f'Saved {test_plot}')
+    print(f'Saved {bubble_plot}')
     for row in rows:
         attack_suffix = ''
         if row['attack_primary_metric_name'] is not None:
@@ -742,12 +826,14 @@ def summarize_multi_suite(root_dirs: list[Path], loss: str, algorithms: tuple[st
     round_plot = plot_aggregated_val_mse_vs_round(curves, output_dir / 'val_mse_vs_round.png')
     upload_plot = plot_aggregated_val_mse_vs_upload(curves, output_dir / 'val_mse_vs_cumulative_upload.png')
     test_plot = plot_aggregated_test_mse_bar(rows, output_dir / 'test_mse_bar.png')
+    bubble_plot = plot_aggregated_test_mse_vs_upload_bubble(rows, output_dir / 'test_mse_vs_upload_bubble.png')
 
     print(f'Saved {csv_path}')
     print(f'Saved {md_path}')
     print(f'Saved {round_plot}')
     print(f'Saved {upload_plot}')
     print(f'Saved {test_plot}')
+    print(f'Saved {bubble_plot}')
     for row in rows:
         attack_suffix = ''
         if row['attack_primary_metric_name'] is not None:

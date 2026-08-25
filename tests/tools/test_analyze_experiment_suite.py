@@ -139,12 +139,14 @@ def test_analyze_experiment_suite_discovers_rows_outputs_plots_and_supports_old(
     round_plot = module.plot_val_mse_vs_round(records, output_dir / 'val_mse_vs_round.png')
     upload_plot = module.plot_val_mse_vs_upload(records, output_dir / 'val_mse_vs_cumulative_upload.png')
     test_plot = module.plot_test_mse_bar(rows, output_dir / 'test_mse_bar.png')
+    bubble_plot = module.plot_test_mse_vs_upload_bubble(rows, output_dir / 'test_mse_vs_upload_bubble.png')
 
     assert csv_path.exists()
     assert md_path.exists()
     assert round_plot.exists()
     assert upload_plot.exists()
     assert test_plot.exists()
+    assert bubble_plot.exists()
     csv_rows = list(csv.DictReader(csv_path.open('r', encoding='utf-8')))
     assert [row['label'] for row in csv_rows] == labels
     assert csv_rows[1]['attack_primary_metric_name'] == 'nearest_client_train_mse'
@@ -185,12 +187,14 @@ def test_analyze_experiment_suite_aggregates_multiple_seeds_with_std_outputs(tmp
     round_plot = module.plot_aggregated_val_mse_vs_round(curves, output_dir / 'val_mse_vs_round.png')
     upload_plot = module.plot_aggregated_val_mse_vs_upload(curves, output_dir / 'val_mse_vs_cumulative_upload.png')
     test_plot = module.plot_aggregated_test_mse_bar(rows, output_dir / 'test_mse_bar.png')
+    bubble_plot = module.plot_aggregated_test_mse_vs_upload_bubble(rows, output_dir / 'test_mse_vs_upload_bubble.png')
 
     assert csv_path.exists()
     assert md_path.exists()
     assert round_plot.exists()
     assert upload_plot.exists()
     assert test_plot.exists()
+    assert bubble_plot.exists()
     csv_rows = list(csv.DictReader(csv_path.open('r', encoding='utf-8')))
     assert [row['label'] for row in csv_rows] == ['centralized', 'fedavg', 'topk', 'ega_ed160_hd1024_rb2_q159_ema095_pt150']
     assert csv_rows[1]['test_mse_mean'] == '0.76'
@@ -211,6 +215,7 @@ def test_analyze_experiment_suite_script_exists_and_is_executable():
     assert 'val_mse_vs_round.png' in content
     assert 'val_mse_vs_cumulative_upload.png' in content
     assert 'test_mse_bar.png' in content
+    assert 'test_mse_vs_upload_bubble.png' in content
     assert 'fedavg baseline' in content
     assert 'attack_success_rate' in content
     assert 'attack_overall_avg_primary_metric_value' in content
