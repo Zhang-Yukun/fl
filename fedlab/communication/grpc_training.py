@@ -471,10 +471,12 @@ class GrpcFederatedCoordinator:
                         candidate_metrics=metrics,
                         candidate_index=self.round_index,
                         label='round',
+                        metric_name=self.primary_metric_name,
+                        metric_mode=self.primary_metric_mode,
                     )
                     if improved and self.server._uses_oracle_evaluation():
                         self.best_oracle_state = _clone_state(self.server.oracle_global_state)
-                    will_stop = self.stopper.update(metrics['mse'])
+                    will_stop = self.stopper.update(metrics[self.primary_metric_name])
                     record = self.server.record_round(
                         self.round_index,
                         results,

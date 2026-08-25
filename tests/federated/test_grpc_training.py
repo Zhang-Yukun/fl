@@ -441,6 +441,30 @@ def test_grpc_coordinator_supports_classification_task(tmp_path, monkeypatch, al
     assert len(captures) == 3
 
 
+def test_grpc_classification_uses_primary_metric_for_multi_round_stopping(tmp_path):
+    config = _classification_grpc_config(tmp_path, algorithm='fedavg')
+    config['federated']['rounds'] = 2
+
+    coordinator = GrpcFederatedCoordinator(config)
+
+    first_response = _submit_one_round(coordinator, config)
+    assert first_response['accepted'] is True
+    assert first_response['stop'] is False
+    assert coordinator.round_index == 1
+
+    second_response = _submit_one_round(coordinator, config)
+    assert second_response['accepted'] is True
+    assert second_response['stop'] is True
+
+    summary = json.loads((Path(config['experiment']['output_dir']) / 'summary.json').read_text(encoding='utf-8'))
+    metrics = json.loads((Path(config['experiment']['output_dir']) / 'metrics.json').read_text(encoding='utf-8'))
+
+    assert summary['best_val_metric_name'] == 'accuracy'
+    assert 'accuracy' in summary['best_val']
+    assert len(metrics) == 2
+    assert all('accuracy' in entry['active_val_metrics'] for entry in metrics)
+
+
 def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path, monkeypatch):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
