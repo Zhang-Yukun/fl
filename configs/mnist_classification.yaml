@@ -52,7 +52,7 @@ transport:
   download_mode: model
 
 attack:
-  target_type: gradient
+  target_type: update_payload
   enabled: false
   steps: 20
   async_enabled: false
