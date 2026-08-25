@@ -8,3 +8,4 @@ grpcio
 einops
 reformer-pytorch
 matplotlib
+torchvision
