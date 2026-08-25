@@ -24,6 +24,7 @@ from fedlab.utils.serialization import (
     state_num_parameters,
 )
 from fedlab.engine.training import evaluate
+from fedlab.tasks import primary_metric as task_primary_metric
 from fedlab.utils.privacy_accounting import (
     AdaptiveRdpStep,
     adaptive_clip_threshold,
@@ -92,9 +93,9 @@ class RoundRecord:
     round: int
     algorithm: str
     train_loss: float
-    val_mse: float
-    val_mae: float
-    val_mape: float
+    primary_metric_name: str
+    primary_metric_value: float
+    val_metrics: dict[str, float]
     round_time_seconds: float
     elapsed_time_seconds: float
     model_parameters: int
@@ -138,6 +139,12 @@ class RoundRecord:
     adaptive_noise_std: float | None = None
     evaluation_mode: str = "protocol"
     active_val_scope: str = "protocol"
+    active_val_metrics: dict[str, float] = field(default_factory=dict)
+    protocol_val_metrics: dict[str, float] = field(default_factory=dict)
+    oracle_val_metrics: dict[str, float] | None = None
+    val_mse: float | None = None
+    val_mae: float | None = None
+    val_mape: float | None = None
     active_val_mse: float | None = None
     active_val_mae: float | None = None
     active_val_mape: float | None = None
@@ -455,13 +462,14 @@ class FederatedServer:
             for result, aggregation_weight in zip(results, aggregation_weights)
         ]
         protocol_metrics = metrics if protocol_metrics is None else protocol_metrics
+        primary_metric_name = task_primary_metric(self.config)
         record = RoundRecord(
             round=round_index,
             algorithm=str(self.config.get("federated", {}).get("algorithm", "fedavg")),
             train_loss=sum(r.loss for r in results) / len(results),
-            val_mse=metrics["mse"],
-            val_mae=metrics["mae"],
-            val_mape=metrics["mape"],
+            primary_metric_name=primary_metric_name,
+            primary_metric_value=float(metrics[primary_metric_name]),
+            val_metrics={key: float(value) for key, value in metrics.items()},
             round_time_seconds=round_time_seconds,
             elapsed_time_seconds=elapsed_time_seconds,
             model_parameters=model_parameters,
@@ -505,15 +513,21 @@ class FederatedServer:
             adaptive_noise_std=None if self.last_privacy_step is None else self.last_privacy_step.noise_std,
             evaluation_mode=self.evaluation_mode,
             active_val_scope=self.evaluation_mode,
-            active_val_mse=metrics["mse"],
-            active_val_mae=metrics["mae"],
-            active_val_mape=metrics["mape"],
-            protocol_val_mse=protocol_metrics.get("mse"),
-            protocol_val_mae=protocol_metrics.get("mae"),
-            protocol_val_mape=protocol_metrics.get("mape"),
-            oracle_val_mse=None if oracle_metrics is None else oracle_metrics.get("mse"),
-            oracle_val_mae=None if oracle_metrics is None else oracle_metrics.get("mae"),
-            oracle_val_mape=None if oracle_metrics is None else oracle_metrics.get("mape"),
+            active_val_metrics={key: float(value) for key, value in metrics.items()},
+            protocol_val_metrics={key: float(value) for key, value in protocol_metrics.items()},
+            oracle_val_metrics=None if oracle_metrics is None else {key: float(value) for key, value in oracle_metrics.items()},
+            val_mse=None if "mse" not in metrics else float(metrics["mse"]),
+            val_mae=None if "mae" not in metrics else float(metrics["mae"]),
+            val_mape=None if "mape" not in metrics else float(metrics["mape"]),
+            active_val_mse=None if "mse" not in metrics else float(metrics["mse"]),
+            active_val_mae=None if "mae" not in metrics else float(metrics["mae"]),
+            active_val_mape=None if "mape" not in metrics else float(metrics["mape"]),
+            protocol_val_mse=None if "mse" not in protocol_metrics else float(protocol_metrics["mse"]),
+            protocol_val_mae=None if "mae" not in protocol_metrics else float(protocol_metrics["mae"]),
+            protocol_val_mape=None if "mape" not in protocol_metrics else float(protocol_metrics["mape"]),
+            oracle_val_mse=None if oracle_metrics is None or "mse" not in oracle_metrics else float(oracle_metrics["mse"]),
+            oracle_val_mae=None if oracle_metrics is None or "mae" not in oracle_metrics else float(oracle_metrics["mae"]),
+            oracle_val_mape=None if oracle_metrics is None or "mape" not in oracle_metrics else float(oracle_metrics["mape"]),
             clients=client_records,
         )
         self.history.append(record)
@@ -523,10 +537,11 @@ class FederatedServer:
         cumulative_transport_download_bytes = sum(item.total_transport_download_bytes for item in self.history)
         if not silent:
             logger.info(
-                "Round {} algorithm={} val_mse={:.6f} time={:.2f}s parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({}) parameter_download_ratio={:.2f} parameter_upload_ratio={:.2f} parameter_total_ratio={:.2f}",
+                "Round {} algorithm={} val_{}={:.6f} time={:.2f}s parameter_upload={} ({}) parameter_download={} ({}) transport_upload={} ({}) transport_download={} ({}) parameter_download_ratio={:.2f} parameter_upload_ratio={:.2f} parameter_total_ratio={:.2f}",
                 round_index,
                 record.algorithm,
-                record.val_mse,
+                record.primary_metric_name,
+                record.primary_metric_value,
                 record.round_time_seconds,
                 record.total_parameter_upload_bytes,
                 _format_num_bytes(record.total_parameter_upload_bytes),

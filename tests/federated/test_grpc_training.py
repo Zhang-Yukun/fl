@@ -13,8 +13,9 @@ import fedlab.federated.client as client_module
 import fedlab.communication.grpc_training as grpc_training_module
 import fedlab.security.attacks as attacks_module
 from fedlab.communication.grpc_training import GrpcFederatedCoordinator, _apply_transport_metrics, run_client, serve
-from fedlab.datasets.rare_earth import build_federated_loaders
+from fedlab.datasets import build_federated_loaders
 import fedlab.federated.algorithms as algorithms_module
+import fedlab.federated.methods.encoded as encoded_methods
 from fedlab.federated.algorithms import resolve_device, run_federated
 from fedlab.federated.client import ClientResult, FederatedClient
 from fedlab.utils.config import load_config
@@ -31,7 +32,12 @@ def _submit_one_round(coordinator: GrpcFederatedCoordinator, config: dict[str, o
     response = None
     for client_id, loader in train_loaders.items():
         client = FederatedClient(client_id, loader, config, device)
-        result = client.train(global_payload["state"], compressed=global_payload["compressed"], round_index=global_payload["round"])
+        result = client.train(
+            global_payload["state"],
+            compressed=global_payload["compressed"],
+            round_index=global_payload["round"],
+            round_context=global_payload.get("round_context", {}),
+        )
         response = coordinator.submit_update({"round": global_payload["round"], "result": result})
     assert response is not None
     while coordinator.finalize_requested and not coordinator.finalization_completed:
@@ -76,6 +82,119 @@ def _run_networked_grpc(config: dict[str, object]) -> None:
         if server_process.is_alive():
             server_process.terminate()
             server_process.join(timeout=5)
+
+
+def _write_classification_split(root: Path, client_id: str, split: str, images: torch.Tensor, labels: torch.Tensor) -> None:
+    client_dir = root / "clients" / client_id
+    client_dir.mkdir(parents=True, exist_ok=True)
+    torch.save({"images": images, "labels": labels}, client_dir / f"{split}.pt")
+
+
+def _prepare_classification_split_dir(root: Path, *, client_ids: list[str], image_shape: tuple[int, int, int], num_classes: int) -> None:
+    train_images_all = []
+    train_labels_all = []
+    val_images_all = []
+    val_labels_all = []
+    test_images_all = []
+    test_labels_all = []
+    for client_offset, client_id in enumerate(client_ids):
+        base_value = float(client_offset) / 10.0
+        train_images = torch.full((6, *image_shape), base_value, dtype=torch.float32)
+        train_labels = torch.tensor([index % num_classes for index in range(6)], dtype=torch.long)
+        val_images = torch.full((3, *image_shape), base_value + 0.1, dtype=torch.float32)
+        val_labels = torch.tensor([index % num_classes for index in range(3)], dtype=torch.long)
+        test_images = torch.full((3, *image_shape), base_value + 0.2, dtype=torch.float32)
+        test_labels = torch.tensor([index % num_classes for index in range(3)], dtype=torch.long)
+        _write_classification_split(root, client_id, 'train', train_images, train_labels)
+        _write_classification_split(root, client_id, 'val', val_images, val_labels)
+        _write_classification_split(root, client_id, 'test', test_images, test_labels)
+        train_images_all.append(train_images)
+        train_labels_all.append(train_labels)
+        val_images_all.append(val_images)
+        val_labels_all.append(val_labels)
+        test_images_all.append(test_images)
+        test_labels_all.append(test_labels)
+    server_dir = root / 'server'
+    server_dir.mkdir(parents=True, exist_ok=True)
+    torch.save({'images': torch.cat(train_images_all, dim=0), 'labels': torch.cat(train_labels_all, dim=0)}, server_dir / 'train.pt')
+    torch.save({'images': torch.cat(val_images_all, dim=0), 'labels': torch.cat(val_labels_all, dim=0)}, server_dir / 'val.pt')
+    torch.save({'images': torch.cat(test_images_all, dim=0), 'labels': torch.cat(test_labels_all, dim=0)}, server_dir / 'test.pt')
+
+
+class _IdentityEgaCodec(torch.nn.Module):
+    """Minimal codec that avoids real EGA artifact pretraining in gRPC tests."""
+
+    def __init__(self, block_size: int):
+        super().__init__()
+        self.block_size = int(block_size)
+        self.encoded_dim = int(block_size)
+        self.anchor = torch.nn.Parameter(torch.zeros(1), requires_grad=False)
+
+    def encode_blocks(self, blocks: torch.Tensor) -> torch.Tensor:
+        return blocks.to(torch.float32)
+
+    def decode_blocks(self, encoded_blocks: torch.Tensor) -> torch.Tensor:
+        return encoded_blocks.to(torch.float32)
+
+
+def _patch_identity_ega_codec(monkeypatch, *, block_size: int = 8) -> None:
+    def _fake_load_ega_codec(config, device, num_clients, allow_pretrain):
+        del config, device, num_clients, allow_pretrain
+        return _IdentityEgaCodec(block_size=block_size)
+
+    def _fake_load_ega_codec_payload(config, payload, device, num_clients):
+        del config, payload, device, num_clients
+        return _IdentityEgaCodec(block_size=block_size)
+
+    monkeypatch.setattr(encoded_methods, 'load_ega_codec', _fake_load_ega_codec)
+    monkeypatch.setattr(encoded_methods, 'load_ega_codec_payload', _fake_load_ega_codec_payload)
+
+
+def _classification_grpc_config(tmp_path: Path, *, algorithm: str) -> dict[str, object]:
+    split_dir = tmp_path / 'classification_split'
+    _prepare_classification_split_dir(split_dir, client_ids=['m1', 'm2', 'm3'], image_shape=(1, 4, 4), num_classes=3)
+    config = {
+        'experiment': {'output_dir': str(tmp_path / algorithm), 'mode': 'federated'},
+        'runtime': {'device': 'cpu', 'log_level': 'INFO', 'deterministic': True, 'seed': 2026},
+        'task': {'type': 'classification'},
+        'data': {
+            'split_dir': str(split_dir),
+            'clients': ['m1', 'm2', 'm3'],
+            'batch_size': 2,
+            'shuffle_train': False,
+            'num_workers': 0,
+            'image_shape': [1, 4, 4],
+            'num_classes': 3,
+        },
+        'model': {'name': 'small_cnn', 'hidden_channels': 4, 'dropout': 0.0},
+        'training': {'lr': 0.001, 'optimizer': 'adam', 'loss': 'cross_entropy', 'patience': 1, 'min_delta': 0.0},
+        'centralized': {'rounds': 1},
+        'federated': {'algorithm': algorithm, 'rounds': 1, 'local_epochs': 1},
+        'transport': {'upload_mode': 'update', 'download_mode': 'model'},
+        'attack': {'enabled': False, 'frequency_rounds': 1, 'sample_count': 1, 'max_samples': 1, 'async_enabled': False, 'device': 'cpu'},
+        'tracking': {'enabled': False},
+        'evaluation': {'metrics': ['accuracy']},
+        'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},
+        'grpc': {'address': '127.0.0.1:50051', 'server_address': '127.0.0.1:50051', 'poll_seconds': 0.05, 'max_message_mb': 32.0},
+    }
+    if algorithm == 'sparse_fedavg':
+        config['federated']['topk_fraction'] = 1.0
+    if algorithm == 'ega_fedavg':
+        config['federated']['quantization_seed'] = 2026
+        config['ega'] = {
+            'artifact_path': str(tmp_path / 'artifacts' / 'ega_codec.pt'),
+            'block_size': 8,
+            'encoded_dim': 8,
+            'hidden_dim': 8,
+            'residual_blocks': 0,
+            'quantization_level': 64,
+            'encoded_dtype': 'float32',
+            'download_method': 'ega',
+            'download_dtype': 'float32',
+            'error_feedback': False,
+            'min_normalization': 1e-6,
+        }
+    return config
 
 
 def test_apply_transport_metrics_tracks_overhead_bytes():
@@ -301,6 +420,27 @@ def test_grpc_coordinator_saves_update_captures_when_attacks_disabled(tmp_path):
     assert (tmp_path / "saved_updates" / "index.json").exists()
 
 
+@pytest.mark.parametrize('algorithm', ['fedavg', 'sparse_fedavg', 'ega_fedavg'])
+def test_grpc_coordinator_supports_classification_task(tmp_path, monkeypatch, algorithm):
+    config = _classification_grpc_config(tmp_path, algorithm=algorithm)
+    if algorithm == 'ega_fedavg':
+        _patch_identity_ega_codec(monkeypatch)
+
+    coordinator = GrpcFederatedCoordinator(config)
+    response = _submit_one_round(coordinator, config)
+
+    assert response['accepted'] is True
+    assert response['stop'] is True
+    summary = json.loads((Path(config['experiment']['output_dir']) / 'summary.json').read_text(encoding='utf-8'))
+    metrics = json.loads((Path(config['experiment']['output_dir']) / 'metrics.json').read_text(encoding='utf-8'))
+    captures = algorithms_module.load_captured_update_records(Path(config['experiment']['output_dir']))
+
+    assert summary['transport'] == 'grpc'
+    assert 'accuracy' in summary['test']
+    assert metrics[0]['algorithm'] == algorithm
+    assert len(captures) == 3
+
+
 def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path, monkeypatch):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
@@ -350,7 +490,8 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
     dense_update["weight"] = torch.tensor([[1.0, 2.0]])
     sparse_update = compress_topk(dense_update, 0.5)
 
-    def fake_train(self, global_state, compressed=False, round_index=0):
+    def fake_train(self, global_state, compressed=False, round_index=0, round_context=None, prepared_state=None):
+        del global_state, compressed, round_index, round_context, prepared_state
         return ClientResult(
             client_id=self.client_id,
             num_samples=1,
@@ -375,11 +516,11 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
             compressor="topk",
         )
 
-    original_build_attack_round_task = grpc_training_module._build_attack_round_task
+    original_build_update_attack_round_task = grpc_training_module.build_update_attack_round_task
     captured_targets = []
 
-    def fake_build_attack_round_task(*args, **kwargs):
-        task = original_build_attack_round_task(*args, **kwargs)
+    def fake_build_update_attack_round_task(*args, **kwargs):
+        task = original_build_update_attack_round_task(*args, **kwargs)
         if task is not None:
             sample_target = task.samples[0].target
             captured_targets.append(sample_target["weight"].detach().cpu().clone())
@@ -393,7 +534,7 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
         return {"mse": mse, "mae": abs(1.0 - first) + abs(2.0 - second), "mape": mse}
 
     monkeypatch.setattr(FederatedClient, "train", fake_train)
-    monkeypatch.setattr(grpc_training_module, "_build_attack_round_task", fake_build_attack_round_task)
+    monkeypatch.setattr(grpc_training_module, "build_update_attack_round_task", fake_build_update_attack_round_task)
     monkeypatch.setattr(server_module, "evaluate", fake_evaluate)
     monkeypatch.setattr(
         algorithms_module,
@@ -689,11 +830,16 @@ def test_grpc_coordinator_restores_best_validation_checkpoint(tmp_path, monkeypa
         "build_model",
         _build_zero_model,
     )
+    minimal_loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(torch.zeros(1, 1), torch.zeros(1, 1)),
+        batch_size=1,
+        shuffle=False,
+    )
     monkeypatch.setattr(
         __import__('fedlab.communication.grpc_training', fromlist=['build_federated_loaders']),
         'build_federated_loaders',
         lambda _config: (
-            {"Nd2O3": [0], "CeO2": [0], "La2O3": [0]},
+            {"Nd2O3": minimal_loader, "CeO2": minimal_loader, "La2O3": minimal_loader},
             val_loader,
             test_loader,
         ),

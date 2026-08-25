@@ -35,6 +35,8 @@ from fedlab.federated.algorithms import (
     _wandb_cumulative_communication_payload,
     _wandb_round_payload,
     _log_prediction_views,
+    _configured_primary_metric_name,
+    _configured_primary_metric_mode,
     build_update_attack_round_task,
     configure_random_seed,
     configure_torch_runtime,
@@ -137,9 +139,12 @@ class GrpcFederatedCoordinator:
         ]
         self.compressed = is_compressed_algorithm(config)
         self.max_rounds = int(config['federated'].get('rounds', 20))
+        self.primary_metric_name = _configured_primary_metric_name(config)
+        self.primary_metric_mode = _configured_primary_metric_mode(config)
         self.stopper = EarlyStopper(
             int(config['training'].get('patience', 5)),
             float(config['training'].get('min_delta', 0.0)),
+            mode=self.primary_metric_mode,
         )
         self.round_index = 0
         self.start_time = time.perf_counter()
@@ -158,7 +163,7 @@ class GrpcFederatedCoordinator:
         self.attack_target_type = _attack_target_type(config)
         self.best_global_state = _clone_state(self.server.global_state)
         self.best_oracle_state = None if not self.server._uses_oracle_evaluation() else _clone_state(self.server.oracle_global_state)
-        self.best_metrics = {'mse': float('inf'), 'mae': float('inf'), 'mape': float('inf')}
+        self.best_metrics: dict[str, float] | None = None
         self.best_round = -1
         self.tracker.log({
             'run/algorithm': str(config['federated'].get('algorithm', 'fedavg')),
@@ -263,6 +268,8 @@ class GrpcFederatedCoordinator:
             candidate_metrics=metrics,
             candidate_index=round_index,
             label='round',
+            metric_name=self.primary_metric_name,
+            metric_mode=self.primary_metric_mode,
         )
         if improved and self.server._uses_oracle_evaluation():
             self.best_oracle_state = _clone_state(self.server.oracle_global_state)
@@ -372,9 +379,9 @@ class GrpcFederatedCoordinator:
             'run/transport': 'grpc',
             'run/evaluation_mode': self.server.evaluation_mode,
             'run/best_round': self.best_round,
-            'run/best_val_mse': self.best_metrics['mse'],
-            'run/best_val_mae': self.best_metrics['mae'],
-            'run/best_val_mape': self.best_metrics['mape'],
+            'run/best_val_metric_name': self.primary_metric_name,
+            'run/best_val_metric_value': self.best_metrics[self.primary_metric_name],
+            **{f'run/best_val_{key}': value for key, value in self.best_metrics.items()},
             'privacy/epsilon': summary['privacy_epsilon'],
             'privacy/delta': summary['privacy_delta'],
             'privacy/rdp_total': summary['privacy_rdp_total'],

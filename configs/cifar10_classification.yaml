@@ -59,4 +59,4 @@ attack:
   device: same
 
 evaluation:
-  metrics: [cross_entropy, accuracy]
+  metrics: [accuracy]

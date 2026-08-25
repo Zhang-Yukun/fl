@@ -42,6 +42,7 @@ from fedlab.utils.serialization import (
     state_num_parameters,
 )
 from fedlab.federated.server import EarlyStopper, FederatedServer, RoundRecord
+from fedlab.tasks import primary_metric as task_primary_metric, primary_metric_mode as task_primary_metric_mode
 from fedlab.federated.protocol import validate_transport_modes
 from fedlab.utils.tracking import Tracker
 from fedlab.engine.training import build_training_optimizer, evaluate, predict_first_batch, predict_first_batch_for_state, train_one_epoch
@@ -185,16 +186,50 @@ def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
 
     data = asdict(record)
     clients = data.pop("clients")
-    payload = {f"round/{key}": value for key, value in data.items()}
-    if "round/val_mse" in payload:
-        payload["round/active_val_mse"] = payload["round/val_mse"]
-        payload["round/active_val_mae"] = payload.get("round/val_mae")
-        payload["round/active_val_mape"] = payload.get("round/val_mape")
+    val_metrics = data.pop('val_metrics', {})
+    active_val_metrics = data.pop('active_val_metrics', {})
+    protocol_val_metrics = data.pop('protocol_val_metrics', {})
+    oracle_val_metrics = data.pop('oracle_val_metrics', None)
+    payload = {f"round/{key}": value for key, value in data.items() if value is not None}
+    payload.update({f"round/val_{key}": value for key, value in val_metrics.items()})
+    payload.update({f"round/active_val_{key}": value for key, value in active_val_metrics.items()})
+    payload.update({f"round/protocol_val_{key}": value for key, value in protocol_val_metrics.items()})
+    if oracle_val_metrics is not None:
+        payload.update({f"round/oracle_val_{key}": value for key, value in oracle_val_metrics.items()})
     for client in clients:
         prefix = f"client/{client['client_id']}"
         for key, value in client.items():
             if key != "client_id":
                 payload[f"{prefix}/{key}"] = value
+    return payload
+
+
+def _configured_primary_metric_name(config: dict[str, Any]) -> str:
+    """Return the task-specific metric used for checkpointing and early stopping."""
+
+    return task_primary_metric(config)
+
+
+def _configured_primary_metric_mode(config: dict[str, Any]) -> str:
+    """Return whether the task-specific primary metric should be minimized or maximized."""
+
+    return task_primary_metric_mode(config)
+
+
+def _metric_series_payload(prefix: str, metrics: dict[str, float]) -> dict[str, float]:
+    """Flatten one metric dictionary into ``prefix_metric`` scalar entries."""
+
+    return {f"{prefix}_{name}": float(value) for name, value in metrics.items()}
+
+
+def _augment_best_metric_summary(payload: dict[str, Any], best_metrics: dict[str, float], primary_metric_name: str) -> dict[str, Any]:
+    """Attach generic best-validation metric fields to one summary payload."""
+
+    payload['best_val'] = {key: float(value) for key, value in best_metrics.items()}
+    payload['best_val_metric_name'] = primary_metric_name
+    payload['best_val_metric_value'] = float(best_metrics[primary_metric_name])
+    for name, value in best_metrics.items():
+        payload[f'best_val_{name}'] = float(value)
     return payload
 
 
@@ -273,6 +308,7 @@ def _build_federated_summary(
     last_privacy = history[-1] if history else None
     protocol_test = test_metrics if protocol_test_metrics is None else protocol_test_metrics
     oracle_test = protocol_test if oracle_test_metrics is None else oracle_test_metrics
+    primary_metric_name = _configured_primary_metric_name(server.config)
     summary = {
         "test": test_metrics,
         "active_test_scope": server.evaluation_mode,
@@ -283,9 +319,6 @@ def _build_federated_summary(
         "rounds": len(history),
         "total_time_seconds": total_elapsed,
         "best_round": best_round,
-        "best_val_mse": best_metrics["mse"],
-        "best_val_mae": best_metrics["mae"],
-        "best_val_mape": best_metrics["mape"],
         "test_checkpoint": "best_validation",
         "last_parameter_download_compression_ratio": history[-1].parameter_download_compression_ratio if history else 0.0,
         "last_parameter_upload_compression_ratio": history[-1].parameter_upload_compression_ratio if history else 0.0,
@@ -311,6 +344,7 @@ def _build_federated_summary(
         "adaptive_noise_std": None if last_privacy is None else last_privacy.adaptive_noise_std,
         "privacy_trust_model": "central_dp_trusted_aggregator" if (last_privacy is not None and last_privacy.privacy_accountant is not None) else None,
     }
+    _augment_best_metric_summary(summary, best_metrics, primary_metric_name)
     if transport is not None:
         summary["transport"] = transport
     return summary
@@ -1289,10 +1323,12 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
         "run/mode": "centralized",
     })
     optimizer = build_training_optimizer(model.parameters(), config)
-    stopper = EarlyStopper(int(config["training"].get("patience", 5)))
+    primary_metric_name = _configured_primary_metric_name(config)
+    primary_metric_mode = _configured_primary_metric_mode(config)
+    stopper = EarlyStopper(int(config["training"].get("patience", 5)), float(config["training"].get("min_delta", 0.0)), mode=primary_metric_mode)
     history = []
     best_state = serialize_model(model)
-    best_metrics = {"mse": float("inf"), "mae": float("inf"), "mape": float("inf")}
+    best_metrics: dict[str, float] | None = None
     best_round = -1
     for round_index in range(_resolve_centralized_rounds(config)):
         round_start = time.perf_counter()
@@ -1306,32 +1342,35 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
             candidate_metrics=metrics,
             candidate_index=round_index,
             label="round",
+            metric_name=primary_metric_name,
+            metric_mode=primary_metric_mode,
         )
         round_time = time.perf_counter() - round_start
         elapsed = time.perf_counter() - start_time
         round_record = {
             "round": round_index,
             "train_loss": loss,
-            "val_mse": metrics["mse"],
-            "val_mae": metrics["mae"],
-            "val_mape": metrics["mape"],
+            "primary_metric_name": primary_metric_name,
+            "primary_metric_value": metrics[primary_metric_name],
+            **_metric_series_payload("val", metrics),
             "round_time_seconds": round_time,
             "elapsed_time_seconds": elapsed,
         }
         history.append(round_record)
         logger.info(
-            "Centralized round {} loss={:.6f} val_mse={:.6f} time={:.2f}s elapsed={:.2f}s",
+            "Centralized round {} loss={:.6f} val_{}={:.6f} time={:.2f}s elapsed={:.2f}s",
             round_index,
             loss,
-            metrics["mse"],
+            primary_metric_name,
+            metrics[primary_metric_name],
             round_time,
             elapsed,
         )
         tracker.log({
             "round/loss": loss,
-            "round/val_mse": metrics["mse"],
-            "round/val_mae": metrics["mae"],
-            "round/val_mape": metrics["mape"],
+            "round/val_primary_metric_name": primary_metric_name,
+            "round/val_primary_metric_value": metrics[primary_metric_name],
+            **{f"round/val_{key}": value for key, value in metrics.items()},
             "round/time_seconds": round_time,
             "run/elapsed_time_seconds": elapsed,
         }, step=round_index)
@@ -1348,7 +1387,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
             )
         except Exception as exc:
             logger.debug("Skip centralized val prediction plot: {}", exc)
-        if stopper.update(metrics["mse"]):
+        if stopper.update(metrics[primary_metric_name]):
             logger.info("Centralized early stopping at round {}", round_index)
             break
     model.load_state_dict(best_state)
@@ -1366,6 +1405,8 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
                 "total_time_seconds": total_elapsed,
                 "best_round": best_round,
                 "best_val": best_metrics,
+                "best_val_metric_name": primary_metric_name,
+                "best_val_metric_value": best_metrics[primary_metric_name],
                 "test_checkpoint": "best_validation",
             },
             handle,
@@ -1376,9 +1417,9 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
         **{f"test/{key}": value for key, value in test_metrics.items()},
         "run/total_time_seconds": total_elapsed,
         "run/best_round": best_round,
-        "run/best_val_mse": best_metrics["mse"],
-        "run/best_val_mae": best_metrics["mae"],
-        "run/best_val_mape": best_metrics["mape"],
+        "run/best_val_metric_name": primary_metric_name,
+        "run/best_val_metric_value": best_metrics[primary_metric_name],
+        **{f"run/best_val_{key}": value for key, value in best_metrics.items()},
     })
     try:
         _log_prediction_views(
@@ -1395,17 +1436,20 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
         logger.debug("Skip centralized prediction plot: {}", exc)
     tracker.finish()
     with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
+        summary_payload = {
+            "test": test_metrics,
+            "rounds": len(history),
+            "total_time_seconds": total_elapsed,
+            "best_round": best_round,
+            "best_val": best_metrics,
+            "best_val_metric_name": primary_metric_name,
+            "best_val_metric_value": best_metrics[primary_metric_name],
+            "test_checkpoint": "best_validation",
+        }
+        for key, value in best_metrics.items():
+            summary_payload[f"best_val_{key}"] = value
         json.dump(
-            {
-                "test": test_metrics,
-                "rounds": len(history),
-                "total_time_seconds": total_elapsed,
-                "best_round": best_round,
-                "best_val_mse": best_metrics["mse"],
-                "best_val_mae": best_metrics["mae"],
-                "best_val_mape": best_metrics["mape"],
-                "test_checkpoint": "best_validation",
-            },
+            summary_payload,
             handle,
             ensure_ascii=False,
             indent=2,
@@ -1463,12 +1507,14 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         "run/model_bytes": state_num_bytes(server.global_state),
         "run/compressed_uploads": compressed,
     })
-    stopper = EarlyStopper(int(config["training"].get("patience", 5)), float(config["training"].get("min_delta", 0.0)))
+    primary_metric_name = _configured_primary_metric_name(config)
+    primary_metric_mode = _configured_primary_metric_mode(config)
+    stopper = EarlyStopper(int(config["training"].get("patience", 5)), float(config["training"].get("min_delta", 0.0)), mode=primary_metric_mode)
     max_rounds = int(config["federated"].get("rounds", 20))
     attack_manager = AsyncAttackManager(config, tracker)
     best_global_state = _clone_state(server.global_state)
     best_oracle_state = None if not server._uses_oracle_evaluation() else _clone_state(server.oracle_global_state)
-    best_metrics = {"mse": float("inf"), "mae": float("inf"), "mape": float("inf")}
+    best_metrics: dict[str, float] | None = None
     best_round = -1
     for round_index in range(max_rounds):
         round_start = time.perf_counter()
@@ -1497,6 +1543,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             candidate_metrics=metrics,
             candidate_index=round_index,
             label="round",
+            metric_name=primary_metric_name,
+            metric_mode=primary_metric_mode,
         )
         if improved and server._uses_oracle_evaluation():
             best_oracle_state = _clone_state(server.oracle_global_state)
@@ -1576,7 +1624,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             attack_results=attack_manager.attack_results,
             attack_target_type=attack_target_type,
         )
-        if stopper.update(metrics["mse"]):
+        if stopper.update(metrics[primary_metric_name]):
             logger.info("Early stopping at round {}", round_index)
             break
     server.global_state = _clone_state(best_global_state)
@@ -1642,9 +1690,9 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     )
     tracker.log({
         "run/best_round": best_round,
-        "run/best_val_mse": best_metrics["mse"],
-        "run/best_val_mae": best_metrics["mae"],
-        "run/best_val_mape": best_metrics["mape"],
+        "run/best_val_metric_name": primary_metric_name,
+        "run/best_val_metric_value": best_metrics[primary_metric_name],
+        **{f"run/best_val_{key}": value for key, value in best_metrics.items()},
         "privacy/epsilon": summary["privacy_epsilon"],
         "privacy/delta": summary["privacy_delta"],
         "privacy/rdp_total": summary["privacy_rdp_total"],

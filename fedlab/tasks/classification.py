@@ -7,19 +7,12 @@ from torch import nn
 from fedlab.datasets.image_classification import build_federated_image_classification_loaders
 from fedlab.modeling.classification import build_model as build_classification_model
 from fedlab.tasks.base import TaskSpec
-from fedlab.utils.metrics import accuracy, cross_entropy
+from fedlab.utils.metrics import accuracy
 
 
 def _classification_metrics(pred, target):
-    ce = cross_entropy(pred, target)
-    acc = accuracy(pred, target)
-    error_rate = 1.0 - acc
     return {
-        'cross_entropy': ce,
-        'accuracy': acc,
-        'mse': ce,
-        'mae': error_rate,
-        'mape': error_rate * 100.0,
+        'accuracy': accuracy(pred, target),
     }
 
 
@@ -30,8 +23,8 @@ CLASSIFICATION_TASK = TaskSpec(
     create_loss=lambda _config: nn.CrossEntropyLoss(),
     compute_metrics=_classification_metrics,
     default_loss='cross_entropy',
-    default_metrics=('cross_entropy', 'accuracy'),
+    default_metrics=('accuracy',),
     default_optimizer='adam',
-    primary_metric='cross_entropy',
-    primary_metric_mode='min',
+    primary_metric='accuracy',
+    primary_metric_mode='max',
 )
