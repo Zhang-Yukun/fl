@@ -86,10 +86,11 @@ def test_replay_saved_update_attacks_matches_inline_results(tmp_path, monkeypatc
         assert online["primary_metric_name"] == replay["primary_metric_name"]
         assert online["primary_metric_value"] == pytest.approx(replay["primary_metric_value"])
         assert online["nearest_client_train_mse"] == pytest.approx(replay["nearest_client_train_mse"])
+        assert online["budget_recovered_fraction"] == pytest.approx(replay["budget_recovered_fraction"])
         assert online["objective_mse"] == pytest.approx(replay["objective_mse"])
         assert online["artifact_path"] == replay["artifact_path"]
 
-    assert replay_summary["primary_metric_name"] == "nearest_client_train_mse"
+    assert replay_summary["primary_metric_name"] == "budget_recovered_fraction"
     assert replay_summary["overall_avg_primary_metric_value"] == pytest.approx(
         sum(record["primary_metric_value"] for record in online_results) / len(online_results)
     )

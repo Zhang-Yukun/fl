@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from scipy.optimize import linear_sum_assignment
 from torch import nn
 
 from fedlab.modeling import build_model
@@ -39,6 +40,14 @@ class AttackResult:
     exact_target_mse: float | None = None
     nearest_client_train_mse: float | None = None
     nearest_client_train_indices: list[int] | None = None
+    matched_reference_indices: list[int] | None = None
+    matched_reference_metric_name: str | None = None
+    matched_reference_metric_value: float | None = None
+    recovered_count: int | None = None
+    reconstructed_count: int | None = None
+    reference_count: int | None = None
+    budget_recovered_fraction: float | None = None
+    coverage_recovered_fraction: float | None = None
     metric_name: str = "reconstruction_mse"
     client_id: str | None = None
     round_index: int | None = None
@@ -114,6 +123,50 @@ def _normalize_report_metrics(config: dict[str, Any], target_type: str) -> set[s
     if unknown:
         raise ValueError(f"Unsupported attack report_metrics entries: {unknown}")
     return set(items)
+
+
+def _normalize_recovery_metric(value: Any, default: str = "mse") -> str:
+    """Resolve one configured set-recovery metric name."""
+
+    metric = str(default if value is None else value).strip().lower()
+    if metric == "auto":
+        metric = default
+    allowed = {"mse", "psnr", "ssim"}
+    if metric not in allowed:
+        raise ValueError(f"Unsupported attack recovery metric: {metric}")
+    return metric
+
+
+def _default_metric_objective(metric: str) -> str:
+    """Return whether smaller or larger values are better for one metric."""
+
+    return "min" if metric == "mse" else "max"
+
+
+def _normalize_recovery_objective(value: Any, metric: str) -> str:
+    """Resolve the configured set-recovery matching or success objective."""
+
+    objective = str(value if value is not None else "auto").strip().lower()
+    if objective == "auto":
+        objective = _default_metric_objective(metric)
+    if objective not in {"min", "max"}:
+        raise ValueError(f"Unsupported attack recovery objective: {objective}")
+    return objective
+
+
+def _resolve_recovery_threshold(config: dict[str, Any], metric: str, data_range: float) -> float:
+    """Resolve the configured set-recovery success threshold."""
+
+    attack_cfg = config.get("attack", {})
+    configured = attack_cfg.get("recovery_success_threshold")
+    if configured is not None:
+        return float(configured)
+    if metric == "mse":
+        return _attack_threshold(config)
+    if metric == "ssim":
+        threshold = _attack_ssim_threshold(config)
+        return 0.0 if threshold is None else float(threshold)
+    return _compute_psnr(_attack_threshold(config), data_range)
 
 
 def _is_classification_attack(config: dict[str, Any], real_y: torch.Tensor) -> bool:
@@ -354,6 +407,38 @@ def _select_reference_targets(
     return reference_x, reference_y, "nearest_client_train"
 
 
+def _pairwise_metric_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Tensor, metric: str, data_range: float) -> torch.Tensor:
+    """Return one pairwise reconstruction-quality matrix for set matching."""
+
+    recon = reconstructed.detach().cpu().float()
+    refs = reference_inputs.detach().cpu().float()
+    recon_flat = recon.reshape(recon.shape[0], -1)
+    refs_flat = refs.reshape(refs.shape[0], -1)
+    mse_matrix = torch.mean((recon_flat[:, None, :] - refs_flat[None, :, :]) ** 2, dim=-1)
+    if metric == "mse":
+        return mse_matrix
+    if metric == "psnr":
+        safe = torch.clamp(mse_matrix, min=torch.finfo(mse_matrix.dtype).tiny)
+        values = 20.0 * math.log10(data_range) - 10.0 * torch.log10(safe)
+        return torch.where(mse_matrix <= 0, torch.full_like(values, float("inf")), values)
+    if metric == "ssim":
+        values = torch.empty_like(mse_matrix)
+        for row in range(recon.shape[0]):
+            for col in range(refs.shape[0]):
+                values[row, col] = _compute_ssim(recon[row : row + 1], refs[col : col + 1], data_range)
+        return values
+    raise ValueError(f"Unsupported pairwise metric: {metric}")
+
+
+def _metric_passes_threshold(value: float | None, metric: str, objective: str, threshold: float) -> bool:
+    """Return whether one matched metric value counts as recovered."""
+
+    del metric
+    if value is None or not math.isfinite(float(value)):
+        return False
+    return float(value) <= threshold if objective == "min" else float(value) >= threshold
+
+
 def _evaluate_reconstruction(
     name: str,
     reconstructed_x: torch.Tensor,
@@ -429,6 +514,94 @@ def _evaluate_reconstruction(
         reconstructed_x=reconstructed_x.detach().cpu().clone(),
         reconstructed_y=None if reconstructed_y is None else reconstructed_y.detach().cpu().clone(),
     )
+
+
+def apply_set_recovery_metrics(
+    results: list[AttackResult],
+    *,
+    reference_inputs: torch.Tensor | None,
+    reference_targets: torch.Tensor | None,
+    config: dict[str, Any],
+) -> None:
+    """Mutate one attack-result group with one-to-one set-recovery metrics."""
+
+    if not results or reference_inputs is None:
+        return
+    references = reference_inputs.detach().cpu()
+    if references.numel() == 0 or references.shape[0] == 0:
+        return
+    attack_cfg = config.get("attack", {})
+    data_range = _attack_data_range(config)
+    match_metric = _normalize_recovery_metric(attack_cfg.get("recovery_match_metric"), default="mse")
+    success_metric = _normalize_recovery_metric(attack_cfg.get("recovery_success_metric"), default=match_metric)
+    match_objective = _normalize_recovery_objective(attack_cfg.get("recovery_match_objective"), match_metric)
+    success_objective = _normalize_recovery_objective(attack_cfg.get("recovery_success_objective"), success_metric)
+    success_threshold = _resolve_recovery_threshold(config, success_metric, data_range)
+
+    reconstructed_batches: list[torch.Tensor] = []
+    row_slices: list[tuple[int, int, int]] = []
+    start = 0
+    for result_index, result in enumerate(results):
+        if result.reconstructed_x is None:
+            continue
+        batch = result.reconstructed_x.detach().cpu()
+        reconstructed_batches.append(batch)
+        stop = start + int(batch.shape[0])
+        row_slices.append((result_index, start, stop))
+        start = stop
+    if not reconstructed_batches:
+        return
+
+    reconstructed = torch.cat(reconstructed_batches, dim=0)
+    match_matrix = _pairwise_metric_matrix(reconstructed, references, match_metric, data_range)
+    success_matrix = match_matrix if success_metric == match_metric else _pairwise_metric_matrix(reconstructed, references, success_metric, data_range)
+    cost_matrix = match_matrix.numpy()
+    if match_objective == "max":
+        cost_matrix = -cost_matrix
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    row_to_col = {int(row): int(col) for row, col in zip(row_ind.tolist(), col_ind.tolist())}
+
+    recovered = 0
+    row_success: dict[int, bool] = {}
+    row_metric_value: dict[int, float] = {}
+    for row_index in range(reconstructed.shape[0]):
+        matched_col = row_to_col.get(int(row_index))
+        if matched_col is None:
+            row_success[row_index] = False
+            continue
+        metric_value = float(success_matrix[row_index, matched_col].item())
+        row_metric_value[row_index] = metric_value
+        success = _metric_passes_threshold(metric_value, success_metric, success_objective, success_threshold)
+        row_success[row_index] = success
+        recovered += int(success)
+
+    reconstructed_count = int(reconstructed.shape[0])
+    reference_count = int(references.shape[0])
+    budget_fraction = recovered / reconstructed_count if reconstructed_count else 0.0
+    coverage_fraction = recovered / reference_count if reference_count else 0.0
+    reference_targets_cpu = None if reference_targets is None else reference_targets.detach().cpu()
+
+    for result_index, row_start, row_stop in row_slices:
+        result = results[result_index]
+        matched_indices = [row_to_col[row] for row in range(row_start, row_stop) if row in row_to_col]
+        matched_metric_values = [row_metric_value[row] for row in range(row_start, row_stop) if row in row_metric_value]
+        if matched_indices:
+            index_tensor = torch.tensor(matched_indices, dtype=torch.long)
+            result.reference_x = references.index_select(0, index_tensor)
+            result.reference_y = None if reference_targets_cpu is None else reference_targets_cpu.index_select(0, index_tensor)
+            result.reference_label = "matched_client_train"
+        result.matched_reference_indices = matched_indices or None
+        result.matched_reference_metric_name = success_metric
+        result.matched_reference_metric_value = None if not matched_metric_values else float(sum(matched_metric_values) / len(matched_metric_values))
+        result.recovered_count = recovered
+        result.reconstructed_count = reconstructed_count
+        result.reference_count = reference_count
+        result.budget_recovered_fraction = float(budget_fraction)
+        result.coverage_recovered_fraction = float(coverage_fraction)
+        result.metric_name = "budget_recovered_fraction"
+        result.mse = float(budget_fraction)
+        result.success = bool(all(row_success.get(row, False) for row in range(row_start, row_stop)))
+        result.success_threshold = float(success_threshold)
 
 
 def _create_optimizer(name: str, variables: list[torch.Tensor], lr: float, history_size: int) -> torch.optim.Optimizer:
@@ -634,6 +807,14 @@ def save_attack_artifacts(output_dir: Path, results: list[AttackResult]) -> list
                 "exact_target_mse": result.exact_target_mse,
                 "nearest_client_train_mse": result.nearest_client_train_mse,
                 "nearest_client_train_indices": result.nearest_client_train_indices,
+                "matched_reference_indices": result.matched_reference_indices,
+                "matched_reference_metric_name": result.matched_reference_metric_name,
+                "matched_reference_metric_value": result.matched_reference_metric_value,
+                "recovered_count": result.recovered_count,
+                "reconstructed_count": result.reconstructed_count,
+                "reference_count": result.reference_count,
+                "budget_recovered_fraction": result.budget_recovered_fraction,
+                "coverage_recovered_fraction": result.coverage_recovered_fraction,
             },
             artifact_path,
         )
@@ -749,6 +930,12 @@ def _summarize_attack_subset(
             "avg_time_seconds": _mean_finite([result.time_seconds for result in method_subset]),
             "passes": (success_count / total if total else 0.0) <= success_rate_threshold,
         }
+        budget_values = [result.budget_recovered_fraction for result in method_subset if result.budget_recovered_fraction is not None]
+        coverage_values = [result.coverage_recovered_fraction for result in method_subset if result.coverage_recovered_fraction is not None]
+        if budget_values:
+            method_record["avg_budget_recovered_fraction"] = _mean_finite(budget_values)
+        if coverage_values:
+            method_record["avg_coverage_recovered_fraction"] = _mean_finite(coverage_values)
         exact_values = [result.exact_target_mse for result in method_subset if result.exact_target_mse is not None]
         nearest_values = [result.nearest_client_train_mse for result in method_subset if result.nearest_client_train_mse is not None]
         if exact_values:
@@ -762,7 +949,7 @@ def _summarize_attack_subset(
     overall_best_primary_metric_value = _mean_finite(sorted([result.mse for result in subset])[:1])
     overall_record: dict[str, Any] = {
         "primary_metric_name": primary_metric_name,
-        "primary_metric_direction": "higher_is_more_private",
+        "primary_metric_direction": "lower_is_more_private" if primary_metric_name == "budget_recovered_fraction" else "higher_is_more_private",
         "target_type": subset[0].target_type if subset else None,
         "success_rate_threshold": success_rate_threshold,
         "overall_avg_primary_metric_value": overall_avg_primary_metric_value,
@@ -777,10 +964,16 @@ def _summarize_attack_subset(
     }
     overall_exact_values = [result.exact_target_mse for result in subset if result.exact_target_mse is not None]
     overall_nearest_values = [result.nearest_client_train_mse for result in subset if result.nearest_client_train_mse is not None]
+    overall_budget_values = [result.budget_recovered_fraction for result in subset if result.budget_recovered_fraction is not None]
+    overall_coverage_values = [result.coverage_recovered_fraction for result in subset if result.coverage_recovered_fraction is not None]
     if overall_exact_values:
         overall_record["overall_avg_exact_target_mse"] = _mean_finite(overall_exact_values)
     if overall_nearest_values:
         overall_record["overall_avg_nearest_client_train_mse"] = _mean_finite(overall_nearest_values)
+    if overall_budget_values:
+        overall_record["overall_avg_budget_recovered_fraction"] = _mean_finite(overall_budget_values)
+    if overall_coverage_values:
+        overall_record["overall_avg_coverage_recovered_fraction"] = _mean_finite(overall_coverage_values)
     return overall_record
 
 

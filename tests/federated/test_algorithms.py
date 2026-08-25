@@ -781,6 +781,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
             "attack.target_type=update_payload",
             "attack.frequency_rounds=1",
             "attack.max_samples=1",
+            "attack.sample_count=1",
             "attack.steps=1",
             "attack.optimizer=adam",
             "attack.local_optimizer=adam",
@@ -799,14 +800,15 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert "metric_name" not in attack_results[0]
     assert result["attack_evaluations"] == 6
     assert result["attack_target_type"] == "update_payload"
-    assert result["attack_primary_metric_name"] == "nearest_client_train_mse"
-    assert result["attack_primary_metric_direction"] == "higher_is_more_private"
+    assert result["attack_primary_metric_name"] == "budget_recovered_fraction"
+    assert result["attack_primary_metric_direction"] == "lower_is_more_private"
     assert result["attack_overall_avg_primary_metric_value"] is not None
     assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
-    assert result["attack_summary"]["primary_metric_name"] == "nearest_client_train_mse"
+    assert result["attack_summary"]["primary_metric_name"] == "budget_recovered_fraction"
     assert result["attack_summary"]["target_type"] == "update_payload"
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
     assert result["attack_summary"]["overall_avg_nearest_client_train_mse"] is not None
+    assert result["attack_summary"]["overall_avg_budget_recovered_fraction"] is not None
     assert "overall_avg_exact_target_mse" not in result["attack_summary"]
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 3
     assert set(result["attack_summary"]["clients"]) == {"Nd2O3", "CeO2", "La2O3"}
@@ -821,6 +823,7 @@ def test_federated_run_supports_legacy_gradient_attacks(tmp_path):
             "attack.target_type=gradient",
             "attack.frequency_rounds=1",
             "attack.max_samples=1",
+            "attack.sample_count=1",
             "attack.steps=1",
             "federated.algorithm=fedavg",
             "federated.rounds=1",

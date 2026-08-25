@@ -219,6 +219,6 @@ def test_federated_run_supports_classification_attacks(tmp_path):
 
     assert summary['attack_evaluations'] == 2
     assert summary['attack_target_type'] == 'update_payload'
-    assert summary['attack_primary_metric_name'] == 'nearest_client_train_mse'
+    assert summary['attack_primary_metric_name'] == 'budget_recovered_fraction'
     assert (output_dir / 'attack_results.json').exists()
     assert sorted((output_dir / 'attack_artifacts').rglob('*.pt'))

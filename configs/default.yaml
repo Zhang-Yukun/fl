@@ -50,6 +50,10 @@ attack:
   enabled: true
   reference_metric: nearest_client_train_mse
   report_metrics: [nearest_client_train_mse]
+  recovery_match_metric: mse
+  recovery_match_objective: auto
+  recovery_success_metric: mse
+  recovery_success_objective: auto
   steps: 20
   optimizer: adam
   lr: 0.001

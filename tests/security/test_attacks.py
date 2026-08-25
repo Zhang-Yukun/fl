@@ -1,8 +1,9 @@
+import pytest
 import torch
 
 from fedlab.modeling import build_model
 from fedlab.engine.training import first_batch_gradient
-from fedlab.security.attacks import dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
+from fedlab.security.attacks import AttackResult, apply_set_recovery_metrics, dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
 from fedlab.utils.serialization import serialize_model, subtract_state
 
 
@@ -207,6 +208,79 @@ def test_attack_artifacts_persist_reconstructions(tmp_path):
     assert payload["reference_label"] is not None
     assert payload["reconstructed_x"].shape == x.shape
     assert payload["reconstructed_y"] is not None
+
+
+def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and_classification():
+    ts_config = _tiny_patchtst_config(target_type="update_payload")
+    ts_config["attack"]["recovery_success_threshold"] = 0.01
+    ts_results = [
+        AttackResult(
+            name="DLG",
+            mse=0.0,
+            psnr=0.0,
+            ssim=0.0,
+            iterations=1,
+            time_seconds=0.0,
+            success=False,
+            success_threshold=0.5,
+            gradient_mse=0.0,
+            target_type="update_payload",
+            reconstructed_x=torch.tensor([[[0.0], [0.0]]]),
+            reconstructed_y=torch.tensor([[[0.0]]]),
+        ),
+        AttackResult(
+            name="DLG",
+            mse=0.0,
+            psnr=0.0,
+            ssim=0.0,
+            iterations=1,
+            time_seconds=0.0,
+            success=False,
+            success_threshold=0.5,
+            gradient_mse=0.0,
+            target_type="update_payload",
+            reconstructed_x=torch.tensor([[[0.0], [0.0]]]),
+            reconstructed_y=torch.tensor([[[0.0]]]),
+        ),
+    ]
+    ts_reference_inputs = torch.tensor([[[0.0], [0.0]], [[1.0], [1.0]]])
+    ts_reference_targets = torch.tensor([[[0.0]], [[1.0]]])
+    apply_set_recovery_metrics(ts_results, reference_inputs=ts_reference_inputs, reference_targets=ts_reference_targets, config=ts_config)
+    assert ts_results[0].metric_name == "budget_recovered_fraction"
+    assert ts_results[0].budget_recovered_fraction == pytest.approx(0.5)
+    assert ts_results[0].coverage_recovered_fraction == pytest.approx(0.5)
+    assert ts_results[0].matched_reference_indices == [0]
+    assert ts_results[1].matched_reference_indices == [1]
+    assert ts_results[0].reference_label == "matched_client_train"
+    assert ts_results[0].success is True
+    assert ts_results[1].success is False
+
+    cls_config = _tiny_classification_config(target_type="update_payload")
+    cls_config["attack"]["recovery_success_threshold"] = 0.01
+    cls_results = [
+        AttackResult(
+            name="iDLG",
+            mse=0.0,
+            psnr=0.0,
+            ssim=0.0,
+            iterations=1,
+            time_seconds=0.0,
+            success=False,
+            success_threshold=0.5,
+            gradient_mse=0.0,
+            target_type="update_payload",
+            reconstructed_x=torch.tensor([[[[1.0, 0.0], [0.0, 1.0]]]]),
+            reconstructed_y=torch.tensor([1]),
+        ),
+    ]
+    cls_reference_inputs = torch.tensor([[[[1.0, 0.0], [0.0, 1.0]]], [[[0.0, 1.0], [1.0, 0.0]]]])
+    cls_reference_targets = torch.tensor([1, 2], dtype=torch.long)
+    apply_set_recovery_metrics(cls_results, reference_inputs=cls_reference_inputs, reference_targets=cls_reference_targets, config=cls_config)
+    assert cls_results[0].budget_recovered_fraction == pytest.approx(1.0)
+    assert cls_results[0].coverage_recovered_fraction == pytest.approx(0.5)
+    assert cls_results[0].reference_y is not None
+    assert torch.equal(cls_results[0].reference_y, torch.tensor([1]))
+
 
 
 def test_classification_attacks_support_integer_labels_and_logits():

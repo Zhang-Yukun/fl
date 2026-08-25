@@ -3,6 +3,10 @@ attack:
   enabled: true
   reference_metric: nearest_client_train_mse
   report_metrics: [nearest_client_train_mse]
+  recovery_match_metric: mse
+  recovery_match_objective: auto
+  recovery_success_metric: mse
+  recovery_success_objective: auto
   frequency_rounds: 5
   max_samples: 1
   steps: 300
@@ -12,7 +16,6 @@ attack:
   lbfgs_history_size: 20
   client_selection: all
   clients_per_round: 3
-  sample_count: 1
   input_clip: 5.0
   target_clip: 5.0
   success_mse_threshold: 0.5

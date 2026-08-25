@@ -387,7 +387,7 @@ def test_grpc_coordinator_saves_attack_results(tmp_path):
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
     assert summary["attack_evaluations"] == len(attack_results) == 6
     assert summary["attack_target_type"] == "update_payload"
-    assert summary["attack_primary_metric_name"] == "nearest_client_train_mse"
+    assert summary["attack_primary_metric_name"] == "budget_recovered_fraction"
 
 
 def test_grpc_coordinator_saves_update_captures_when_attacks_disabled(tmp_path):

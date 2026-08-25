@@ -21,6 +21,7 @@ from loguru import logger
 
 from fedlab.utils.artifacts import save_experiment_config, save_federated_snapshot, should_save_periodic_artifacts
 from fedlab.security.attacks import (
+    apply_set_recovery_metrics,
     attack_success_rate,
     attach_attack_metadata,
     dlg_attack,
@@ -681,6 +682,19 @@ def _select_attack_client_ids(client_ids: list[str], config: dict[str, Any], rou
     return [client_ids[(start + offset) % len(client_ids)] for offset in range(min(count, len(client_ids)))]
 
 
+def _resolve_attack_sample_count(attack_cfg: dict[str, Any], available_batches: int | None) -> int:
+    """Resolve how many attack reconstructions to run for one client in one round."""
+
+    configured = attack_cfg.get("sample_count", "auto")
+    if configured is None or str(configured).strip().lower() == "auto":
+        count = max(1, int(attack_cfg.get("sample_count_cap", 8)))
+    else:
+        count = max(1, int(configured))
+    if available_batches is not None:
+        count = min(count, max(1, int(available_batches)))
+    return count
+
+
 def _capture_round_update_records(
     config: dict[str, Any],
     clients: list[FederatedClient],
@@ -697,7 +711,6 @@ def _capture_round_update_records(
         return []
     attack_cfg = config.get("attack", {})
     max_samples = int(attack_cfg.get("max_samples", 1))
-    sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
     round_context = round_context or {}
     results_by_client = {result.client_id: result for result in results}
     records: list[dict[str, Any]] = []
@@ -718,6 +731,7 @@ def _capture_round_update_records(
         reference_target_getter = getattr(client, "train_reference_targets", None)
         reference_targets = reference_target_getter() if callable(reference_target_getter) else None
         samples = []
+        sample_count = _resolve_attack_sample_count(attack_cfg, len(client.train_loader))
         for sample_index in range(sample_count):
             real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
             samples.append(
@@ -878,13 +892,15 @@ def _build_attack_round_task(
         return None
     attack_cfg = config.get("attack", {})
     max_samples = int(attack_cfg.get("max_samples", 1))
-    sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
     selected_clients = _select_attack_clients(clients, config, round_index)
     round_context = round_context or {}
     results_by_client = {result.client_id: result for result in results}
     samples: list[AttackSampleTask] = []
+    evaluations_per_client = 0
     for client_index, client in enumerate(selected_clients):
         result = results_by_client[client.client_id]
+        sample_count = _resolve_attack_sample_count(attack_cfg, len(client.train_loader))
+        evaluations_per_client = max(evaluations_per_client, sample_count)
         for sample_index in range(sample_count):
             reference_inputs = None
             reference_targets = None
@@ -937,7 +953,7 @@ def _build_attack_round_task(
     return AttackRoundTask(
         round_index=round_index,
         clients_this_round=len(selected_clients),
-        evaluations_per_client=sample_count,
+        evaluations_per_client=evaluations_per_client,
         samples=samples,
     )
 
@@ -965,6 +981,7 @@ def _execute_attack_round_task(
 
     start = time.perf_counter()
     attacks = []
+    sample_lookup = {(sample.client_id, sample.round_index, sample.sample_index): sample for sample in task.samples}
     for sample in task.samples:
         for result in (
             attach_attack_metadata(
@@ -1009,6 +1026,27 @@ def _execute_attack_round_task(
             result.plot_real_x = result.plot_reference_x
             result.plot_real_y = result.plot_reference_y
             attacks.append(result)
+    grouped: dict[tuple[str | None, int | None, str], list[Any]] = {}
+    for result in attacks:
+        grouped.setdefault((result.client_id, result.round_index, result.name), []).append(result)
+    for key, subset in grouped.items():
+        client_id, round_index, _name = key
+        first = next((sample_lookup.get((result.client_id, result.round_index, result.sample_index)) for result in subset), None)
+        if first is None or first.reference_inputs is None:
+            continue
+        apply_set_recovery_metrics(
+            subset,
+            reference_inputs=first.reference_inputs,
+            reference_targets=first.reference_targets,
+            config=config,
+        )
+        for result in subset:
+            if result.reference_x is not None:
+                result.plot_reference_x = _inverse_plot_tensor(result.reference_x, first.scale_mean, first.scale_std)
+            if result.reference_y is not None:
+                result.plot_reference_y = _inverse_plot_tensor(result.reference_y, first.scale_mean, first.scale_std)
+            result.plot_real_x = result.plot_reference_x
+            result.plot_real_y = result.plot_reference_y
     return AttackRoundResult(
         round_index=task.round_index,
         time_seconds=time.perf_counter() - start,
@@ -1048,6 +1086,16 @@ def _attack_payload_metrics(subset: list[Any], cumulative_subset: list[Any], pre
     if nearest_values:
         payload[f"{prefix}/nearest_client_train_mse"] = _mean_finite(nearest_values)
         payload[f"{prefix}/cumulative_avg_nearest_client_train_mse"] = _mean_finite(nearest_so_far)
+    budget_values = [getattr(result, "budget_recovered_fraction", None) for result in subset if getattr(result, "budget_recovered_fraction", None) is not None]
+    budget_so_far = [getattr(result, "budget_recovered_fraction", None) for result in cumulative_subset if getattr(result, "budget_recovered_fraction", None) is not None]
+    coverage_values = [getattr(result, "coverage_recovered_fraction", None) for result in subset if getattr(result, "coverage_recovered_fraction", None) is not None]
+    coverage_so_far = [getattr(result, "coverage_recovered_fraction", None) for result in cumulative_subset if getattr(result, "coverage_recovered_fraction", None) is not None]
+    if budget_values:
+        payload[f"{prefix}/budget_recovered_fraction"] = _mean_finite(budget_values)
+        payload[f"{prefix}/cumulative_avg_budget_recovered_fraction"] = _mean_finite(budget_so_far)
+    if coverage_values:
+        payload[f"{prefix}/coverage_recovered_fraction"] = _mean_finite(coverage_values)
+        payload[f"{prefix}/cumulative_avg_coverage_recovered_fraction"] = _mean_finite(coverage_so_far)
     payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
     payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
     payload[f"{prefix}/iterations"] = float(subset[0].iterations)
