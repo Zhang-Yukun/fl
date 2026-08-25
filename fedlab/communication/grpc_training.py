@@ -27,6 +27,7 @@ from fedlab.federated.algorithms import (
     _build_federated_summary,
     _resolve_test_metric_views,
     _build_attack_round_task,
+    _capture_round_update_records,
     _clone_state,
     _round_history_communication_summary,
     _save_periodic_federated_snapshot,
@@ -34,10 +35,12 @@ from fedlab.federated.algorithms import (
     _wandb_cumulative_communication_payload,
     _wandb_round_payload,
     _log_prediction_views,
+    build_update_attack_round_task,
     configure_random_seed,
     configure_torch_runtime,
     resolve_device,
     is_compressed_algorithm,
+    save_captured_update_records,
 )
 from fedlab.federated.client import ClientResult, FederatedClient
 from fedlab.federated.server import EarlyStopper, FederatedServer
@@ -220,20 +223,30 @@ class GrpcFederatedCoordinator:
                 'stop': self.stopped,
             }
 
-    def _run_attacks(self, round_index: int, round_base_state: dict[str, Any], results, round_context: dict[str, Any] | None = None) -> None:
+    def _run_attacks(
+        self,
+        round_index: int,
+        round_base_state: dict[str, Any],
+        results,
+        round_context: dict[str, Any] | None = None,
+        captured_update_records: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Queue server-side attack evaluation without blocking aggregation or validation."""
 
-        task = _build_attack_round_task(
-            self.config,
-            self.attack_clients,
-            results,
-            round_index,
-            self.max_rounds,
-            round_base_state,
-            self.attack_target_type,
-            server=self.server,
-            round_context=round_context,
-        )
+        if self.attack_target_type == 'update_payload' and captured_update_records is not None:
+            task = build_update_attack_round_task(self.config, captured_update_records, round_index, self.max_rounds)
+        else:
+            task = _build_attack_round_task(
+                self.config,
+                self.attack_clients,
+                results,
+                round_index,
+                self.max_rounds,
+                round_base_state,
+                self.attack_target_type,
+                server=self.server,
+                round_context=round_context,
+            )
         self.attack_manager.submit(task)
 
     def _finish_final_round_bookkeeping(self, round_index: int, results, aggregation_weights, round_base_state, round_context: dict[str, Any] | None = None) -> None:
@@ -291,7 +304,18 @@ class GrpcFederatedCoordinator:
             )
         except Exception as exc:
             logger.debug('Skip gRPC val prediction plot: {}', exc)
-        self._run_attacks(round_index, round_base_state, results, round_context)
+        captured_update_records = _capture_round_update_records(
+            self.config,
+            self.attack_clients,
+            results,
+            round_index,
+            self.max_rounds,
+            round_base_state,
+            server=self.server,
+            round_context=round_context,
+        )
+        save_captured_update_records(self.output_dir, captured_update_records)
+        self._run_attacks(round_index, round_base_state, results, round_context, captured_update_records=captured_update_records)
         if should_save_periodic_artifacts(self.config, round_index + 1):
             _save_periodic_federated_snapshot(
                 output_dir=self.output_dir,
@@ -457,7 +481,24 @@ class GrpcFederatedCoordinator:
                     )
                     if not will_stop:
                         self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=self.round_index)
-                    self._run_attacks(self.round_index, round_base_state, results, round_context)
+                    captured_update_records = _capture_round_update_records(
+                        self.config,
+                        self.attack_clients,
+                        results,
+                        self.round_index,
+                        self.max_rounds,
+                        round_base_state,
+                        server=self.server,
+                        round_context=round_context,
+                    )
+                    save_captured_update_records(self.output_dir, captured_update_records)
+                    self._run_attacks(
+                        self.round_index,
+                        round_base_state,
+                        results,
+                        round_context,
+                        captured_update_records=captured_update_records,
+                    )
                     if (not will_stop) or should_save_periodic_artifacts(self.config, self.round_index + 1):
                         _save_periodic_federated_snapshot(
                             output_dir=self.output_dir,

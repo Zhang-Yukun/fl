@@ -149,14 +149,21 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
     return is_registered_compressed(algorithm)
 
 
+def _should_capture_update_payload(config: dict[str, Any], round_index: int, max_rounds: int) -> bool:
+    """Return whether this round should persist server-visible client updates."""
+
+    attack_cfg = config.get("attack", {})
+    frequency = int(attack_cfg.get("frequency_rounds", 1))
+    return round_index == 0 or round_index == max_rounds - 1 or (frequency > 0 and round_index % frequency == 0)
+
+
 def _should_run_attack(config: dict[str, Any], round_index: int, max_rounds: int) -> bool:
     """Return whether attack evaluation should run on this round."""
 
     attack_cfg = config.get("attack", {})
     if not attack_cfg.get("enabled", True):
         return False
-    frequency = int(attack_cfg.get("frequency_rounds", 1))
-    return round_index == 0 or round_index == max_rounds - 1 or (frequency > 0 and round_index % frequency == 0)
+    return _should_capture_update_payload(config, round_index, max_rounds)
 
 
 def _select_attack_clients(clients: list[FederatedClient], config: dict[str, Any], round_index: int) -> list[FederatedClient]:
@@ -622,6 +629,189 @@ def _clone_attack_target(target: list[torch.Tensor] | StateDict) -> list[torch.T
     if isinstance(target, list):
         return [tensor.detach().cpu().clone() for tensor in target]
     return _clone_state(target)
+
+
+def _select_attack_client_ids(client_ids: list[str], config: dict[str, Any], round_index: int) -> list[str]:
+    """Return the configured attack client subset while preserving client order."""
+
+    if not client_ids:
+        return []
+    attack_cfg = config.get("attack", {})
+    selection = str(attack_cfg.get("client_selection", "all")).lower()
+    count = max(1, int(attack_cfg.get("clients_per_round", 1)))
+    if selection == "all":
+        return list(client_ids)
+    if selection == "first":
+        return list(client_ids[:count])
+    start = round_index % len(client_ids)
+    return [client_ids[(start + offset) % len(client_ids)] for offset in range(min(count, len(client_ids)))]
+
+
+def _capture_round_update_records(
+    config: dict[str, Any],
+    clients: list[FederatedClient],
+    results,
+    round_index: int,
+    max_rounds: int,
+    round_base_state: StateDict,
+    server: FederatedServer | None = None,
+    round_context: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Capture server-visible client updates plus replay inputs for one round."""
+
+    if not _should_capture_update_payload(config, round_index, max_rounds):
+        return []
+    attack_cfg = config.get("attack", {})
+    max_samples = int(attack_cfg.get("max_samples", 1))
+    sample_count = max(1, int(attack_cfg.get("sample_count", 1)))
+    round_context = round_context or {}
+    results_by_client = {result.client_id: result for result in results}
+    records: list[dict[str, Any]] = []
+    for client in clients:
+        result = results_by_client[client.client_id]
+        target_update = _extract_attack_payload(
+            config,
+            result,
+            results,
+            server=server,
+            round_base_state=round_base_state,
+            round_index=round_index,
+            round_context=round_context,
+        )
+        train_loader = getattr(client, "train_loader", None)
+        scaler = getattr(train_loader, "scaler", None)
+        reference_inputs = client.train_reference_inputs()
+        reference_target_getter = getattr(client, "train_reference_targets", None)
+        reference_targets = reference_target_getter() if callable(reference_target_getter) else None
+        samples = []
+        for sample_index in range(sample_count):
+            real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
+            samples.append(
+                {
+                    "sample_index": int(sample_index),
+                    "real_x": real_x.detach().cpu().clone(),
+                    "real_y": real_y.detach().cpu().clone(),
+                }
+            )
+        records.append(
+            {
+                "client_id": client.client_id,
+                "round_index": int(round_index),
+                "target_type": "update_payload",
+                "aggregation_payload_kind": getattr(result, "aggregation_payload_kind", "dense_update"),
+                "compressor": getattr(result, "compressor", "none"),
+                "upload_mode": getattr(result, "upload_mode", "update"),
+                "round_base_state": _clone_state(round_base_state),
+                "target_update": _clone_state(target_update),
+                "reference_inputs": None if reference_inputs is None else reference_inputs.detach().cpu().clone(),
+                "reference_targets": None if reference_targets is None else reference_targets.detach().cpu().clone(),
+                "scale_mean": None if getattr(scaler, "mean", None) is None else [float(value) for value in scaler.mean.reshape(-1).tolist()],
+                "scale_std": None if getattr(scaler, "std", None) is None else [float(value) for value in scaler.std.reshape(-1).tolist()],
+                "samples": samples,
+            }
+        )
+    return records
+
+
+def save_captured_update_records(output_dir: Path, records: list[dict[str, Any]]) -> list[Path]:
+    """Persist captured server-visible updates under per-client subdirectories."""
+
+    if not records:
+        return []
+    capture_root = output_dir / "saved_updates"
+    capture_root.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+    for record in sorted(records, key=lambda item: (str(item["client_id"]), int(item["round_index"]))):
+        client_id = str(record["client_id"])
+        round_index = int(record["round_index"])
+        relative_path = Path(client_id) / f"round_{round_index:04d}.pt"
+        path = capture_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(record, path)
+        saved_paths.append(path)
+    index: list[dict[str, Any]] = []
+    for path in sorted(capture_root.rglob("round_*.pt")):
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        index.append(
+            {
+                "client_id": str(payload["client_id"]),
+                "round_index": int(payload["round_index"]),
+                "target_type": payload.get("target_type", "update_payload"),
+                "path": str(path.relative_to(output_dir)),
+            }
+        )
+    with (capture_root / "index.json").open("w", encoding="utf-8") as handle:
+        json.dump(index, handle, ensure_ascii=False, indent=2)
+    return saved_paths
+
+
+def load_captured_update_records(run_dir: Path) -> list[dict[str, Any]]:
+    """Load persisted per-client update captures sorted by round and client."""
+
+    capture_root = Path(run_dir) / "saved_updates"
+    if not capture_root.exists():
+        return []
+    index_path = capture_root / "index.json"
+    if index_path.exists():
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        records = [torch.load(Path(run_dir) / entry["path"], map_location="cpu", weights_only=False) for entry in index]
+    else:
+        records = [torch.load(path, map_location="cpu", weights_only=False) for path in sorted(capture_root.rglob("round_*.pt"))]
+    return sorted(records, key=lambda item: (int(item["round_index"]), str(item["client_id"])))
+
+
+def build_update_attack_round_task(
+    config: dict[str, Any],
+    records: list[dict[str, Any]],
+    round_index: int,
+    max_rounds: int,
+) -> AttackRoundTask | None:
+    """Build one update-payload attack task from previously captured update records."""
+
+    if not _should_run_attack(config, round_index, max_rounds):
+        return None
+    records_this_round = [record for record in records if int(record["round_index"]) == int(round_index)]
+    if not records_this_round:
+        return None
+    client_order = [str(client_id) for client_id in config.get("data", {}).get("clients", [])]
+    order_index = {client_id: index for index, client_id in enumerate(client_order)}
+    records_this_round = sorted(
+        records_this_round,
+        key=lambda record: (order_index.get(str(record["client_id"]), len(order_index)), str(record["client_id"])),
+    )
+    client_ids = [str(record["client_id"]) for record in records_this_round]
+    selected_client_ids = set(_select_attack_client_ids(client_ids, config, round_index))
+    selected_records = [record for record in records_this_round if str(record["client_id"]) in selected_client_ids]
+    if not selected_records:
+        return None
+    samples: list[AttackSampleTask] = []
+    evaluations_per_client = 0
+    for record in selected_records:
+        record_samples = list(record.get("samples", []))
+        evaluations_per_client = max(evaluations_per_client, len(record_samples))
+        for sample in record_samples:
+            samples.append(
+                AttackSampleTask(
+                    client_id=str(record["client_id"]),
+                    round_index=int(record["round_index"]),
+                    sample_index=int(sample.get("sample_index", 0)),
+                    target_type="update_payload",
+                    round_base_state=_clone_state(record["round_base_state"]),
+                    target=_clone_state(record["target_update"]),
+                    real_x=sample["real_x"].detach().cpu().clone(),
+                    real_y=sample["real_y"].detach().cpu().clone(),
+                    reference_inputs=None if record.get("reference_inputs") is None else record["reference_inputs"].detach().cpu().clone(),
+                    reference_targets=None if record.get("reference_targets") is None else record["reference_targets"].detach().cpu().clone(),
+                    scale_mean=None if record.get("scale_mean") is None else [float(value) for value in record["scale_mean"]],
+                    scale_std=None if record.get("scale_std") is None else [float(value) for value in record["scale_std"]],
+                )
+            )
+    return AttackRoundTask(
+        round_index=int(round_index),
+        clients_this_round=len(selected_records),
+        evaluations_per_client=evaluations_per_client,
+        samples=samples,
+    )
 
 
 def _resolve_attack_device(config: dict[str, Any]) -> torch.device:
@@ -1347,17 +1537,31 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             )
         except Exception as exc:
             logger.debug("Skip federated val prediction plot: {}", exc)
-        attack_task = _build_attack_round_task(
+        captured_update_records = _capture_round_update_records(
             config,
             clients,
             results,
             round_index,
             max_rounds,
             round_base_state,
-            attack_target_type,
             server=server,
             round_context=round_context,
         )
+        save_captured_update_records(output_dir, captured_update_records)
+        if attack_target_type == "update_payload":
+            attack_task = build_update_attack_round_task(config, captured_update_records, round_index, max_rounds)
+        else:
+            attack_task = _build_attack_round_task(
+                config,
+                clients,
+                results,
+                round_index,
+                max_rounds,
+                round_base_state,
+                attack_target_type,
+                server=server,
+                round_context=round_context,
+            )
         attack_manager.submit(attack_task)
         _save_periodic_federated_snapshot(
             output_dir=output_dir,

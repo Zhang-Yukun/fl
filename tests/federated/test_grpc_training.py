@@ -271,6 +271,36 @@ def test_grpc_coordinator_saves_attack_results(tmp_path):
     assert summary["attack_primary_metric_name"] == "nearest_client_train_mse"
 
 
+def test_grpc_coordinator_saves_update_captures_when_attacks_disabled(tmp_path):
+    """The gRPC server should persist per-client update captures even in noattack mode."""
+
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "attack.frequency_rounds=1",
+            "attack.sample_count=1",
+            "attack.max_samples=1",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+            "runtime.seed=2026",
+            "data.shuffle_train=false",
+            "model.dropout=0.0",
+        ],
+    )
+    coordinator = GrpcFederatedCoordinator(config)
+    response = _submit_one_round(coordinator, config)
+
+    assert response["stop"] is True
+    captures = algorithms_module.load_captured_update_records(tmp_path)
+    assert len(captures) == 3
+    assert {record["client_id"] for record in captures} == {"Nd2O3", "CeO2", "La2O3"}
+    assert (tmp_path / "saved_updates" / "index.json").exists()
+
+
 def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path, monkeypatch):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
