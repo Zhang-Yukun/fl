@@ -663,7 +663,17 @@ def _attack_loop(
                     torch.cuda.manual_seed_all(local_seed)
             model = _prepare_attack_model(config, state, device)
             dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
-            if optimize_y:
+            optimize_dummy_y = bool(optimize_y)
+            inferred_y = None
+            is_classification = _is_classification_attack(config, real_y)
+            if not optimize_dummy_y and is_classification:
+                try:
+                    inferred_y = _infer_classification_label(config, model, prepared_target, resolved_target_type, real_x.to(device))
+                except Exception:
+                    inferred_y = None
+                if inferred_y is None:
+                    optimize_dummy_y = True
+            if optimize_dummy_y:
                 if real_y.ndim == 1 and not torch.is_floating_point(real_y):
                     num_classes = int(config.get("data", {}).get("num_classes", 0))
                     if num_classes <= 0:
@@ -674,12 +684,6 @@ def _attack_loop(
                     dummy_y = torch.randn_like(real_y, device=device, requires_grad=True)
                 variables = [dummy_x, dummy_y]
             else:
-                inferred_y = None
-                if _is_classification_attack(config, real_y):
-                    try:
-                        inferred_y = _infer_classification_label(config, model, prepared_target, resolved_target_type, real_x.to(device))
-                    except Exception:
-                        inferred_y = None
                 dummy_y = real_y.to(device) if inferred_y is None else inferred_y
                 variables = [dummy_x]
             optimizer = _create_optimizer(optimizer_name, variables, lr, history_size)
