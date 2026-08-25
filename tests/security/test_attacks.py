@@ -386,6 +386,29 @@ def test_classification_update_payload_idlg_does_not_reuse_probe_labels_for_mult
 
 
 
+def test_time_series_idlg_does_not_reuse_probe_targets_for_update_payloads():
+    config = _tiny_patchtst_config(target_type="update_payload")
+    device = torch.device("cpu")
+    model = build_model(config).to(device)
+    x = torch.randn(1, 8, 1)
+    true_y = torch.randn(1, 2, 1)
+    decoy_y = true_y + 10.0
+    state = serialize_model(model)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["lr"])
+    optimizer.zero_grad(set_to_none=True)
+    loss = torch.nn.functional.mse_loss(model(x), true_y)
+    loss.backward()
+    optimizer.step()
+    target_update = subtract_state(serialize_model(model), state)
+
+    result = idlg_attack(config, state, target_update, x, decoy_y, device, target_type="update_payload")
+
+    assert result.reconstructed_y is not None
+    assert result.reconstructed_y.shape == true_y.shape
+    assert not torch.allclose(result.reconstructed_y.cpu(), decoy_y)
+
+
+
 def test_classification_update_payload_attacks_keep_reference_labels():
     config = _tiny_classification_config(target_type="update_payload")
     device = torch.device("cpu")

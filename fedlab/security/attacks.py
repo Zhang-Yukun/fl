@@ -673,6 +673,11 @@ def _attack_loop(
                     inferred_y = None
                 if inferred_y is None:
                     optimize_dummy_y = True
+            elif not optimize_dummy_y:
+                # iDLG's label-inference shortcut is specific to single-sample classification.
+                # For forecasting/regression payloads, fixing the probe target would inject oracle
+                # information, so fall back to optimizing the target tensor jointly.
+                optimize_dummy_y = True
             if optimize_dummy_y:
                 if real_y.ndim == 1 and not torch.is_floating_point(real_y):
                     num_classes = int(config.get("data", {}).get("num_classes", 0))
