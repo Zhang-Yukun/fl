@@ -1,0 +1,62 @@
+experiment:
+  name: mnist_classification
+  mode: federated
+  output_dir: outputs/mnist_classification
+
+runtime:
+  device: cpu
+  log_level: INFO
+
+tracking:
+  enabled: false
+
+artifacts:
+  config_formats: [yaml]
+  save_every_rounds: 0
+
+task:
+  type: classification
+
+data:
+  dataset_name: mnist
+  split_dir: ../data/mnist_3clients
+  clients: [client1, client2, client3]
+  image_shape: [1, 28, 28]
+  num_classes: 10
+  batch_size: 64
+  shuffle_train: true
+  num_workers: 0
+
+model:
+  name: small_cnn
+  hidden_channels: 32
+  dropout: 0.1
+
+training:
+  lr: 0.001
+  loss: cross_entropy
+  optimizer: adam
+  patience: 5
+  min_delta: 0.0
+
+centralized:
+  rounds: 5
+
+federated:
+  algorithm: fedavg
+  rounds: 5
+  local_epochs: 1
+
+transport:
+  upload_mode: update
+  download_mode: model
+
+attack:
+  target_type: gradient
+  enabled: false
+  steps: 20
+  async_enabled: false
+  device: same
+
+evaluation:
+  metrics: [cross_entropy, accuracy]

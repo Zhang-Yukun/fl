@@ -1,0 +1,62 @@
+experiment:
+  name: cifar10_classification
+  mode: federated
+  output_dir: outputs/cifar10_classification
+
+runtime:
+  device: cpu
+  log_level: INFO
+
+tracking:
+  enabled: false
+
+artifacts:
+  config_formats: [yaml]
+  save_every_rounds: 0
+
+task:
+  type: classification
+
+data:
+  dataset_name: cifar10
+  split_dir: ../data/cifar10_3clients
+  clients: [client1, client2, client3]
+  image_shape: [3, 32, 32]
+  num_classes: 10
+  batch_size: 64
+  shuffle_train: true
+  num_workers: 0
+
+model:
+  name: small_cnn
+  hidden_channels: 32
+  dropout: 0.1
+
+training:
+  lr: 0.001
+  loss: cross_entropy
+  optimizer: adam
+  patience: 5
+  min_delta: 0.0
+
+centralized:
+  rounds: 5
+
+federated:
+  algorithm: fedavg
+  rounds: 5
+  local_epochs: 1
+
+transport:
+  upload_mode: update
+  download_mode: model
+
+attack:
+  target_type: gradient
+  enabled: false
+  steps: 20
+  async_enabled: false
+  device: same
+
+evaluation:
+  metrics: [cross_entropy, accuracy]

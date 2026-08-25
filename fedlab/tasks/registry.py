@@ -8,14 +8,19 @@ import torch
 from torch import nn
 
 from fedlab.tasks.base import LossFn, MetricFn, TaskSpec
+from fedlab.tasks.classification import CLASSIFICATION_TASK
 from fedlab.tasks.forecasting import FORECASTING_TASK
-from fedlab.utils.metrics import mae, mape, mse
+from fedlab.utils.metrics import accuracy, cross_entropy, mae, mape, mse
 
 
 _TASKS: dict[str, TaskSpec] = {
     "forecasting": FORECASTING_TASK,
     "time_series_forecasting": FORECASTING_TASK,
     "rare_earth_forecasting": FORECASTING_TASK,
+    "classification": CLASSIFICATION_TASK,
+    "image_classification": CLASSIFICATION_TASK,
+    "mnist_classification": CLASSIFICATION_TASK,
+    "cifar10_classification": CLASSIFICATION_TASK,
 }
 
 
@@ -45,6 +50,12 @@ def _loss_huber(config: dict[str, Any]) -> LossFn:
     return nn.HuberLoss(delta=delta)
 
 
+def _loss_cross_entropy(_config: dict[str, Any]) -> LossFn:
+    """Build categorical cross-entropy for integer classification labels."""
+
+    return nn.CrossEntropyLoss()
+
+
 LOSS_REGISTRY: dict[str, callable] = {
     "mse": _loss_mse,
     "l2": _loss_mse,
@@ -52,12 +63,17 @@ LOSS_REGISTRY: dict[str, callable] = {
     "l1": _loss_l1,
     "smooth_l1": _loss_smooth_l1,
     "huber": _loss_huber,
+    "cross_entropy": _loss_cross_entropy,
+    "ce": _loss_cross_entropy,
 }
 
 METRIC_REGISTRY: dict[str, MetricFn] = {
     "mse": lambda pred, target: {"mse": mse(pred, target)},
     "mae": lambda pred, target: {"mae": mae(pred, target)},
     "mape": lambda pred, target: {"mape": mape(pred, target)},
+    "accuracy": lambda pred, target: {"accuracy": accuracy(pred, target)},
+    "cross_entropy": lambda pred, target: {"cross_entropy": cross_entropy(pred, target)},
+    "ce": lambda pred, target: {"cross_entropy": cross_entropy(pred, target)},
 }
 
 
@@ -118,9 +134,8 @@ def create_loss(config: dict[str, Any]) -> LossFn:
 def metric_names(config: dict[str, Any]) -> tuple[str, ...]:
     """Resolve the configured evaluation metric names.
 
-    The current forecasting pipeline expects ``mse``, ``mae``, and ``mape`` to
-    remain available for summaries and early-stop reporting, so configured
-    metrics are merged with the task defaults.
+    Configured metrics are merged with the task defaults so task-specific
+    reporting remains available even when callers request a subset.
     """
 
     task = get_task(config)
@@ -146,8 +161,23 @@ def compute_metrics(config: dict[str, Any], pred: torch.Tensor, target: torch.Te
 
     task = get_task(config)
     configured = config.get("evaluation", {}).get("metrics")
-    if configured is None and task.compute_metrics is not None:
-        return task.compute_metrics(pred, target)
+    if task.compute_metrics is not None:
+        task_result = task.compute_metrics(pred, target)
+        if configured is None:
+            return task_result
+        requested_names = list(metric_names(config))
+        result: dict[str, float] = {}
+        for name in requested_names:
+            if name in task_result:
+                result[name] = task_result[name]
+                continue
+            if name not in METRIC_REGISTRY:
+                raise ValueError(f"Unknown evaluation metric: {name}")
+            result.update(METRIC_REGISTRY[name](pred, target))
+        for compatibility_name in ("mse", "mae", "mape"):
+            if compatibility_name in task_result and compatibility_name not in result:
+                result[compatibility_name] = task_result[compatibility_name]
+        return result
     result: dict[str, float] = {}
     for name in metric_names(config):
         if name not in METRIC_REGISTRY:

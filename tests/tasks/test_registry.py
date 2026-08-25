@@ -21,8 +21,8 @@ def test_default_optimizer_falls_back_to_sgd_for_forecasting():
 
     optimizer = build_optimizer([torch.nn.Parameter(torch.ones(1))], config)
 
-    assert optimizer.__class__.__name__ == "SGD"
-    assert optimizer_name(config) == "sgd"
+    assert optimizer.__class__.__name__ == "Adam"
+    assert optimizer_name(config) == "adam"
 
 
 def test_task_aware_model_builder_annotates_model():
@@ -65,3 +65,26 @@ def test_component_registry_allows_config_driven_loss_metric_and_optimizer():
     assert metrics['mae'] == 1.0
     assert 'mse' in metrics
     assert optimizer_name(config) == 'sgd'
+
+
+def test_classification_task_resolves_accuracy_and_cross_entropy():
+    config = {
+        'task': {'type': 'classification'},
+        'data': {'image_shape': [1, 4, 4], 'num_classes': 3},
+        'model': {'name': 'small_cnn', 'hidden_channels': 4},
+        'training': {'loss': 'cross_entropy', 'optimizer': 'adam', 'lr': 0.001},
+        'evaluation': {'metrics': ['accuracy', 'cross_entropy']},
+    }
+
+    task = get_task(config)
+    model = build_model(config)
+    metrics = compute_metrics(config, torch.tensor([[2.0, 0.0, -1.0]]), torch.tensor([0]))
+    optimizer = build_optimizer([torch.nn.Parameter(torch.ones(1))], config)
+
+    assert task.name == 'classification'
+    assert get_model_task(model).name == 'classification'
+    assert metric_names(config) == ('accuracy', 'cross_entropy')
+    assert metrics['accuracy'] == 1.0
+    assert 'cross_entropy' in metrics
+    assert 'mse' in metrics and 'mae' in metrics and 'mape' in metrics
+    assert optimizer.__class__.__name__ == 'Adam'
