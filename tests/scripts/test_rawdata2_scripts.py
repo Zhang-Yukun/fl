@@ -47,6 +47,7 @@ RETAINED_WRAPPERS = (
     "run_exp_seed8192_mse_part2.sh",
     "run_exp_seed8192_mae_part1.sh",
     "run_exp_seed8192_mae_part2.sh",
+    "run_analyze_experiment_suite_batch.sh",
 )
 
 RETAINED_EGA_SWEEPS = (
@@ -266,10 +267,17 @@ def test_oracle_gpu_wrappers_call_generic_suite_without_duplicate_attackfreq5_ru
         if name == "run_controlled_suite.sh":
             assert "run_suite.sh" in content
             continue
+        if name == "run_analyze_experiment_suite_batch.sh":
+            assert "fedlab.tools.analyze_experiment_suite" in content
+            continue
         if name.startswith("run_exp_seed"):
             assert "run_controlled_suite.sh" in content
             assert 'PROJECT_NAME="re_fl_noattack_${mode}_adam"' in content
+            assert 'BASE_ALGOS=fedavg,topk,ega' in content
             assert 'PROJECT_NAME="re_fl_attack_${mode}_adam"' in content
+            if name.endswith("_part2.sh"):
+                assert 'BASE_PORT="${BASE_PORT:-' in content
+                assert 'BASE_PORT="${BASE_PORT}"' in content
             continue
         assert "run_oracle_suite.sh" in content
         assert "run_oracle_suite_param.sh" not in content
@@ -298,3 +306,32 @@ def test_oracle_gpu_wrappers_call_generic_suite_without_duplicate_attackfreq5_ru
 def test_removed_legacy_scripts_are_absent():
     for name in REMOVED_LEGACY:
         assert not (SCRIPT_DIR / name).exists(), name
+
+
+def test_batch_analysis_wrapper_supports_single_seed_and_multiseed_outputs():
+    content = _assert_executable("run_analyze_experiment_suite_batch.sh")
+    for marker in (
+        'INPUT_ROOT="${INPUT_ROOT:-outputs/output/exp}"',
+        'OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/analysis/exp}"',
+        'MODE="${MODE:-single_sync}"',
+        'PROFILE="${PROFILE:-noattack}"',
+        'SEEDS_RAW="${SEEDS:-42 55 2026 8192}"',
+        'LOSSES_RAW="${LOSSES:-mse mae}"',
+        'ALGORITHMS_RAW="${ALGORITHMS:-centralized fedavg topk ega}"',
+        'INCLUDE_OLD="${INCLUDE_OLD:-false}"',
+        '--input-root PATH',
+        '--output-root PATH',
+        '--mode NAME',
+        '--profile noattack|attack',
+        '--seeds "42 55 2026 8192" | 42,55,2026,8192',
+        '--losses "mse mae" | mse,mae',
+        '--algorithms "centralized fedavg topk ega" | centralized,fedavg,topk,ega',
+        'fedlab.tools.analyze_experiment_suite',
+        'local input_dir="${INPUT_ROOT}/${MODE}/${seed}/${PROFILE}_${loss}"',
+        'local output_dir="${OUTPUT_ROOT}/${MODE}/${seed}/${PROFILE}_${loss}"',
+        'local output_dir="${OUTPUT_ROOT}/${MODE}/multiseed/${PROFILE}_${loss}"',
+        'cmd+=("${INPUT_ROOT}/${MODE}/${seed}/${PROFILE}_${loss}")',
+        'cmd+=("${ALGORITHM_LIST[@]}")',
+        'PYTHONPATH=. "${cmd[@]}"',
+    ):
+        assert marker in content
