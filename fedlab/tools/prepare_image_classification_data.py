@@ -125,6 +125,19 @@ def _load_torchvision_dataset(dataset_name: str, raw_root: Path, train: bool):
     return torch.cat(images, dim=0), torch.cat(labels, dim=0), getattr(dataset, "classes", None)
 
 
+def _combine_server_payload(
+    payloads: dict[str, dict[str, dict[str, torch.Tensor]]],
+    split_name: str,
+) -> dict[str, torch.Tensor]:
+    """Combine one split across all clients into the shared server view."""
+
+    client_ids = list(payloads.keys())
+    return {
+        'images': torch.cat([payloads[client_id][split_name]['images'] for client_id in client_ids], dim=0),
+        'labels': torch.cat([payloads[client_id][split_name]['labels'] for client_id in client_ids], dim=0),
+    }
+
+
 def _summary_from_payloads(
     dataset_name: str,
     raw_root: Path,
@@ -138,6 +151,10 @@ def _summary_from_payloads(
 
     first_client = next(iter(payloads.values()))
     example_shape = list(first_client["train"]["images"].shape[1:])
+    server_payloads = {
+        split_name: _combine_server_payload(payloads, split_name)
+        for split_name in ('train', 'val', 'test')
+    }
     return {
         "dataset": str(dataset_name).lower(),
         "raw_root": str(raw_root),
@@ -157,6 +174,13 @@ def _summary_from_payloads(
             }
             for client_id, client_payload in payloads.items()
         },
+        "server": {
+            split_name: {
+                "rows": int(split_payload['labels'].shape[0]),
+                "label_histogram": torch.bincount(split_payload['labels'], minlength=(0 if class_names is None else len(class_names))).tolist(),
+            }
+            for split_name, split_payload in server_payloads.items()
+        },
     }
 
 
@@ -173,11 +197,15 @@ def save_client_split_payloads(
     """Persist per-client split payloads and return the preparation summary."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    server_dir = output_dir / 'server'
+    server_dir.mkdir(parents=True, exist_ok=True)
     for client_id, client_payload in payloads.items():
         client_dir = output_dir / "clients" / client_id
         client_dir.mkdir(parents=True, exist_ok=True)
         for split_name, split_payload in client_payload.items():
             torch.save(split_payload, client_dir / f"{split_name}.pt")
+    for split_name in ('train', 'val', 'test'):
+        torch.save(_combine_server_payload(payloads, split_name), server_dir / f'{split_name}.pt')
     summary = _summary_from_payloads(
         dataset_name,
         raw_root,

@@ -25,21 +25,6 @@ class TensorClassificationDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return self.images[index], self.labels[index]
 
 
-class _ConcatLoader:
-    """Small iterable that presents multiple DataLoaders as one validation/test stream."""
-
-    def __init__(self, loaders: list[DataLoader]):
-        self.loaders = loaders
-        self.class_names = getattr(loaders[0], 'class_names', None) if loaders else None
-
-    def __iter__(self):
-        for loader in self.loaders:
-            yield from loader
-
-    def __len__(self) -> int:
-        return sum(len(loader) for loader in self.loaders)
-
-
 def _seed_worker(worker_id: int) -> None:
     import random
     import numpy as np
@@ -80,6 +65,27 @@ def _attach_loader_metadata(loader: DataLoader, class_names: list[str] | None) -
     return loader
 
 
+def _build_loader_from_payload(
+    payload: dict[str, torch.Tensor],
+    *,
+    batch_size: int,
+    shuffle: bool,
+    num_workers: int,
+    seed: int | None,
+    identity: str,
+    class_names: list[str] | None,
+) -> DataLoader:
+    """Build one classification DataLoader from a saved tensor payload."""
+
+    return _attach_loader_metadata(
+        DataLoader(
+            TensorClassificationDataset(payload['images'], payload['labels']),
+            **_loader_kwargs(batch_size, shuffle, num_workers, seed, identity),
+        ),
+        class_names,
+    )
+
+
 def build_federated_image_classification_loaders(config: dict[str, Any]) -> tuple[dict[str, DataLoader], Any, Any]:
     """Build per-client train loaders plus shared validation/test loaders."""
 
@@ -98,26 +104,54 @@ def build_federated_image_classification_loaders(config: dict[str, Any]) -> tupl
         class_names = json.loads(summary_path.read_text(encoding='utf-8')).get('class_names')
 
     train_loaders: dict[str, DataLoader] = {}
-    val_loaders: list[DataLoader] = []
-    test_loaders: list[DataLoader] = []
     for client_id in clients:
         client_dir = split_dir / 'clients' / client_id
         train_payload = read_split_payload(client_dir / 'train.pt')
-        val_payload = read_split_payload(client_dir / 'val.pt')
-        test_payload = read_split_payload(client_dir / 'test.pt')
-        train_loader = _attach_loader_metadata(
-            DataLoader(TensorClassificationDataset(train_payload['images'], train_payload['labels']), **_loader_kwargs(batch_size, shuffle_train, num_workers, seed, client_id + ':train')),
-            class_names,
+        train_loaders[client_id] = _build_loader_from_payload(
+            train_payload,
+            batch_size=batch_size,
+            shuffle=shuffle_train,
+            num_workers=num_workers,
+            seed=seed,
+            identity=client_id + ':train',
+            class_names=class_names,
         )
-        val_loader = _attach_loader_metadata(
-            DataLoader(TensorClassificationDataset(val_payload['images'], val_payload['labels']), **_loader_kwargs(batch_size, False, num_workers, seed, client_id + ':val')),
-            class_names,
-        )
-        test_loader = _attach_loader_metadata(
-            DataLoader(TensorClassificationDataset(test_payload['images'], test_payload['labels']), **_loader_kwargs(batch_size, False, num_workers, seed, client_id + ':test')),
-            class_names,
-        )
-        train_loaders[client_id] = train_loader
-        val_loaders.append(val_loader)
-        test_loaders.append(test_loader)
-    return train_loaders, _ConcatLoader(val_loaders), _ConcatLoader(test_loaders)
+
+    server_dir = split_dir / 'server'
+    val_payload = read_split_payload(server_dir / 'val.pt') if (server_dir / 'val.pt').exists() else None
+    test_payload = read_split_payload(server_dir / 'test.pt') if (server_dir / 'test.pt').exists() else None
+    if val_payload is None or test_payload is None:
+        val_images = []
+        val_labels = []
+        test_images = []
+        test_labels = []
+        for client_id in clients:
+            client_dir = split_dir / 'clients' / client_id
+            client_val = read_split_payload(client_dir / 'val.pt')
+            client_test = read_split_payload(client_dir / 'test.pt')
+            val_images.append(client_val['images'])
+            val_labels.append(client_val['labels'])
+            test_images.append(client_test['images'])
+            test_labels.append(client_test['labels'])
+        val_payload = {'images': torch.cat(val_images, dim=0), 'labels': torch.cat(val_labels, dim=0)}
+        test_payload = {'images': torch.cat(test_images, dim=0), 'labels': torch.cat(test_labels, dim=0)}
+
+    val_loader = _build_loader_from_payload(
+        val_payload,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        seed=seed,
+        identity='server:val',
+        class_names=class_names,
+    )
+    test_loader = _build_loader_from_payload(
+        test_payload,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        seed=seed,
+        identity='server:test',
+        class_names=class_names,
+    )
+    return train_loaders, val_loader, test_loader

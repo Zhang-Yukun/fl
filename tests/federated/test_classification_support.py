@@ -12,7 +12,11 @@ def _write_split(root: Path, client_id: str, split: str, images: torch.Tensor, l
 
 
 def _prepare_classification_split_dir(root: Path) -> None:
-    for client_offset, client_id in enumerate(['client1', 'client2', 'client3']):
+    val_images_all = []
+    val_labels_all = []
+    test_images_all = []
+    test_labels_all = []
+    for client_offset, client_id in enumerate(['m1', 'm2', 'm3']):
         base_value = float(client_offset) / 10.0
         train_images = torch.full((6, 1, 4, 4), base_value, dtype=torch.float32)
         train_labels = torch.tensor([0, 1, 2, 0, 1, 2], dtype=torch.long)
@@ -23,6 +27,14 @@ def _prepare_classification_split_dir(root: Path) -> None:
         _write_split(root, client_id, 'train', train_images, train_labels)
         _write_split(root, client_id, 'val', val_images, val_labels)
         _write_split(root, client_id, 'test', test_images, test_labels)
+        val_images_all.append(val_images)
+        val_labels_all.append(val_labels)
+        test_images_all.append(test_images)
+        test_labels_all.append(test_labels)
+    server_dir = root / 'server'
+    server_dir.mkdir(parents=True, exist_ok=True)
+    torch.save({'images': torch.cat(val_images_all, dim=0), 'labels': torch.cat(val_labels_all, dim=0)}, server_dir / 'val.pt')
+    torch.save({'images': torch.cat(test_images_all, dim=0), 'labels': torch.cat(test_labels_all, dim=0)}, server_dir / 'test.pt')
 
 
 def test_federated_run_supports_classification_task(tmp_path):
@@ -33,7 +45,7 @@ def test_federated_run_supports_classification_task(tmp_path):
         'task': {'type': 'classification'},
         'data': {
             'split_dir': str(tmp_path),
-            'clients': ['client1', 'client2', 'client3'],
+            'clients': ['m1', 'm2', 'm3'],
             'batch_size': 2,
             'shuffle_train': False,
             'num_workers': 0,
@@ -67,7 +79,7 @@ def test_federated_run_supports_classification_attacks(tmp_path):
         'task': {'type': 'classification'},
         'data': {
             'split_dir': str(tmp_path),
-            'clients': ['client1', 'client2', 'client3'],
+            'clients': ['m1', 'm2', 'm3'],
             'batch_size': 2,
             'shuffle_train': False,
             'num_workers': 0,

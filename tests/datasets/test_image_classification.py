@@ -19,6 +19,10 @@ def test_build_image_classification_loaders_from_split_dir(tmp_path):
         _write_client_split(tmp_path, client_id, 'train', 6, float(client_index))
         _write_client_split(tmp_path, client_id, 'val', 3, float(client_index + 10))
         _write_client_split(tmp_path, client_id, 'test', 3, float(client_index + 20))
+    server_dir = tmp_path / 'server'
+    server_dir.mkdir(parents=True, exist_ok=True)
+    torch.save({'images': torch.full((9, 1, 4, 4), 99.0), 'labels': torch.arange(9, dtype=torch.long) % 3}, server_dir / 'val.pt')
+    torch.save({'images': torch.full((9, 1, 4, 4), 199.0), 'labels': torch.arange(9, dtype=torch.long) % 3}, server_dir / 'test.pt')
     (tmp_path / 'summary.json').write_text(json.dumps({'class_names': [str(index) for index in range(3)]}), encoding='utf-8')
 
     config = {
@@ -39,3 +43,7 @@ def test_build_image_classification_loaders_from_split_dir(tmp_path):
     assert len(val_loader) > 0
     assert len(test_loader) > 0
     assert getattr(val_loader, 'class_names', None) == ['0', '1', '2']
+    server_val_x, _ = next(iter(val_loader))
+    server_test_x, _ = next(iter(test_loader))
+    assert torch.all(server_val_x == 99.0)
+    assert torch.all(server_test_x == 199.0)

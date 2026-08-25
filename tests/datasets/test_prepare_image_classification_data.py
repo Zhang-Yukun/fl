@@ -70,11 +70,15 @@ def test_save_client_split_payloads_writes_expected_layout(tmp_path):
     assert (tmp_path / 'clients' / 'm1' / 'train.pt').exists()
     assert (tmp_path / 'clients' / 'm2' / 'val.pt').exists()
     assert (tmp_path / 'clients' / 'm3' / 'test.pt').exists()
+    assert (tmp_path / 'server' / 'train.pt').exists()
+    assert (tmp_path / 'server' / 'val.pt').exists()
+    assert (tmp_path / 'server' / 'test.pt').exists()
     loaded = torch.load(tmp_path / 'clients' / 'm2' / 'train.pt', map_location="cpu", weights_only=False)
     assert torch.equal(loaded["labels"], torch.tensor([2, 2]))
     saved_summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert saved_summary["dataset"] == "mnist"
     assert saved_summary['clients']['m1']['train']['rows'] == 2
+    assert saved_summary['server']['train']['rows'] == 6
     assert summary["image_shape"] == [1, 2, 2]
 
 
