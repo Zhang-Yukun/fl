@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import torch
 from torch import nn
@@ -11,8 +11,14 @@ from fedlab.tasks.base import LossFn, MetricFn, TaskSpec
 from fedlab.utils.metrics import accuracy, cross_entropy, mae, mape, mse
 
 
+LossBuilder = Callable[[dict[str, Any]], LossFn]
+
 _TASKS: dict[str, TaskSpec] = {}
 _BUILTIN_TASKS_LOADED = False
+_LOSS_BUILDERS: dict[str, LossBuilder] = {}
+_METRIC_BUILDERS: dict[str, MetricFn] = {}
+LOSS_REGISTRY = _LOSS_BUILDERS
+METRIC_REGISTRY = _METRIC_BUILDERS
 
 
 def _normalize_name(name: str) -> str:
@@ -21,17 +27,23 @@ def _normalize_name(name: str) -> str:
     return str(name).strip().lower()
 
 
+def _register_named_plugin(registry: dict[str, Any], kind: str, plugin: Any, primary_name: str, aliases: tuple[str, ...], replace: bool = False) -> Any:
+    """Register one named plugin and optional aliases into one registry."""
+
+    names = (_normalize_name(primary_name), *(_normalize_name(alias) for alias in aliases))
+    for name in names:
+        existing = registry.get(name)
+        if existing is not None and existing is not plugin and not replace:
+            raise ValueError(f"{kind} alias already registered: {name}")
+    for name in names:
+        registry[name] = plugin
+    return plugin
+
+
 def register_task(task: TaskSpec, *aliases: str, replace: bool = False) -> TaskSpec:
     """Register one task plugin and optional aliases."""
 
-    names = (_normalize_name(task.name), *(_normalize_name(alias) for alias in aliases))
-    for name in names:
-        existing = _TASKS.get(name)
-        if existing is not None and existing is not task and not replace:
-            raise ValueError(f"Task alias already registered: {name}")
-    for name in names:
-        _TASKS[name] = task
-    return task
+    return _register_named_plugin(_TASKS, 'Task', task, task.name, aliases, replace=replace)
 
 
 def task_plugin(*aliases: str, replace: bool = False):
@@ -43,11 +55,53 @@ def task_plugin(*aliases: str, replace: bool = False):
     return decorator
 
 
+def register_loss(name: str, builder: LossBuilder, *aliases: str, replace: bool = False) -> LossBuilder:
+    """Register one loss builder and optional aliases."""
+
+    return _register_named_plugin(_LOSS_BUILDERS, 'Loss', builder, name, aliases, replace=replace)
+
+
+def loss_plugin(name: str, *aliases: str, replace: bool = False):
+    """Decorator for registering one loss builder."""
+
+    def decorator(builder: LossBuilder) -> LossBuilder:
+        return register_loss(name, builder, *aliases, replace=replace)
+
+    return decorator
+
+
+def register_metric(name: str, metric: MetricFn, *aliases: str, replace: bool = False) -> MetricFn:
+    """Register one metric builder and optional aliases."""
+
+    return _register_named_plugin(_METRIC_BUILDERS, 'Metric', metric, name, aliases, replace=replace)
+
+
+def metric_plugin(name: str, *aliases: str, replace: bool = False):
+    """Decorator for registering one metric builder."""
+
+    def decorator(metric: MetricFn) -> MetricFn:
+        return register_metric(name, metric, *aliases, replace=replace)
+
+    return decorator
+
+
 def list_registered_tasks() -> dict[str, TaskSpec]:
     """Return a snapshot of currently registered tasks."""
 
     _ensure_builtin_tasks_registered()
     return dict(_TASKS)
+
+
+def list_registered_losses() -> dict[str, LossBuilder]:
+    """Return a snapshot of currently registered losses."""
+
+    return dict(_LOSS_BUILDERS)
+
+
+def list_registered_metrics() -> dict[str, MetricFn]:
+    """Return a snapshot of currently registered metrics."""
+
+    return dict(_METRIC_BUILDERS)
 
 
 def _ensure_builtin_tasks_registered() -> None:
@@ -93,25 +147,36 @@ def _loss_cross_entropy(_config: dict[str, Any]) -> LossFn:
     return nn.CrossEntropyLoss()
 
 
-LOSS_REGISTRY: dict[str, callable] = {
-    "mse": _loss_mse,
-    "l2": _loss_mse,
-    "mae": _loss_l1,
-    "l1": _loss_l1,
-    "smooth_l1": _loss_smooth_l1,
-    "huber": _loss_huber,
-    "cross_entropy": _loss_cross_entropy,
-    "ce": _loss_cross_entropy,
-}
+def _metric_mse(pred, target):
+    return {'mse': mse(pred, target)}
 
-METRIC_REGISTRY: dict[str, MetricFn] = {
-    "mse": lambda pred, target: {"mse": mse(pred, target)},
-    "mae": lambda pred, target: {"mae": mae(pred, target)},
-    "mape": lambda pred, target: {"mape": mape(pred, target)},
-    "accuracy": lambda pred, target: {"accuracy": accuracy(pred, target)},
-    "cross_entropy": lambda pred, target: {"cross_entropy": cross_entropy(pred, target)},
-    "ce": lambda pred, target: {"cross_entropy": cross_entropy(pred, target)},
-}
+
+def _metric_mae(pred, target):
+    return {'mae': mae(pred, target)}
+
+
+def _metric_mape(pred, target):
+    return {'mape': mape(pred, target)}
+
+
+def _metric_accuracy(pred, target):
+    return {'accuracy': accuracy(pred, target)}
+
+
+def _metric_cross_entropy(pred, target):
+    return {'cross_entropy': cross_entropy(pred, target)}
+
+
+register_loss('mse', _loss_mse, 'l2')
+register_loss('mae', _loss_l1, 'l1')
+register_loss('smooth_l1', _loss_smooth_l1)
+register_loss('huber', _loss_huber)
+register_loss('cross_entropy', _loss_cross_entropy, 'ce')
+register_metric('mse', _metric_mse)
+register_metric('mae', _metric_mae)
+register_metric('mape', _metric_mape)
+register_metric('accuracy', _metric_accuracy)
+register_metric('cross_entropy', _metric_cross_entropy, 'ce')
 
 
 def task_type(config: dict[str, Any]) -> str:
@@ -164,9 +229,9 @@ def create_loss(config: dict[str, Any]) -> LossFn:
         return task.create_loss(config)
     if task.create_loss is not None and config.get("training", {}).get("loss") is None:
         return task.create_loss(config)
-    if name not in LOSS_REGISTRY:
+    if name not in _LOSS_BUILDERS:
         raise ValueError(f"Unknown training loss: {name}")
-    return LOSS_REGISTRY[name](config)
+    return _LOSS_BUILDERS[name](config)
 
 
 def metric_names(config: dict[str, Any]) -> tuple[str, ...]:
@@ -209,18 +274,18 @@ def compute_metrics(config: dict[str, Any], pred: torch.Tensor, target: torch.Te
             if name in task_result:
                 result[name] = task_result[name]
                 continue
-            if name not in METRIC_REGISTRY:
+            if name not in _METRIC_BUILDERS:
                 raise ValueError(f"Unknown evaluation metric: {name}")
-            result.update(METRIC_REGISTRY[name](pred, target))
+            result.update(_METRIC_BUILDERS[name](pred, target))
         for compatibility_name in ("mse", "mae", "mape"):
             if compatibility_name in task_result and compatibility_name not in result:
                 result[compatibility_name] = task_result[compatibility_name]
         return result
     result: dict[str, float] = {}
     for name in metric_names(config):
-        if name not in METRIC_REGISTRY:
+        if name not in _METRIC_BUILDERS:
             raise ValueError(f"Unknown evaluation metric: {name}")
-        result.update(METRIC_REGISTRY[name](pred, target))
+        result.update(_METRIC_BUILDERS[name](pred, target))
     return result
 
 

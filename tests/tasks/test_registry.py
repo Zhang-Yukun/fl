@@ -2,7 +2,21 @@ import torch
 
 from fedlab.datasets import build_federated_loaders
 from fedlab.modeling import build_model
-from fedlab.tasks import build_optimizer, compute_metrics, create_loss, get_model_task, get_task, metric_names, optimizer_name, primary_metric, primary_metric_mode
+from fedlab.tasks import (
+    build_optimizer,
+    compute_metrics,
+    create_loss,
+    get_model_task,
+    get_task,
+    list_registered_losses,
+    list_registered_metrics,
+    metric_names,
+    optimizer_name,
+    primary_metric,
+    primary_metric_mode,
+    register_loss,
+    register_metric,
+)
 from fedlab.tasks.base import TaskSpec
 from fedlab.tasks.registry import list_registered_tasks, register_task, task_plugin
 from fedlab.utils.config import load_config
@@ -100,6 +114,16 @@ def test_builtin_task_aliases_are_registered():
     assert registered['mnist_classification'].name == 'classification'
 
 
+def test_builtin_loss_and_metric_aliases_are_registered():
+    losses = list_registered_losses()
+    metrics = list_registered_metrics()
+
+    assert losses['mse'] is losses['l2']
+    assert losses['cross_entropy'] is losses['ce']
+    assert metrics['cross_entropy'] is metrics['ce']
+    assert 'accuracy' in metrics
+
+
 def test_register_task_supports_aliases(monkeypatch):
     from fedlab.tasks import registry as task_registry
 
@@ -118,6 +142,38 @@ def test_register_task_supports_aliases(monkeypatch):
     assert task_registry._TASKS['dummy'] is dummy_task
     assert task_registry._TASKS['dummy_alias'] is dummy_task
     assert get_task({'task': {'type': 'dummy_alias'}}) is dummy_task
+
+
+def test_register_loss_supports_aliases(monkeypatch):
+    from fedlab.tasks import registry as task_registry
+
+    snapshot = list_registered_losses()
+    monkeypatch.setattr(task_registry, '_LOSS_BUILDERS', dict(snapshot))
+    monkeypatch.setattr(task_registry, 'LOSS_REGISTRY', task_registry._LOSS_BUILDERS)
+
+    def custom_loss(_config):
+        return torch.nn.L1Loss()
+
+    register_loss('custom_l1', custom_loss, 'custom_alias')
+
+    assert task_registry._LOSS_BUILDERS['custom_l1'] is custom_loss
+    assert task_registry._LOSS_BUILDERS['custom_alias'] is custom_loss
+
+
+def test_register_metric_supports_aliases(monkeypatch):
+    from fedlab.tasks import registry as task_registry
+
+    snapshot = list_registered_metrics()
+    monkeypatch.setattr(task_registry, '_METRIC_BUILDERS', dict(snapshot))
+    monkeypatch.setattr(task_registry, 'METRIC_REGISTRY', task_registry._METRIC_BUILDERS)
+
+    def custom_metric(_pred, _target):
+        return {'custom_score': 1.0}
+
+    register_metric('custom_metric', custom_metric, 'custom_alias')
+
+    assert task_registry._METRIC_BUILDERS['custom_metric'] is custom_metric
+    assert task_registry._METRIC_BUILDERS['custom_alias'] is custom_metric
 
 
 def test_task_plugin_rejects_conflicting_alias(monkeypatch):
@@ -139,6 +195,24 @@ def test_task_plugin_rejects_conflicting_alias(monkeypatch):
         assert 'classification' in str(exc)
     else:
         raise AssertionError('Expected conflicting alias registration to fail')
+
+
+def test_metric_registration_rejects_conflicting_alias(monkeypatch):
+    from fedlab.tasks import registry as task_registry
+
+    snapshot = list_registered_metrics()
+    monkeypatch.setattr(task_registry, '_METRIC_BUILDERS', dict(snapshot))
+    monkeypatch.setattr(task_registry, 'METRIC_REGISTRY', task_registry._METRIC_BUILDERS)
+
+    def conflicting_metric(_pred, _target):
+        return {'accuracy': 0.0}
+
+    try:
+        register_metric('other_accuracy', conflicting_metric, 'accuracy')
+    except ValueError as exc:
+        assert 'accuracy' in str(exc)
+    else:
+        raise AssertionError('Expected conflicting metric registration to fail')
 
 
 def test_task_plugin_decorator_registers_task(monkeypatch):
