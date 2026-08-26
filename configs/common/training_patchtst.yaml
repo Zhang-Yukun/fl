@@ -1,6 +1,6 @@
 training:
   lr: 0.001
-  patience: 50
+  patience: 500
   min_delta: 0.0
   loss: mse
   optimizer: adam
