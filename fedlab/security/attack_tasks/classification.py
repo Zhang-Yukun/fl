@@ -53,11 +53,9 @@ def infer_classification_label(
     target_type: str,
     reference_x: torch.Tensor,
 ) -> torch.Tensor | None:
-    """Infer one iDLG classification label from the last-layer signal."""
+    """Infer one iDLG pseudo-label and broadcast it across the attacked batch."""
 
-    if reference_x.shape[0] != 1:
-        return None
-    num_classes = _classification_num_classes(config, model=model, sample_x=reference_x)
+    num_classes = _classification_num_classes(config, model=model, sample_x=reference_x[:1])
     named_parameters = [(name, parameter) for name, parameter in model.named_parameters() if parameter.requires_grad]
     candidate_signals: list[tuple[str, torch.Tensor]] = []
     if target_type == "gradient":
@@ -76,4 +74,4 @@ def infer_classification_label(
         return None
     _preferred_name, preferred_signal = candidate_signals[-1]
     inferred = int(torch.argmin(preferred_signal).item()) if target_type == "gradient" else int(torch.argmax(preferred_signal).item())
-    return torch.tensor([inferred], device=reference_x.device, dtype=torch.long)
+    return torch.full((int(reference_x.shape[0]),), inferred, device=reference_x.device, dtype=torch.long)

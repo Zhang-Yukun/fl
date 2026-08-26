@@ -487,12 +487,12 @@ def test_classification_idlg_inferrs_label_from_update_payload():
     assert not torch.equal(result.reconstructed_y.cpu(), decoy_y)
 
 
-def test_classification_idlg_does_not_reuse_probe_labels_when_label_inference_is_invalid():
+def test_classification_idlg_broadcasts_one_inferred_pseudo_label_for_multi_sample_gradients():
     config = _tiny_classification_config(target_type="gradient")
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(2, 1, 4, 4)
-    true_y = torch.tensor([2, 1], dtype=torch.long)
+    true_y = torch.tensor([2, 2], dtype=torch.long)
     decoy_y = torch.tensor([0, 0], dtype=torch.long)
     loss = torch.nn.functional.cross_entropy(model(x), true_y)
     grads = torch.autograd.grad(loss, tuple(model.parameters()))
@@ -501,17 +501,18 @@ def test_classification_idlg_does_not_reuse_probe_labels_when_label_inference_is
     result = idlg_attack(config, state, [grad.detach() for grad in grads], x, decoy_y, device, target_type="gradient")
 
     assert result.reconstructed_y is not None
-    assert result.reconstructed_y.shape == (2, 3)
-    assert torch.is_floating_point(result.reconstructed_y)
-    assert not torch.equal(result.reconstructed_y.detach().cpu().argmax(dim=1), decoy_y)
+    assert result.reconstructed_y.shape == (2,)
+    assert result.reconstructed_y.dtype == torch.long
+    assert torch.equal(result.reconstructed_y.cpu(), true_y)
+    assert not torch.equal(result.reconstructed_y.cpu(), decoy_y)
 
 
-def test_classification_update_payload_idlg_does_not_reuse_probe_labels_for_multi_sample_batches():
+def test_classification_update_payload_idlg_broadcasts_one_inferred_pseudo_label_for_multi_sample_batches():
     config = _tiny_classification_config(target_type="update_payload")
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(2, 1, 4, 4)
-    true_y = torch.tensor([1, 2], dtype=torch.long)
+    true_y = torch.tensor([1, 1], dtype=torch.long)
     decoy_y = torch.tensor([0, 0], dtype=torch.long)
     state = serialize_model(model)
     optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["lr"])
@@ -524,9 +525,10 @@ def test_classification_update_payload_idlg_does_not_reuse_probe_labels_for_mult
     result = idlg_attack(config, state, target_update, x, decoy_y, device, target_type="update_payload")
 
     assert result.reconstructed_y is not None
-    assert result.reconstructed_y.shape == (2, 3)
-    assert torch.is_floating_point(result.reconstructed_y)
-    assert not torch.equal(result.reconstructed_y.detach().cpu().argmax(dim=1), decoy_y)
+    assert result.reconstructed_y.shape == (2,)
+    assert result.reconstructed_y.dtype == torch.long
+    assert torch.equal(result.reconstructed_y.cpu(), true_y)
+    assert not torch.equal(result.reconstructed_y.cpu(), decoy_y)
 
 
 
