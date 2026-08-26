@@ -837,6 +837,31 @@ def test_federated_run_supports_legacy_gradient_attacks(tmp_path):
     assert result["attack_target_type"] == "gradient"
 
 
+def test_federated_run_supports_configured_attack_method_subset(tmp_path):
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "attack.enabled=true",
+            "attack.methods=dlg",
+            "attack.target_type=update_payload",
+            "attack.frequency_rounds=1",
+            "attack.max_samples=1",
+            "attack.sample_count=1",
+            "attack.steps=1",
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+        ],
+    )
+    config["experiment"]["output_dir"] = str(tmp_path)
+
+    result = run_federated(config)
+
+    attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
+    assert {entry["name"] for entry in attack_results} == {"DLG"}
+    assert result["attack_evaluations"] == 3
+    assert set(result["attack_summary"]["methods"]) == {"DLG"}
+
+
 def test_attack_auto_sampling_defaults_to_one_reconstruction_with_capped_multi_sample_batches():
     attack_cfg = {
         "sample_count": "auto",

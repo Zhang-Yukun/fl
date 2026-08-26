@@ -24,11 +24,10 @@ from fedlab.security.attacks import (
     apply_set_recovery_metrics,
     attack_success_rate,
     attach_attack_metadata,
-    dlg_attack,
-    idlg_attack,
     save_attack_artifacts,
     summarize_attack_results,
 )
+from fedlab.security.registry import run_attacks
 from fedlab.federated.client import FederatedClient
 from fedlab.federated.methods import build_method, is_registered_compressed
 from fedlab.datasets import build_federated_loaders
@@ -1037,40 +1036,23 @@ def _execute_attack_round_task(
     attacks = []
     sample_lookup = {(sample.client_id, sample.round_index, sample.sample_index): sample for sample in task.samples}
     for sample in task.samples:
-        for result in (
-            attach_attack_metadata(
-                dlg_attack(
-                    config,
-                    sample.round_base_state,
-                    sample.target,
-                    sample.real_x,
-                    sample.real_y,
-                    attack_device,
-                    target_type=sample.target_type,
-                    reference_inputs=sample.reference_inputs,
-                    reference_targets=sample.reference_targets,
-                ),
-                client_id=sample.client_id,
-                round_index=sample.round_index,
-                sample_index=sample.sample_index,
-            ),
-            attach_attack_metadata(
-                idlg_attack(
-                    config,
-                    sample.round_base_state,
-                    sample.target,
-                    sample.real_x,
-                    sample.real_y,
-                    attack_device,
-                    target_type=sample.target_type,
-                    reference_inputs=sample.reference_inputs,
-                    reference_targets=sample.reference_targets,
-                ),
-                client_id=sample.client_id,
-                round_index=sample.round_index,
-                sample_index=sample.sample_index,
-            ),
+        for result in run_attacks(
+            config,
+            sample.round_base_state,
+            sample.target,
+            sample.real_x,
+            sample.real_y,
+            attack_device,
+            target_type=sample.target_type,
+            reference_inputs=sample.reference_inputs,
+            reference_targets=sample.reference_targets,
         ):
+            result = attach_attack_metadata(
+                result,
+                client_id=sample.client_id,
+                round_index=sample.round_index,
+                sample_index=sample.sample_index,
+            )
             plot_reference_x = result.reference_x if getattr(result, "reference_x", None) is not None else result.real_x
             plot_reference_y = result.reference_y if getattr(result, "reference_y", None) is not None else result.real_y
             result.plot_reference_x = _inverse_plot_tensor(plot_reference_x, sample.scale_mean, sample.scale_std)
