@@ -32,6 +32,25 @@ class AttackSummaryMetricSpec:
 
 
 @dataclass(frozen=True)
+class AttackRecordFieldSpec:
+    """One registered JSON record field serializer."""
+
+    output_key: str
+    value_getter: Callable[[Any], Any]
+    omit_if_none: bool = True
+    finite_float_to_none: bool = True
+
+
+@dataclass(frozen=True)
+class AttackArtifactFieldSpec:
+    """One registered artifact payload field serializer."""
+
+    output_key: str
+    value_getter: Callable[[Any], Any]
+    tensor_to_cpu: bool = False
+
+
+@dataclass(frozen=True)
 class RecoveryMetricSpec:
     """One registered set-recovery metric definition."""
 
@@ -48,6 +67,12 @@ _RECOVERY_METRICS: dict[str, RecoveryMetricSpec] = {}
 _BUILTIN_RECOVERY_METRICS_LOADED = False
 _ATTACK_SUMMARY_METRICS: dict[str, AttackSummaryMetricSpec] = {}
 _BUILTIN_ATTACK_SUMMARY_METRICS_LOADED = False
+_ATTACK_RECORD_FIELDS: dict[str, AttackRecordFieldSpec] = {}
+_ATTACK_RECORD_FIELD_ORDER: list[str] = []
+_BUILTIN_ATTACK_RECORD_FIELDS_LOADED = False
+_ATTACK_ARTIFACT_FIELDS: dict[str, AttackArtifactFieldSpec] = {}
+_ATTACK_ARTIFACT_FIELD_ORDER: list[str] = []
+_BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED = False
 
 
 def _normalize_name(name: str) -> str:
@@ -350,6 +375,156 @@ def summarize_metric_values(results: list[Any], metric_name: str) -> dict[str, f
     else:
         best = min(finite)
     return {'average': average, 'best': best}
+
+
+def register_attack_record_field(
+    output_key: str,
+    value_getter: Callable[[Any], Any],
+    *,
+    omit_if_none: bool = True,
+    finite_float_to_none: bool = True,
+    replace: bool = False,
+) -> AttackRecordFieldSpec:
+    """Register one JSON attack record field serializer."""
+
+    key = str(output_key)
+    spec = AttackRecordFieldSpec(
+        output_key=key,
+        value_getter=value_getter,
+        omit_if_none=bool(omit_if_none),
+        finite_float_to_none=bool(finite_float_to_none),
+    )
+    existing = _ATTACK_RECORD_FIELDS.get(key)
+    if existing is not None and existing != spec and not replace:
+        raise ValueError(f'Attack record field already registered: {key}')
+    _ATTACK_RECORD_FIELDS[key] = spec
+    if key not in _ATTACK_RECORD_FIELD_ORDER:
+        _ATTACK_RECORD_FIELD_ORDER.append(key)
+    return spec
+
+
+def register_attack_artifact_field(
+    output_key: str,
+    value_getter: Callable[[Any], Any],
+    *,
+    tensor_to_cpu: bool = False,
+    replace: bool = False,
+) -> AttackArtifactFieldSpec:
+    """Register one attack artifact payload field serializer."""
+
+    key = str(output_key)
+    spec = AttackArtifactFieldSpec(
+        output_key=key,
+        value_getter=value_getter,
+        tensor_to_cpu=bool(tensor_to_cpu),
+    )
+    existing = _ATTACK_ARTIFACT_FIELDS.get(key)
+    if existing is not None and existing != spec and not replace:
+        raise ValueError(f'Attack artifact field already registered: {key}')
+    _ATTACK_ARTIFACT_FIELDS[key] = spec
+    if key not in _ATTACK_ARTIFACT_FIELD_ORDER:
+        _ATTACK_ARTIFACT_FIELD_ORDER.append(key)
+    return spec
+
+
+def _ensure_builtin_attack_record_fields_registered() -> None:
+    global _BUILTIN_ATTACK_RECORD_FIELDS_LOADED
+    if _BUILTIN_ATTACK_RECORD_FIELDS_LOADED:
+        return
+    _BUILTIN_ATTACK_RECORD_FIELDS_LOADED = True
+    register_attack_record_field('name', lambda result: getattr(result, 'name', None))
+    register_attack_record_field('psnr', lambda result: getattr(result, 'psnr', None), omit_if_none=False)
+    register_attack_record_field('ssim', lambda result: getattr(result, 'ssim', None), omit_if_none=False)
+    register_attack_record_field('iterations', lambda result: getattr(result, 'iterations', None))
+    register_attack_record_field('time_seconds', lambda result: getattr(result, 'time_seconds', None))
+    register_attack_record_field('success', lambda result: getattr(result, 'success', None))
+    register_attack_record_field('success_threshold', lambda result: getattr(result, 'success_threshold', None))
+    register_attack_record_field('target_type', lambda result: getattr(result, 'target_type', None))
+    register_attack_record_field('exact_target_mse', lambda result: getattr(result, 'exact_target_mse', None))
+    register_attack_record_field('nearest_client_train_mse', lambda result: getattr(result, 'nearest_client_train_mse', None))
+    register_attack_record_field('nearest_client_train_indices', lambda result: getattr(result, 'nearest_client_train_indices', None))
+    register_attack_record_field('matched_reference_indices', lambda result: getattr(result, 'matched_reference_indices', None))
+    register_attack_record_field('matched_reference_metric_name', lambda result: getattr(result, 'matched_reference_metric_name', None))
+    register_attack_record_field('matched_reference_metric_value', lambda result: getattr(result, 'matched_reference_metric_value', None))
+    register_attack_record_field('recovered_count', lambda result: getattr(result, 'recovered_count', None))
+    register_attack_record_field('reconstructed_count', lambda result: getattr(result, 'reconstructed_count', None))
+    register_attack_record_field('reference_count', lambda result: getattr(result, 'reference_count', None))
+    register_attack_record_field('budget_recovered_fraction', lambda result: getattr(result, 'budget_recovered_fraction', None))
+    register_attack_record_field('coverage_recovered_fraction', lambda result: getattr(result, 'coverage_recovered_fraction', None))
+    register_attack_record_field('client_id', lambda result: getattr(result, 'client_id', None))
+    register_attack_record_field('round_index', lambda result: getattr(result, 'round_index', None))
+    register_attack_record_field('sample_index', lambda result: getattr(result, 'sample_index', None))
+    register_attack_record_field('artifact_path', lambda result: getattr(result, 'artifact_path', None))
+    register_attack_record_field('primary_metric_name', lambda result: getattr(result, 'metric_name', None))
+    register_attack_record_field('primary_metric_value', lambda result: getattr(result, 'mse', None), omit_if_none=False)
+    register_attack_record_field('objective_mse', lambda result: getattr(result, 'gradient_mse', None), omit_if_none=False)
+
+
+def _ensure_builtin_attack_artifact_fields_registered() -> None:
+    global _BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED
+    if _BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED:
+        return
+    _BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED = True
+    for key in ('name', 'client_id', 'round_index', 'sample_index', 'target_type', 'reference_label'):
+        register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None))
+    register_attack_artifact_field('primary_metric_name', lambda result: getattr(result, 'metric_name', None))
+    register_attack_artifact_field('primary_metric_value', lambda result: getattr(result, 'mse', None))
+    for key in ('real_x', 'real_y', 'reference_x', 'reference_y', 'reconstructed_x', 'reconstructed_y'):
+        register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None), tensor_to_cpu=True)
+    for key in ('plot_real_x', 'plot_real_y', 'plot_reference_x', 'plot_reference_y', 'plot_reconstructed_x', 'plot_reconstructed_y'):
+        register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None), tensor_to_cpu=True)
+    for key in (
+        'exact_target_mse',
+        'nearest_client_train_mse',
+        'nearest_client_train_indices',
+        'matched_reference_indices',
+        'matched_reference_metric_name',
+        'matched_reference_metric_value',
+        'recovered_count',
+        'reconstructed_count',
+        'reference_count',
+        'budget_recovered_fraction',
+        'coverage_recovered_fraction',
+    ):
+        register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None))
+
+
+def list_registered_attack_record_fields() -> tuple[AttackRecordFieldSpec, ...]:
+    _ensure_builtin_attack_record_fields_registered()
+    return tuple(_ATTACK_RECORD_FIELDS[key] for key in _ATTACK_RECORD_FIELD_ORDER)
+
+
+def list_registered_attack_artifact_fields() -> tuple[AttackArtifactFieldSpec, ...]:
+    _ensure_builtin_attack_artifact_fields_registered()
+    return tuple(_ATTACK_ARTIFACT_FIELDS[key] for key in _ATTACK_ARTIFACT_FIELD_ORDER)
+
+
+def serialize_attack_record(result: Any) -> dict[str, Any]:
+    """Serialize one attack result into a JSON-ready record via the registry."""
+
+    record: dict[str, Any] = {}
+    for spec in list_registered_attack_record_fields():
+        value = spec.value_getter(result)
+        if value is None and spec.omit_if_none:
+            continue
+        if isinstance(value, float) and spec.finite_float_to_none and not math.isfinite(value):
+            value = None
+        if value is None and spec.omit_if_none:
+            continue
+        record[spec.output_key] = value
+    return record
+
+
+def build_attack_artifact_payload(result: Any) -> dict[str, Any]:
+    """Serialize one attack artifact payload via the registry."""
+
+    payload: dict[str, Any] = {}
+    for spec in list_registered_attack_artifact_fields():
+        value = spec.value_getter(result)
+        if spec.tensor_to_cpu and value is not None:
+            value = value.detach().cpu()
+        payload[spec.output_key] = value
+    return payload
 
 
 def _attack_threshold(config: dict[str, Any]) -> float:

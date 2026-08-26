@@ -4,7 +4,7 @@ import torch
 from fedlab.modeling import build_model
 from fedlab.engine.training import first_batch_gradient, first_batch_sample
 from fedlab.security.attacks import AttackResult, apply_set_recovery_metrics, dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
-from fedlab.security.registry import register_attack_summary_metric, register_recovery_metric
+from fedlab.security.registry import register_attack_artifact_field, register_attack_record_field, register_attack_summary_metric, register_recovery_metric
 from fedlab.utils.serialization import serialize_model, subtract_state
 
 
@@ -235,6 +235,44 @@ def test_attack_gradient_sampling_supports_eval_mode():
     assert torch.allclose(sample_x_a, sample_x_b)
     assert all(torch.allclose(left, right) for left, right in zip(grads_a, grads_b))
 
+
+
+def test_attack_serialization_supports_custom_registered_fields(tmp_path, monkeypatch):
+    import fedlab.security.registry as registry_module
+
+    snapshot_record_fields = dict(registry_module._ATTACK_RECORD_FIELDS)
+    snapshot_record_order = list(registry_module._ATTACK_RECORD_FIELD_ORDER)
+    snapshot_artifact_fields = dict(registry_module._ATTACK_ARTIFACT_FIELDS)
+    snapshot_artifact_order = list(registry_module._ATTACK_ARTIFACT_FIELD_ORDER)
+    monkeypatch.setattr(registry_module, '_ATTACK_RECORD_FIELDS', dict(snapshot_record_fields))
+    monkeypatch.setattr(registry_module, '_ATTACK_RECORD_FIELD_ORDER', list(snapshot_record_order))
+    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_RECORD_FIELDS_LOADED', True)
+    monkeypatch.setattr(registry_module, '_ATTACK_ARTIFACT_FIELDS', dict(snapshot_artifact_fields))
+    monkeypatch.setattr(registry_module, '_ATTACK_ARTIFACT_FIELD_ORDER', list(snapshot_artifact_order))
+    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED', True)
+
+    register_attack_record_field('custom_json_field', lambda result: getattr(result, 'custom_json_field', None))
+    register_attack_artifact_field('custom_artifact_field', lambda result: getattr(result, 'custom_artifact_field', None))
+
+    result = AttackResult(
+        name='DLG',
+        mse=0.1,
+        psnr=1.0,
+        ssim=0.1,
+        iterations=1,
+        time_seconds=0.0,
+        success=False,
+        success_threshold=0.5,
+        gradient_mse=0.2,
+    )
+    result.custom_json_field = 7.0
+    result.custom_artifact_field = 'hello'
+
+    records = save_attack_artifacts(tmp_path, [result])
+    payload = torch.load(tmp_path / records[0]['artifact_path'], map_location='cpu', weights_only=False)
+
+    assert records[0]['custom_json_field'] == 7.0
+    assert payload['custom_artifact_field'] == 'hello'
 
 
 def test_attack_artifacts_persist_reconstructions(tmp_path):

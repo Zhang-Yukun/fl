@@ -6,14 +6,20 @@ from fedlab.security.registry import (
     list_registered_attacks,
     list_registered_recovery_metrics,
     attack_primary_metric_direction,
+    build_attack_artifact_payload,
     get_attack_summary_metric,
+    list_registered_attack_artifact_fields,
+    list_registered_attack_record_fields,
     list_registered_attack_summary_metrics,
     register_attack,
+    register_attack_artifact_field,
+    register_attack_record_field,
     register_attack_summary_metric,
     register_recovery_metric,
     resolve_recovery_objective,
     resolve_recovery_threshold,
     run_attacks,
+    serialize_attack_record,
     summarize_metric_values,
 )
 
@@ -135,3 +141,29 @@ def test_register_attack_summary_metric_supports_custom_metric(monkeypatch):
     assert stats['average'] == 0.75
     assert stats['best'] == 0.75
     assert attack_primary_metric_direction('custom_score') == 'lower_is_more_private'
+
+
+def test_attack_record_and_artifact_serialization_are_registry_driven(monkeypatch):
+    import fedlab.security.registry as registry_module
+
+    monkeypatch.setattr(registry_module, '_ATTACK_RECORD_FIELDS', dict(registry_module._ATTACK_RECORD_FIELDS))
+    monkeypatch.setattr(registry_module, '_ATTACK_RECORD_FIELD_ORDER', list(registry_module._ATTACK_RECORD_FIELD_ORDER))
+    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_RECORD_FIELDS_LOADED', True)
+    monkeypatch.setattr(registry_module, '_ATTACK_ARTIFACT_FIELDS', dict(registry_module._ATTACK_ARTIFACT_FIELDS))
+    monkeypatch.setattr(registry_module, '_ATTACK_ARTIFACT_FIELD_ORDER', list(registry_module._ATTACK_ARTIFACT_FIELD_ORDER))
+    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED', True)
+
+    register_attack_record_field('custom_json_field', lambda result: getattr(result, 'custom_json_field', None))
+    register_attack_artifact_field('custom_artifact_field', lambda result: getattr(result, 'custom_artifact_field', None))
+
+    class Dummy:
+        custom_json_field = 1.5
+        custom_artifact_field = 'payload'
+
+    record = serialize_attack_record(Dummy())
+    artifact = build_attack_artifact_payload(Dummy())
+
+    assert 'custom_json_field' in record
+    assert artifact['custom_artifact_field'] == 'payload'
+    assert list_registered_attack_record_fields()
+    assert list_registered_attack_artifact_fields()

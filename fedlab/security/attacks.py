@@ -16,12 +16,14 @@ from torch import nn
 from fedlab.modeling import build_model
 from fedlab.security.registry import (
     attack_primary_metric_direction,
+    build_attack_artifact_payload,
     compute_recovery_metric_matrix,
     get_attack_summary_metric,
     list_registered_attack_summary_metrics,
     normalize_recovery_metric_name,
     resolve_recovery_objective,
     resolve_recovery_threshold,
+    serialize_attack_record,
     summarize_metric_values,
 )
 from fedlab.tasks import create_loss
@@ -80,19 +82,7 @@ class AttackResult:
     def to_record(self) -> dict[str, Any]:
         """Return a JSON-serializable attack record."""
 
-        record = asdict(self)
-        for key in ("real_x", "real_y", "reference_x", "reference_y", "reconstructed_x", "reconstructed_y"):
-            record.pop(key, None)
-        record["primary_metric_name"] = record.pop("metric_name")
-        record["primary_metric_value"] = record.pop("mse")
-        record["objective_mse"] = record.pop("gradient_mse")
-        for key, value in list(record.items()):
-            if value is None:
-                record.pop(key, None)
-                continue
-            if isinstance(value, float) and not math.isfinite(value):
-                record[key] = None
-        return record
+        return serialize_attack_record(self)
 
 
 def _normalize_target_type(target_type: str | None, config: dict[str, Any]) -> str:
@@ -764,42 +754,7 @@ def save_attack_artifacts(output_dir: Path, results: list[AttackResult]) -> list
         relative_path = Path(f"round_{round_index:04d}") / client_id / f"sample_{sample_index:04d}" / filename
         artifact_path = artifact_root / relative_path
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {
-                "name": result.name,
-                "client_id": result.client_id,
-                "round_index": result.round_index,
-                "sample_index": result.sample_index,
-                "target_type": result.target_type,
-                "primary_metric_name": result.metric_name,
-                "primary_metric_value": result.mse,
-                "real_x": None if result.real_x is None else result.real_x.detach().cpu(),
-                "real_y": None if result.real_y is None else result.real_y.detach().cpu(),
-                "reference_x": None if result.reference_x is None else result.reference_x.detach().cpu(),
-                "reference_y": None if result.reference_y is None else result.reference_y.detach().cpu(),
-                "reference_label": result.reference_label,
-                "reconstructed_x": None if result.reconstructed_x is None else result.reconstructed_x.detach().cpu(),
-                "reconstructed_y": None if result.reconstructed_y is None else result.reconstructed_y.detach().cpu(),
-                "plot_real_x": None if getattr(result, "plot_real_x", None) is None else getattr(result, "plot_real_x").detach().cpu(),
-                "plot_real_y": None if getattr(result, "plot_real_y", None) is None else getattr(result, "plot_real_y").detach().cpu(),
-                "plot_reference_x": None if getattr(result, "plot_reference_x", None) is None else getattr(result, "plot_reference_x").detach().cpu(),
-                "plot_reference_y": None if getattr(result, "plot_reference_y", None) is None else getattr(result, "plot_reference_y").detach().cpu(),
-                "plot_reconstructed_x": None if getattr(result, "plot_reconstructed_x", None) is None else getattr(result, "plot_reconstructed_x").detach().cpu(),
-                "plot_reconstructed_y": None if getattr(result, "plot_reconstructed_y", None) is None else getattr(result, "plot_reconstructed_y").detach().cpu(),
-                "exact_target_mse": result.exact_target_mse,
-                "nearest_client_train_mse": result.nearest_client_train_mse,
-                "nearest_client_train_indices": result.nearest_client_train_indices,
-                "matched_reference_indices": result.matched_reference_indices,
-                "matched_reference_metric_name": result.matched_reference_metric_name,
-                "matched_reference_metric_value": result.matched_reference_metric_value,
-                "recovered_count": result.recovered_count,
-                "reconstructed_count": result.reconstructed_count,
-                "reference_count": result.reference_count,
-                "budget_recovered_fraction": result.budget_recovered_fraction,
-                "coverage_recovered_fraction": result.coverage_recovered_fraction,
-            },
-            artifact_path,
-        )
+        torch.save(build_attack_artifact_payload(result), artifact_path)
         result.artifact_path = str(Path("attack_artifacts") / relative_path)
         records.append(result.to_record())
     return records
