@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from fedlab.tools.attack_plot_registry import discover_attack_names
 from fedlab.tools.plot_attack_reconstructions import plot_one_artifact, select_records
 
 
@@ -64,7 +65,7 @@ def plot_attack_suite(
     limit_per_attack: int = 10,
     sort_key: str = "mse",
     descending: bool = False,
-    attack_names: tuple[str, ...] = ("DLG", "iDLG"),
+    attack_names: tuple[str, ...] | None = None,
 ) -> list[str]:
     """Plot a fixed number of reconstructions per attack for each experiment."""
 
@@ -77,8 +78,9 @@ def plot_attack_suite(
             continue
         records = load_json(attack_results_path)
         algorithm_label = sanitize_label(load_algorithm_label(run_dir))
+        selected_attack_names = attack_names or discover_attack_names(records)
         report_lines.append(f"- {run_dir.name}: algorithm={algorithm_label}")
-        for attack_name in attack_names:
+        for attack_name in selected_attack_names:
             selected = select_records(
                 records,
                 sort_key=sort_key,

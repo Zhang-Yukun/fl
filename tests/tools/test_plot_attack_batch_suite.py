@@ -75,3 +75,42 @@ def test_plot_attack_batch_suite_script_exists():
     assert content.startswith("#!/usr/bin/env python3")
     assert "limit_per_attack" in content
     assert "algorithm_label" in content
+
+
+def test_plot_attack_batch_suite_discovers_custom_attack_names(tmp_path):
+    run_dir = tmp_path / "custom_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "metrics.json").write_text(json.dumps([{"round": 0, "algorithm": "fedavg"}], ensure_ascii=False), encoding="utf-8")
+    rel = Path("attack_artifacts") / "round_0000" / "Nd2O3" / "sample_0000" / "customattack_00000.pt"
+    artifact_path = run_dir / rel
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "reference_x": torch.tensor([[[1.0], [2.0], [3.0]]]),
+            "reference_y": torch.tensor([[[4.0], [5.0]]]),
+            "reconstructed_x": torch.tensor([[[1.0], [2.1], [3.0]]]),
+            "reconstructed_y": torch.tensor([[[4.0], [5.0]]]),
+        },
+        artifact_path,
+    )
+    (run_dir / "attack_results.json").write_text(
+        json.dumps(
+            [{
+                "name": "CustomAttack",
+                "client_id": "Nd2O3",
+                "round_index": 0,
+                "sample_index": 0,
+                "artifact_path": rel.as_posix(),
+                "primary_metric_value": 0.1,
+                "primary_metric_name": "custom_privacy",
+            }],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    output_dir = tmp_path / "gallery"
+    module.plot_attack_suite([run_dir], output_dir, limit_per_attack=1)
+
+    assert len(list((output_dir / "fedavg" / "CustomAttack").glob("*.png"))) == 1

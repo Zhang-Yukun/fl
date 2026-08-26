@@ -79,8 +79,8 @@ def test_plot_attack_reconstructions_hides_idlg_target_by_default():
     record = {"name": "iDLG"}
     assert module.should_plot_real_y(record) is False
     assert module.should_plot_reconstructed_y(record) is False
-    assert module.should_plot_real_y(record, show_idlg_y=True) is True
-    assert module.should_plot_reconstructed_y(record, show_idlg_y=True) is True
+    assert module.should_plot_real_y(record, show_policy_overrides=True) is True
+    assert module.should_plot_reconstructed_y(record, show_policy_overrides=True) is True
     assert module.should_plot_real_y({"name": "DLG"}) is True
     assert module.should_plot_reconstructed_y({"name": "DLG"}) is True
 
@@ -127,3 +127,9 @@ def test_plot_attack_reconstructions_supports_image_artifacts(tmp_path):
 
     output_path = module.plot_one_artifact(run_dir, module.load_json(run_dir / "attack_results.json")[0], run_dir / "plots")
     assert output_path.exists()
+
+
+def test_plot_attack_reconstructions_supports_unknown_attack_policy_defaults():
+    record = {"name": "CustomAttack"}
+    assert module.should_plot_real_y(record) is True
+    assert module.should_plot_reconstructed_y(record) is True

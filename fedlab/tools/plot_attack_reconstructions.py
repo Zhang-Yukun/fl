@@ -19,6 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 
+from fedlab.tools.attack_plot_registry import should_plot_real_y, should_plot_reconstructed_y
 from fedlab.utils.tracking import _attack_reconstruction_figure
 
 
@@ -63,23 +64,6 @@ def select_records(
 
 
 
-def should_plot_real_y(record: dict[str, Any], show_idlg_y: bool = False) -> bool:
-    """Return whether real_y should appear on the plot for one attack record."""
-
-    name = str(record.get("name", "")).lower()
-    if name == "idlg" and not show_idlg_y:
-        return False
-    return True
-
-
-def should_plot_reconstructed_y(record: dict[str, Any], show_idlg_y: bool = False) -> bool:
-    """Return whether reconstructed_y should appear on the plot for one attack record."""
-
-    name = str(record.get("name", "")).lower()
-    if name == "idlg" and not show_idlg_y:
-        return False
-    return True
-
 def _artifact_tensor(payload: dict[str, Any], *names: str):
     """Return the first available tensor payload from a saved artifact."""
 
@@ -120,8 +104,8 @@ def plot_one_artifact(
         reference_label=artifact.get('reference_label') or record.get('reference_label') or 'reference',
         plot_reference_x=real_x,
         plot_reconstructed_x=recon_x,
-        plot_reference_y=real_y if should_plot_real_y(record, show_idlg_y=show_idlg_y) else None,
-        plot_reconstructed_y=recon_y if should_plot_reconstructed_y(record, show_idlg_y=show_idlg_y) else None,
+        plot_reference_y=real_y if should_plot_real_y(record, show_policy_overrides=show_idlg_y) else None,
+        plot_reconstructed_y=recon_y if should_plot_reconstructed_y(record, show_policy_overrides=show_idlg_y) else None,
         reference_x=real_x,
         reconstructed_x=recon_x,
         reference_y=real_y,
