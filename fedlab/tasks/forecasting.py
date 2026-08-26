@@ -5,6 +5,7 @@ from __future__ import annotations
 from fedlab.datasets.rare_earth import build_federated_loaders
 from fedlab.modeling.forecasting import build_model as build_forecasting_model
 from fedlab.tasks.base import TaskSpec
+from fedlab.tasks.registry import register_task
 
 
 FORECASTING_TASK = TaskSpec(
@@ -16,4 +17,11 @@ FORECASTING_TASK = TaskSpec(
     default_optimizer="adam",
     primary_metric="mse",
     primary_metric_mode="min",
+)
+
+
+register_task(
+    FORECASTING_TASK,
+    "time_series_forecasting",
+    "rare_earth_forecasting",
 )

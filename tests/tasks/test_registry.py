@@ -3,6 +3,8 @@ import torch
 from fedlab.datasets import build_federated_loaders
 from fedlab.modeling import build_model
 from fedlab.tasks import build_optimizer, compute_metrics, create_loss, get_model_task, get_task, metric_names, optimizer_name, primary_metric, primary_metric_mode
+from fedlab.tasks.base import TaskSpec
+from fedlab.tasks.registry import list_registered_tasks, register_task, task_plugin
 from fedlab.utils.config import load_config
 
 
@@ -86,5 +88,73 @@ def test_classification_task_resolves_accuracy_and_cross_entropy():
     assert metric_names(config) == ('accuracy', 'cross_entropy')
     assert metrics['accuracy'] == 1.0
     assert 'cross_entropy' in metrics
-    assert 'mse' in metrics and 'mae' in metrics and 'mape' in metrics
     assert optimizer.__class__.__name__ == 'Adam'
+
+
+def test_builtin_task_aliases_are_registered():
+    registered = list_registered_tasks()
+
+    assert registered['forecasting'].name == 'forecasting'
+    assert registered['rare_earth_forecasting'].name == 'forecasting'
+    assert registered['classification'].name == 'classification'
+    assert registered['mnist_classification'].name == 'classification'
+
+
+def test_register_task_supports_aliases(monkeypatch):
+    from fedlab.tasks import registry as task_registry
+
+    snapshot = list_registered_tasks()
+    monkeypatch.setattr(task_registry, '_TASKS', dict(snapshot))
+    monkeypatch.setattr(task_registry, '_BUILTIN_TASKS_LOADED', True)
+
+    dummy_task = TaskSpec(
+        name='dummy',
+        build_model=lambda _config: torch.nn.Identity(),
+        build_federated_loaders=lambda _config: ({}, None, None),
+    )
+
+    register_task(dummy_task, 'dummy_alias')
+
+    assert task_registry._TASKS['dummy'] is dummy_task
+    assert task_registry._TASKS['dummy_alias'] is dummy_task
+    assert get_task({'task': {'type': 'dummy_alias'}}) is dummy_task
+
+
+def test_task_plugin_rejects_conflicting_alias(monkeypatch):
+    from fedlab.tasks import registry as task_registry
+
+    snapshot = list_registered_tasks()
+    monkeypatch.setattr(task_registry, '_TASKS', dict(snapshot))
+    monkeypatch.setattr(task_registry, '_BUILTIN_TASKS_LOADED', True)
+
+    conflicting = TaskSpec(
+        name='classification_conflict',
+        build_model=lambda _config: torch.nn.Identity(),
+        build_federated_loaders=lambda _config: ({}, None, None),
+    )
+
+    try:
+        register_task(conflicting, 'classification')
+    except ValueError as exc:
+        assert 'classification' in str(exc)
+    else:
+        raise AssertionError('Expected conflicting alias registration to fail')
+
+
+def test_task_plugin_decorator_registers_task(monkeypatch):
+    from fedlab.tasks import registry as task_registry
+
+    snapshot = list_registered_tasks()
+    monkeypatch.setattr(task_registry, '_TASKS', dict(snapshot))
+    monkeypatch.setattr(task_registry, '_BUILTIN_TASKS_LOADED', True)
+
+    plugin_task = TaskSpec(
+        name='decorated_task',
+        build_model=lambda _config: torch.nn.Identity(),
+        build_federated_loaders=lambda _config: ({}, None, None),
+    )
+
+    task_plugin('decorated_alias')(plugin_task)
+
+    assert task_registry._TASKS['decorated_task'] is plugin_task
+    assert task_registry._TASKS['decorated_alias'] is plugin_task

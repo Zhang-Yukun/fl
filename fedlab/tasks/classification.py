@@ -7,6 +7,7 @@ from torch import nn
 from fedlab.datasets.image_classification import build_federated_image_classification_loaders
 from fedlab.modeling.classification import build_model as build_classification_model
 from fedlab.tasks.base import TaskSpec
+from fedlab.tasks.registry import register_task
 from fedlab.utils.metrics import accuracy
 
 
@@ -27,4 +28,12 @@ CLASSIFICATION_TASK = TaskSpec(
     default_optimizer='adam',
     primary_metric='accuracy',
     primary_metric_mode='max',
+)
+
+
+register_task(
+    CLASSIFICATION_TASK,
+    'image_classification',
+    'mnist_classification',
+    'cifar10_classification',
 )

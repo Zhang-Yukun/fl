@@ -8,20 +8,57 @@ import torch
 from torch import nn
 
 from fedlab.tasks.base import LossFn, MetricFn, TaskSpec
-from fedlab.tasks.classification import CLASSIFICATION_TASK
-from fedlab.tasks.forecasting import FORECASTING_TASK
 from fedlab.utils.metrics import accuracy, cross_entropy, mae, mape, mse
 
 
-_TASKS: dict[str, TaskSpec] = {
-    "forecasting": FORECASTING_TASK,
-    "time_series_forecasting": FORECASTING_TASK,
-    "rare_earth_forecasting": FORECASTING_TASK,
-    "classification": CLASSIFICATION_TASK,
-    "image_classification": CLASSIFICATION_TASK,
-    "mnist_classification": CLASSIFICATION_TASK,
-    "cifar10_classification": CLASSIFICATION_TASK,
-}
+_TASKS: dict[str, TaskSpec] = {}
+_BUILTIN_TASKS_LOADED = False
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize registry keys to the canonical lowercase form."""
+
+    return str(name).strip().lower()
+
+
+def register_task(task: TaskSpec, *aliases: str, replace: bool = False) -> TaskSpec:
+    """Register one task plugin and optional aliases."""
+
+    names = (_normalize_name(task.name), *(_normalize_name(alias) for alias in aliases))
+    for name in names:
+        existing = _TASKS.get(name)
+        if existing is not None and existing is not task and not replace:
+            raise ValueError(f"Task alias already registered: {name}")
+    for name in names:
+        _TASKS[name] = task
+    return task
+
+
+def task_plugin(*aliases: str, replace: bool = False):
+    """Decorator for registering one ``TaskSpec`` as a task plugin."""
+
+    def decorator(task: TaskSpec) -> TaskSpec:
+        return register_task(task, *aliases, replace=replace)
+
+    return decorator
+
+
+def list_registered_tasks() -> dict[str, TaskSpec]:
+    """Return a snapshot of currently registered tasks."""
+
+    _ensure_builtin_tasks_registered()
+    return dict(_TASKS)
+
+
+def _ensure_builtin_tasks_registered() -> None:
+    """Load builtin task modules once so they can self-register."""
+
+    global _BUILTIN_TASKS_LOADED
+    if _BUILTIN_TASKS_LOADED:
+        return
+    _BUILTIN_TASKS_LOADED = True
+    from fedlab.tasks import classification as _classification  # noqa: F401
+    from fedlab.tasks import forecasting as _forecasting  # noqa: F401
 
 
 def _loss_mse(_config: dict[str, Any]) -> LossFn:
@@ -90,6 +127,7 @@ def task_type(config: dict[str, Any]) -> str:
 def get_task(config: dict[str, Any]) -> TaskSpec:
     """Return the registered task plugin for one experiment config."""
 
+    _ensure_builtin_tasks_registered()
     name = task_type(config)
     if name not in _TASKS:
         raise ValueError(f"Unknown task type: {name}")
@@ -227,6 +265,7 @@ def annotate_model(model: nn.Module, config: dict[str, Any]) -> nn.Module:
 def get_model_task(model: nn.Module) -> TaskSpec:
     """Resolve the task plugin attached to a model, falling back to forecasting."""
 
+    _ensure_builtin_tasks_registered()
     name = getattr(model, "_federated_task_type", "forecasting")
     if name not in _TASKS:
         raise ValueError(f"Unknown model task type: {name}")

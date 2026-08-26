@@ -9,11 +9,14 @@ from fedlab.tasks.registry import (
     get_model_config,
     get_model_task,
     get_task,
+    list_registered_tasks,
     loss_name,
     metric_names,
     optimizer_name,
     primary_metric,
     primary_metric_mode,
+    register_task,
+    task_plugin,
     task_type,
 )
 
@@ -29,7 +32,10 @@ __all__ = [
     "optimizer_name",
     "get_model_task",
     "get_task",
+    "list_registered_tasks",
     "primary_metric",
     "primary_metric_mode",
+    "register_task",
     "task_type",
+    "task_plugin",
 ]
