@@ -14,6 +14,7 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 
 from fedlab.modeling import build_model
+from fedlab.security.attack_tasks import infer_classification_label, is_classification_attack, time_series_total_variation
 from fedlab.security.registry import (
     attack_primary_metric_direction,
     build_attack_artifact_payload,
@@ -147,77 +148,6 @@ def _resolve_recovery_threshold(config: dict[str, Any], metric: str, data_range:
     """Resolve the configured set-recovery success threshold."""
 
     return resolve_recovery_threshold(config, metric, data_range)
-
-
-def _is_classification_attack(config: dict[str, Any], real_y: torch.Tensor) -> bool:
-    """Return whether the current attack target is an image-classification label batch."""
-
-    task_type = str(config.get("task", {}).get("type", "")).lower()
-    if task_type == "classification":
-        return True
-    return real_y.ndim == 1 and not torch.is_floating_point(real_y)
-
-
-def _classification_num_classes(config: dict[str, Any], model: nn.Module | None = None, sample_x: torch.Tensor | None = None) -> int:
-    """Resolve the classification output dimension used by label inference."""
-
-    configured = int(config.get("data", {}).get("num_classes", 0))
-    if configured > 0:
-        return configured
-    if model is not None and sample_x is not None:
-        with torch.no_grad():
-            return int(model(sample_x).shape[1])
-    raise ValueError("Could not infer classification num_classes for iDLG label inference")
-
-
-def _candidate_label_signal_from_tensor(tensor: torch.Tensor, num_classes: int) -> torch.Tensor | None:
-    """Project one parameter-shaped gradient/update tensor onto a class-wise score vector."""
-
-    detached = tensor.detach()
-    if detached.ndim == 1 and detached.numel() == num_classes:
-        return detached.reshape(num_classes)
-    if detached.ndim >= 2 and detached.shape[0] == num_classes:
-        return detached.reshape(num_classes, -1).sum(dim=1)
-    return None
-
-
-def _infer_classification_label(
-    config: dict[str, Any],
-    model: nn.Module,
-    target: list[torch.Tensor] | StateDict,
-    target_type: str,
-    reference_x: torch.Tensor,
-) -> torch.Tensor | None:
-    """Infer the iDLG classification label from the last-layer gradient/update signal.
-
-    For cross-entropy with batch size 1, the true class has the only negative entry in
-    the last-layer bias gradient. For transmitted one-step updates, the sign flips, so
-    the true class becomes the largest positive entry.
-    """
-
-    if reference_x.shape[0] != 1:
-        return None
-    num_classes = _classification_num_classes(config, model=model, sample_x=reference_x)
-    named_parameters = [(name, parameter) for name, parameter in model.named_parameters() if parameter.requires_grad]
-    candidate_signals: list[tuple[str, torch.Tensor]] = []
-    if target_type == "gradient":
-        for (name, _parameter), tensor in zip(named_parameters, target):
-            signal = _candidate_label_signal_from_tensor(tensor, num_classes)
-            if signal is not None:
-                candidate_signals.append((name, signal))
-    else:
-        for name, _parameter in named_parameters:
-            if name not in target:
-                continue
-            signal = _candidate_label_signal_from_tensor(target[name], num_classes)
-            if signal is not None:
-                candidate_signals.append((name, signal))
-    if not candidate_signals:
-        return None
-    preferred_name, preferred_signal = candidate_signals[-1]
-    del preferred_name
-    inferred = int(torch.argmin(preferred_signal).item()) if target_type == "gradient" else int(torch.argmax(preferred_signal).item())
-    return torch.tensor([inferred], device=reference_x.device, dtype=torch.long)
 
 
 def _attack_loss(config: dict[str, Any], pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -628,10 +558,10 @@ def _attack_loop(
             dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
             optimize_dummy_y = bool(optimize_y)
             inferred_y = None
-            is_classification = _is_classification_attack(config, real_y)
+            is_classification = is_classification_attack(config, real_y)
             if not optimize_dummy_y and is_classification:
                 try:
-                    inferred_y = _infer_classification_label(config, model, prepared_target, resolved_target_type, real_x.to(device))
+                    inferred_y = infer_classification_label(config, model, prepared_target, resolved_target_type, real_x.to(device))
                 except Exception:
                     inferred_y = None
                 if inferred_y is None:
@@ -672,7 +602,7 @@ def _attack_loop(
                         else:
                             dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
                         if tv_weight > 0:
-                            dist = dist + tv_weight * _time_series_total_variation(dummy_x)
+                            dist = dist + tv_weight * time_series_total_variation(dummy_x)
                         holder["loss"] = float(dist.detach().cpu().item())
                         dist.backward()
                         return dist
@@ -686,7 +616,7 @@ def _attack_loop(
                     else:
                         dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
                     if tv_weight > 0:
-                        dist = dist + tv_weight * _time_series_total_variation(dummy_x)
+                        dist = dist + tv_weight * time_series_total_variation(dummy_x)
                     dist_value = float(dist.detach().cpu().item())
                     dist.backward()
                     optimizer.step()
