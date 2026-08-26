@@ -4,7 +4,7 @@ import torch
 from fedlab.modeling import build_model
 from fedlab.engine.training import first_batch_gradient, first_batch_sample
 from fedlab.security.attacks import AttackResult, apply_set_recovery_metrics, dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
-from fedlab.security.registry import register_recovery_metric
+from fedlab.security.registry import register_attack_summary_metric, register_recovery_metric
 from fedlab.utils.serialization import serialize_model, subtract_state
 
 
@@ -119,6 +119,45 @@ def test_gradient_attacks_run_on_vendored_patchtst():
     assert "avg_objective_mse" in summary["methods"]["DLG"]
     assert set(summary["clients"]) == {"Nd2O3", "CeO2"}
     assert summary["clients"]["Nd2O3"]["methods"]["DLG"]["total_count"] == 1
+
+
+def test_attack_summary_uses_registered_primary_metric_direction(monkeypatch):
+    import fedlab.security.registry as registry_module
+
+    snapshot = registry_module.list_registered_attack_summary_metrics()
+    monkeypatch.setattr(registry_module, '_ATTACK_SUMMARY_METRICS', dict(snapshot))
+    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_SUMMARY_METRICS_LOADED', True)
+
+    register_attack_summary_metric(
+        'custom_privacy',
+        lambda result: getattr(result, 'custom_privacy', None),
+        average_key='overall_avg_custom_privacy',
+        best_key='overall_best_custom_privacy',
+        best_objective='max',
+        privacy_direction='lower_is_more_private',
+    )
+
+    result = AttackResult(
+        name='DLG',
+        mse=0.0,
+        psnr=0.0,
+        ssim=0.0,
+        iterations=1,
+        time_seconds=0.0,
+        success=False,
+        success_threshold=0.5,
+        gradient_mse=0.0,
+        target_type='gradient',
+        metric_name='custom_privacy',
+    )
+    result.custom_privacy = 0.8
+
+    summary = summarize_attack_results([result], success_rate_threshold=0.03)
+
+    assert summary['primary_metric_direction'] == 'lower_is_more_private'
+    assert summary['overall_avg_primary_metric_value'] == 0.8
+    assert summary['overall_avg_custom_privacy'] == 0.8
+    assert summary['methods']['DLG']['avg_custom_privacy'] == 0.8
 
 
 def test_update_payload_attacks_run_on_vendored_patchtst():

@@ -14,7 +14,16 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 
 from fedlab.modeling import build_model
-from fedlab.security.registry import compute_recovery_metric_matrix, normalize_recovery_metric_name, resolve_recovery_objective, resolve_recovery_threshold
+from fedlab.security.registry import (
+    attack_primary_metric_direction,
+    compute_recovery_metric_matrix,
+    get_attack_summary_metric,
+    list_registered_attack_summary_metrics,
+    normalize_recovery_metric_name,
+    resolve_recovery_objective,
+    resolve_recovery_threshold,
+    summarize_metric_values,
+)
 from fedlab.tasks import create_loss
 from fedlab.utils.serialization import StateDict, load_serialized
 
@@ -871,6 +880,31 @@ def _mean_finite(values: list[float]) -> float | None:
     return sum(finite) / len(finite)
 
 
+def _apply_registered_summary_metrics(
+    record: dict[str, Any],
+    subset: list[AttackResult],
+    *,
+    prefix: str,
+) -> None:
+    """Attach registry-driven aggregate metrics onto one summary record."""
+
+    metric_specs = {spec.name: spec for spec in list_registered_attack_summary_metrics().values()}
+    for spec in [metric_specs[name] for name in sorted(metric_specs)]:
+        if prefix == 'avg' and not spec.include_per_method:
+            continue
+        if prefix == 'overall' and not spec.include_overall:
+            continue
+        stats = summarize_metric_values(subset, spec.name)
+        average_key = spec.average_key
+        best_key = spec.best_key
+        if average_key is not None and stats['average'] is not None:
+            key = average_key if prefix == 'overall' else average_key.replace('overall_', '')
+            record[key] = stats['average']
+        if best_key is not None and stats['best'] is not None:
+            key = best_key if prefix == 'overall' else best_key.replace('overall_', '')
+            record[key] = stats['best']
+
+
 def _summarize_attack_subset(
     subset: list[AttackResult],
     *,
@@ -884,9 +918,7 @@ def _summarize_attack_subset(
         method_subset = [result for result in subset if result.name == name]
         total = len(method_subset)
         success_count = sum(result.success for result in method_subset)
-        avg_primary_metric_value = _mean_finite([result.mse for result in method_subset])
-        best_primary_metric_value = _mean_finite(sorted([result.mse for result in method_subset])[:1])
-        avg_objective_mse = _mean_finite([result.gradient_mse for result in method_subset])
+        primary_stats = summarize_metric_values(method_subset, primary_metric_name)
         method_record: dict[str, Any] = {
             "primary_metric_name": method_subset[0].metric_name if method_subset else primary_metric_name,
             "target_type": method_subset[0].target_type if method_subset else None,
@@ -894,59 +926,28 @@ def _summarize_attack_subset(
             "total_count": total,
             "success_rate": success_count / total if total else 0.0,
             "success_rate_percent": round((success_count / total if total else 0.0) * 100.0, 2),
-            "avg_primary_metric_value": avg_primary_metric_value,
-            "best_primary_metric_value": best_primary_metric_value,
-            "avg_psnr": _mean_finite([result.psnr for result in method_subset]),
-            "avg_ssim": _mean_finite([result.ssim for result in method_subset]),
-            "best_ssim": _mean_finite(sorted([result.ssim for result in method_subset], reverse=True)[:1]),
-            "avg_objective_mse": avg_objective_mse,
-            "avg_time_seconds": _mean_finite([result.time_seconds for result in method_subset]),
+            "avg_primary_metric_value": primary_stats['average'],
+            "best_primary_metric_value": primary_stats['best'],
             "passes": (success_count / total if total else 0.0) <= success_rate_threshold,
         }
-        budget_values = [result.budget_recovered_fraction for result in method_subset if result.budget_recovered_fraction is not None]
-        coverage_values = [result.coverage_recovered_fraction for result in method_subset if result.coverage_recovered_fraction is not None]
-        if budget_values:
-            method_record["avg_budget_recovered_fraction"] = _mean_finite(budget_values)
-        if coverage_values:
-            method_record["avg_coverage_recovered_fraction"] = _mean_finite(coverage_values)
-        exact_values = [result.exact_target_mse for result in method_subset if result.exact_target_mse is not None]
-        nearest_values = [result.nearest_client_train_mse for result in method_subset if result.nearest_client_train_mse is not None]
-        if exact_values:
-            method_record["avg_exact_target_mse"] = _mean_finite(exact_values)
-        if nearest_values:
-            method_record["avg_nearest_client_train_mse"] = _mean_finite(nearest_values)
+        _apply_registered_summary_metrics(method_record, method_subset, prefix='avg')
         methods[name] = method_record
 
     overall_success_rate = attack_success_rate(subset)
-    overall_avg_primary_metric_value = _mean_finite([result.mse for result in subset])
-    overall_best_primary_metric_value = _mean_finite(sorted([result.mse for result in subset])[:1])
+    primary_stats = summarize_metric_values(subset, primary_metric_name)
     overall_record: dict[str, Any] = {
         "primary_metric_name": primary_metric_name,
-        "primary_metric_direction": "lower_is_more_private" if primary_metric_name == "budget_recovered_fraction" else "higher_is_more_private",
+        "primary_metric_direction": attack_primary_metric_direction(primary_metric_name),
         "target_type": subset[0].target_type if subset else None,
         "success_rate_threshold": success_rate_threshold,
-        "overall_avg_primary_metric_value": overall_avg_primary_metric_value,
-        "overall_best_primary_metric_value": overall_best_primary_metric_value,
-        "overall_avg_psnr": _mean_finite([result.psnr for result in subset]),
-        "overall_avg_ssim": _mean_finite([result.ssim for result in subset]),
-        "overall_avg_objective_mse": _mean_finite([result.gradient_mse for result in subset]),
+        "overall_avg_primary_metric_value": primary_stats['average'],
+        "overall_best_primary_metric_value": primary_stats['best'],
         "overall_success_rate": overall_success_rate,
         "overall_success_rate_percent": round(overall_success_rate * 100.0, 2),
         "overall_passes": overall_success_rate <= success_rate_threshold,
         "methods": methods,
     }
-    overall_exact_values = [result.exact_target_mse for result in subset if result.exact_target_mse is not None]
-    overall_nearest_values = [result.nearest_client_train_mse for result in subset if result.nearest_client_train_mse is not None]
-    overall_budget_values = [result.budget_recovered_fraction for result in subset if result.budget_recovered_fraction is not None]
-    overall_coverage_values = [result.coverage_recovered_fraction for result in subset if result.coverage_recovered_fraction is not None]
-    if overall_exact_values:
-        overall_record["overall_avg_exact_target_mse"] = _mean_finite(overall_exact_values)
-    if overall_nearest_values:
-        overall_record["overall_avg_nearest_client_train_mse"] = _mean_finite(overall_nearest_values)
-    if overall_budget_values:
-        overall_record["overall_avg_budget_recovered_fraction"] = _mean_finite(overall_budget_values)
-    if overall_coverage_values:
-        overall_record["overall_avg_coverage_recovered_fraction"] = _mean_finite(overall_coverage_values)
+    _apply_registered_summary_metrics(overall_record, subset, prefix='overall')
     return overall_record
 
 

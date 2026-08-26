@@ -5,11 +5,16 @@ from fedlab.security.registry import (
     configured_attack_names,
     list_registered_attacks,
     list_registered_recovery_metrics,
+    attack_primary_metric_direction,
+    get_attack_summary_metric,
+    list_registered_attack_summary_metrics,
     register_attack,
+    register_attack_summary_metric,
     register_recovery_metric,
     resolve_recovery_objective,
     resolve_recovery_threshold,
     run_attacks,
+    summarize_metric_values,
 )
 
 
@@ -18,6 +23,14 @@ def test_builtin_attacks_are_registered():
 
     assert 'dlg' in registered
     assert 'idlg' in registered
+
+
+def test_builtin_attack_summary_metrics_are_registered():
+    registered = list_registered_attack_summary_metrics()
+
+    assert {'reconstruction_mse', 'nearest_client_train_mse', 'budget_recovered_fraction'} <= set(registered)
+    assert attack_primary_metric_direction('reconstruction_mse') == 'higher_is_more_private'
+    assert attack_primary_metric_direction('budget_recovered_fraction') == 'lower_is_more_private'
 
 
 def test_builtin_recovery_metrics_are_registered():
@@ -95,3 +108,30 @@ def test_register_recovery_metric_supports_custom_metric(monkeypatch):
     assert matrix.shape == (2, 3)
     assert resolve_recovery_objective('auto', 'custom_zero') == 'min'
     assert resolve_recovery_threshold({'attack': {}}, 'custom_zero', 1.0) == 0.25
+
+
+def test_register_attack_summary_metric_supports_custom_metric(monkeypatch):
+    import fedlab.security.registry as registry_module
+
+    snapshot = list_registered_attack_summary_metrics()
+    monkeypatch.setattr(registry_module, '_ATTACK_SUMMARY_METRICS', dict(snapshot))
+    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_SUMMARY_METRICS_LOADED', True)
+
+    register_attack_summary_metric(
+        'custom_score',
+        lambda result: getattr(result, 'custom_score', None),
+        average_key='overall_avg_custom_score',
+        best_key='overall_best_custom_score',
+        best_objective='max',
+        privacy_direction='lower_is_more_private',
+    )
+
+    class Dummy:
+        custom_score = 0.75
+
+    stats = summarize_metric_values([Dummy()], 'custom_score')
+
+    assert get_attack_summary_metric('custom_score').best_objective == 'max'
+    assert stats['average'] == 0.75
+    assert stats['best'] == 0.75
+    assert attack_primary_metric_direction('custom_score') == 'lower_is_more_private'

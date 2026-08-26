@@ -14,6 +14,23 @@ RecoveryMatrixFn = Callable[[torch.Tensor, torch.Tensor, float], torch.Tensor]
 RecoveryThresholdFn = Callable[[dict[str, Any], float], float]
 
 
+AttackValueGetter = Callable[[Any], float | None]
+
+
+@dataclass(frozen=True)
+class AttackSummaryMetricSpec:
+    """One registered attack-summary metric definition."""
+
+    name: str
+    value_getter: AttackValueGetter
+    average_key: str | None = None
+    best_key: str | None = None
+    best_objective: str = 'min'
+    include_per_method: bool = True
+    include_overall: bool = True
+    privacy_direction: str | None = None
+
+
 @dataclass(frozen=True)
 class RecoveryMetricSpec:
     """One registered set-recovery metric definition."""
@@ -29,6 +46,8 @@ _ATTACK_ORDER: list[str] = []
 _BUILTIN_ATTACKS_LOADED = False
 _RECOVERY_METRICS: dict[str, RecoveryMetricSpec] = {}
 _BUILTIN_RECOVERY_METRICS_LOADED = False
+_ATTACK_SUMMARY_METRICS: dict[str, AttackSummaryMetricSpec] = {}
+_BUILTIN_ATTACK_SUMMARY_METRICS_LOADED = False
 
 
 def _normalize_name(name: str) -> str:
@@ -150,6 +169,187 @@ def run_attacks(
             )
         )
     return results
+
+
+def register_attack_summary_metric(
+    name: str,
+    value_getter: AttackValueGetter,
+    *,
+    average_key: str | None = None,
+    best_key: str | None = None,
+    best_objective: str = 'min',
+    include_per_method: bool = True,
+    include_overall: bool = True,
+    privacy_direction: str | None = None,
+    aliases: tuple[str, ...] = (),
+    replace: bool = False,
+) -> AttackSummaryMetricSpec:
+    """Register one summary metric derived from ``AttackResult`` fields."""
+
+    normalized_name = _normalize_name(name)
+    if best_objective not in {'min', 'max'}:
+        raise ValueError(f'Unsupported summary metric best_objective: {best_objective}')
+    spec = AttackSummaryMetricSpec(
+        name=normalized_name,
+        value_getter=value_getter,
+        average_key=average_key,
+        best_key=best_key,
+        best_objective=best_objective,
+        include_per_method=bool(include_per_method),
+        include_overall=bool(include_overall),
+        privacy_direction=privacy_direction,
+    )
+    names = (normalized_name, *(_normalize_name(alias) for alias in aliases))
+    for candidate in names:
+        existing = _ATTACK_SUMMARY_METRICS.get(candidate)
+        if existing is not None and existing != spec and not replace:
+            raise ValueError(f'Attack summary metric alias already registered: {candidate}')
+    for candidate in names:
+        _ATTACK_SUMMARY_METRICS[candidate] = spec
+    return spec
+
+
+def attack_summary_metric_plugin(
+    name: str,
+    *,
+    average_key: str | None = None,
+    best_key: str | None = None,
+    best_objective: str = 'min',
+    include_per_method: bool = True,
+    include_overall: bool = True,
+    privacy_direction: str | None = None,
+    aliases: tuple[str, ...] = (),
+    replace: bool = False,
+):
+    """Decorator for registering one attack summary metric."""
+
+    def decorator(value_getter: AttackValueGetter) -> AttackValueGetter:
+        register_attack_summary_metric(
+            name,
+            value_getter,
+            average_key=average_key,
+            best_key=best_key,
+            best_objective=best_objective,
+            include_per_method=include_per_method,
+            include_overall=include_overall,
+            privacy_direction=privacy_direction,
+            aliases=aliases,
+            replace=replace,
+        )
+        return value_getter
+
+    return decorator
+
+
+def _ensure_builtin_attack_summary_metrics_registered() -> None:
+    """Register builtin attack summary metrics once."""
+
+    global _BUILTIN_ATTACK_SUMMARY_METRICS_LOADED
+    if _BUILTIN_ATTACK_SUMMARY_METRICS_LOADED:
+        return
+    _BUILTIN_ATTACK_SUMMARY_METRICS_LOADED = True
+    register_attack_summary_metric(
+        'reconstruction_mse',
+        lambda result: getattr(result, 'mse', None) if getattr(result, 'metric_name', None) == 'reconstruction_mse' else getattr(result, 'exact_target_mse', None),
+        average_key='overall_avg_exact_target_mse',
+        privacy_direction='higher_is_more_private',
+    )
+    register_attack_summary_metric(
+        'exact_target_mse',
+        lambda result: getattr(result, 'exact_target_mse', None),
+        average_key='overall_avg_exact_target_mse',
+        privacy_direction=None,
+    )
+    register_attack_summary_metric(
+        'nearest_client_train_mse',
+        lambda result: getattr(result, 'nearest_client_train_mse', None),
+        average_key='overall_avg_nearest_client_train_mse',
+        privacy_direction='higher_is_more_private',
+    )
+    register_attack_summary_metric(
+        'budget_recovered_fraction',
+        lambda result: getattr(result, 'budget_recovered_fraction', None),
+        average_key='overall_avg_budget_recovered_fraction',
+        privacy_direction='lower_is_more_private',
+        best_objective='max',
+    )
+    register_attack_summary_metric(
+        'coverage_recovered_fraction',
+        lambda result: getattr(result, 'coverage_recovered_fraction', None),
+        average_key='overall_avg_coverage_recovered_fraction',
+        privacy_direction='lower_is_more_private',
+        best_objective='max',
+    )
+    register_attack_summary_metric(
+        'psnr',
+        lambda result: getattr(result, 'psnr', None),
+        average_key='overall_avg_psnr',
+        best_key='overall_best_psnr',
+        best_objective='max',
+        privacy_direction=None,
+    )
+    register_attack_summary_metric(
+        'ssim',
+        lambda result: getattr(result, 'ssim', None),
+        average_key='overall_avg_ssim',
+        best_key='overall_best_ssim',
+        best_objective='max',
+        privacy_direction=None,
+    )
+    register_attack_summary_metric(
+        'objective_mse',
+        lambda result: getattr(result, 'gradient_mse', None),
+        average_key='overall_avg_objective_mse',
+        privacy_direction=None,
+    )
+    register_attack_summary_metric(
+        'time_seconds',
+        lambda result: getattr(result, 'time_seconds', None),
+        average_key='overall_avg_time_seconds',
+        privacy_direction=None,
+    )
+
+
+def list_registered_attack_summary_metrics() -> dict[str, AttackSummaryMetricSpec]:
+    """Return a snapshot of registered attack summary metrics."""
+
+    _ensure_builtin_attack_summary_metrics_registered()
+    return dict(_ATTACK_SUMMARY_METRICS)
+
+
+def get_attack_summary_metric(name: str) -> AttackSummaryMetricSpec:
+    """Return one registered attack summary metric spec."""
+
+    _ensure_builtin_attack_summary_metrics_registered()
+    normalized = _normalize_name(name)
+    if normalized not in _ATTACK_SUMMARY_METRICS:
+        raise ValueError(f'Unknown attack summary metric: {name}')
+    return _ATTACK_SUMMARY_METRICS[normalized]
+
+
+def attack_primary_metric_direction(name: str) -> str:
+    """Return the privacy interpretation for one primary attack metric."""
+
+    spec = get_attack_summary_metric(name)
+    if spec.privacy_direction is not None:
+        return spec.privacy_direction
+    return 'higher_is_more_private'
+
+
+def summarize_metric_values(results: list[Any], metric_name: str) -> dict[str, float | None]:
+    """Compute average/best summary stats for one registered attack metric."""
+
+    spec = get_attack_summary_metric(metric_name)
+    values = [spec.value_getter(result) for result in results]
+    finite = [float(value) for value in values if value is not None and math.isfinite(float(value))]
+    average = None if not finite else (sum(finite) / len(finite))
+    if not finite:
+        best = None
+    elif spec.best_objective == 'max':
+        best = max(finite)
+    else:
+        best = min(finite)
+    return {'average': average, 'best': best}
 
 
 def _attack_threshold(config: dict[str, Any]) -> float:
