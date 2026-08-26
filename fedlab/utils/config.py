@@ -99,29 +99,11 @@ _RUNTIME_DEFAULTS = {
 
 
 _COMMON_FEDERATED_KEYS = {"algorithm", "rounds", "local_epochs", "local_steps"}
-_ALGORITHM_FEDERATED_KEYS = {
-    "compressed_fedavg": {"topk_fraction"},
-    "sparse_fedavg": {"topk_fraction"},
-    "dp_topk_fedavg": {"topk_fraction"},
-    "randomk_fedavg": {"topk_fraction", "randomk_seed"},
-    "soteriafl": {"topk_fraction", "randomk_seed"},
-    "secure_quantized_fedavg": {"quantization_dtype", "quantization_stochastic_rounding", "quantization_seed"},
-    "qsgd_fedavg": {"qsgd_levels", "quantization_seed"},
-    "sign_fedavg": set(),
-    "fedavg": set(),
-    "fedaware": set(),
-    "adaptive_clipped_rdp_fedavg": set(),
-    "ega_fedavg": {"quantization_seed"},
-}
-_ALGORITHM_ROOT_BLOCKS = {
-    "fedaware": {"fedaware"},
-    "adaptive_clipped_rdp_fedavg": {"adaptive_clipped_rdp"},
-    "ega_fedavg": {"ega"},
-}
-_ALGORITHM_PRIVACY_USERS = {"dp_topk_fedavg", "soteriafl", "secure_quantized_fedavg"}
 
 import yaml
 from loguru import logger
+
+from fedlab.federated.methods import get_registered_method, list_registered_methods
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -212,30 +194,33 @@ def _validate_no_deprecated_schedule_keys(config: dict[str, Any]) -> None:
 
 
 def _sanitize_algorithm_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Drop algorithm-specific config blocks that do not apply to the active method."""
+    """Drop method-specific config blocks that do not apply to the active plugin."""
 
     result = copy.deepcopy(config)
     federated_cfg = result.get("federated")
     if not isinstance(federated_cfg, dict):
         return result
     algorithm = str(federated_cfg.get("algorithm", "")).lower()
-    if not algorithm or algorithm not in _ALGORITHM_FEDERATED_KEYS:
+    if not algorithm:
+        return result
+    try:
+        method = get_registered_method(algorithm)
+    except ValueError:
         return result
 
-    allowed_federated_keys = _COMMON_FEDERATED_KEYS | _ALGORITHM_FEDERATED_KEYS.get(algorithm, set())
+    allowed_federated_keys = _COMMON_FEDERATED_KEYS | set(method.config_spec.federated_keys)
     result["federated"] = {
         key: copy.deepcopy(value)
         for key, value in federated_cfg.items()
         if key in allowed_federated_keys
     }
 
-    active_blocks = _ALGORITHM_ROOT_BLOCKS.get(algorithm, set())
-    for block_name in _ALGORITHM_ROOT_BLOCKS.values():
-        for key in block_name:
-            if key not in active_blocks:
-                result.pop(key, None)
+    all_root_blocks = {block for item in list_registered_methods() for block in item.config_spec.root_blocks}
+    for block_name in all_root_blocks:
+        if block_name not in method.config_spec.root_blocks:
+            result.pop(block_name, None)
 
-    if algorithm not in _ALGORITHM_PRIVACY_USERS:
+    if not method.config_spec.uses_privacy_block:
         result.pop("privacy", None)
 
     return result

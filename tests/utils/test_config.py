@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from fedlab.federated.methods import FederatedMethod, MethodConfigSpec, register_method
 from fedlab.utils.config import load_config
 
 
@@ -94,3 +95,47 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["attack"]["recovery_success_metric"] == "mse"
     assert config["grpc"]["max_message_mb"] == 256.0
     assert config["artifacts"]["config_formats"] == ["yaml"]
+
+
+def test_load_config_uses_registered_method_config_metadata(monkeypatch):
+    from fedlab.federated.methods import registry as method_registry
+
+    snapshot = dict(method_registry._METHOD_REGISTRY)
+    monkeypatch.setattr(method_registry, '_METHOD_REGISTRY', dict(snapshot))
+
+    class CustomMetaMethod(FederatedMethod):
+        name = 'custom_meta'
+        config_spec = MethodConfigSpec(
+            federated_keys=frozenset({'custom_fraction'}),
+            root_blocks=frozenset({'custom_block'}),
+            uses_privacy_block=True,
+        )
+
+        def client_update(self, **kwargs):
+            return None
+
+        def aggregate(self, **kwargs):
+            return []
+
+        def extract_attack_payload(self, **kwargs):
+            return None
+
+    register_method('custom_meta', CustomMetaMethod, compressed=False, description='custom test method')
+
+    config = load_config(
+        Path(__file__).parents[2] / 'configs' / 'test.yaml',
+        [
+            'federated.algorithm=custom_meta',
+            'federated.custom_fraction=0.125',
+            'federated.topk_fraction=0.25',
+            'custom_block.enabled=true',
+            'fedaware.alpha=0.7',
+            'privacy.clip_norm=2.0',
+        ],
+    )
+
+    assert config['federated']['custom_fraction'] == 0.125
+    assert 'topk_fraction' not in config['federated']
+    assert 'custom_block' in config
+    assert 'fedaware' not in config
+    assert config['privacy']['clip_norm'] == 2.0

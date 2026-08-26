@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import Any
 
-from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
+from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities, MethodConfigSpec
 from fedlab.federated.methods.registry import federated_method
 from fedlab.federated.protocol import build_upload_payload_state, derive_update_from_upload_payload, resolve_upload_mode, weighted_protocol_base_state
 from fedlab.utils.aggregation import fedaware_weights
@@ -74,6 +74,7 @@ class FedAvgMethod(_DenseFedAvgMethod):
 
     name = 'fedavg'
     capabilities = MethodCapabilities(compressed=False, implemented=True, description='Standard dense FedAvg baseline')
+    config_spec = MethodConfigSpec()
 
     def aggregate(self, *, server, results, round_base_state=None, round_index: int = 0, round_context=None, **_: Any) -> list[float]:
         """Aggregate dense client payloads with sample-size-weighted FedAvg."""
@@ -107,6 +108,7 @@ class FedAwareMethod(_DenseFedAvgMethod):
 
     name = 'fedaware'
     capabilities = MethodCapabilities(compressed=False, implemented=True, description='Adaptive weighted dense FedAvg aggregation')
+    config_spec = MethodConfigSpec(root_blocks=frozenset({'fedaware'}))
 
     def aggregate(self, *, server, results, round_base_state=None, round_index: int = 0, round_context=None, **_: Any) -> list[float]:
         """Aggregate dense updates with FedAware's learned aggregation weights."""
@@ -152,6 +154,7 @@ class AdaptiveClippedRdpFedAvgMethod(_DenseFedAvgMethod):
 
     name = 'adaptive_clipped_rdp_fedavg'
     capabilities = MethodCapabilities(compressed=False, implemented=True, description='Dense FedAvg with adaptive clipping and RDP accounting')
+    config_spec = MethodConfigSpec(root_blocks=frozenset({'adaptive_clipped_rdp'}))
 
     def configure_server(self, server: Any) -> None:
         """Initialize the adaptive RDP accountant on the server."""

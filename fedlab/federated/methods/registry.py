@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from fedlab.federated.methods.base import FederatedMethod
+from fedlab.federated.methods.base import FederatedMethod, MethodConfigSpec
 
 
 @dataclass(frozen=True)
@@ -16,9 +16,21 @@ class RegisteredMethod:
     factory: Callable[[], FederatedMethod]
     compressed: bool
     description: str
+    config_spec: MethodConfigSpec
 
 
 _METHOD_REGISTRY: dict[str, RegisteredMethod] = {}
+
+
+def _resolve_config_spec(factory: Callable[[], FederatedMethod]) -> MethodConfigSpec:
+    spec = getattr(factory, 'config_spec', MethodConfigSpec())
+    if isinstance(spec, MethodConfigSpec):
+        return spec
+    return MethodConfigSpec(
+        federated_keys=frozenset(getattr(spec, 'federated_keys', ())),
+        root_blocks=frozenset(getattr(spec, 'root_blocks', ())),
+        uses_privacy_block=bool(getattr(spec, 'uses_privacy_block', False)),
+    )
 
 
 def register_method(name: str, factory: Callable[[], FederatedMethod], *, compressed: bool = False, description: str = "") -> None:
@@ -37,6 +49,7 @@ def register_method(name: str, factory: Callable[[], FederatedMethod], *, compre
         factory=factory,
         compressed=bool(compressed),
         description=str(description),
+        config_spec=_resolve_config_spec(factory),
     )
 
 

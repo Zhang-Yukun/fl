@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
+from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities, MethodConfigSpec
 from fedlab.federated.methods.registry import federated_method
 from fedlab.federated.protocol import resolve_download_mode, weighted_protocol_base_state
 from fedlab.modeling import build_model
@@ -167,6 +167,10 @@ class EGAFedAvgMethod(FederatedMethod):
         return True
 
     capabilities = MethodCapabilities(compressed=False, implemented=True, description="Encoded gradient aggregation FedAvg variant")
+    config_spec = MethodConfigSpec(
+        federated_keys=frozenset({"quantization_seed"}),
+        root_blocks=frozenset({"ega"}),
+    )
 
     def configure_client(self, client: Any) -> None:
         """Initialize client-side EGA bookkeeping; codec bootstrap comes from the server."""

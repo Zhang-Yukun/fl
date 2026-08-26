@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
+from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities, MethodConfigSpec
 from fedlab.federated.methods.registry import federated_method
 from fedlab.federated.protocol import build_download_payload_state, reconstruct_model_from_download_payload, resolve_download_mode, weighted_protocol_base_state
 from fedlab.utils.serialization import (
@@ -38,6 +38,10 @@ class SecureQuantizedFedAvgMethod(_QuantizedDenseMethod):
 
     name = 'secure_quantized_fedavg'
     capabilities = MethodCapabilities(compressed=False, implemented=True, description='Dense quantized upload FedAvg')
+    config_spec = MethodConfigSpec(
+        federated_keys=frozenset({'quantization_dtype', 'quantization_stochastic_rounding', 'quantization_seed'}),
+        uses_privacy_block=True,
+    )
 
     def uses_custom_download_transport(self) -> bool:
         """Secure quantized FedAvg manages its own quantized download payload."""
@@ -139,6 +143,7 @@ class SignFedAvgMethod(_QuantizedDenseMethod):
 
     name = 'sign_fedavg'
     capabilities = MethodCapabilities(compressed=False, implemented=True, description='Sign-based dense upload FedAvg')
+    config_spec = MethodConfigSpec()
 
     def client_update(self, *, local_state, global_state, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, **_: Any):
         """Return a sign-compressed dense update payload from one local model state."""
@@ -182,6 +187,7 @@ class QsgdFedAvgMethod(_QuantizedDenseMethod):
 
     name = 'qsgd_fedavg'
     capabilities = MethodCapabilities(compressed=False, implemented=True, description='QSGD quantized dense upload FedAvg')
+    config_spec = MethodConfigSpec(federated_keys=frozenset({'qsgd_levels', 'quantization_seed'}))
 
     def client_update(
         self,

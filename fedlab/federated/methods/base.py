@@ -21,6 +21,15 @@ class MethodCapabilities:
     description: str = ""
 
 
+@dataclass(frozen=True)
+class MethodConfigSpec:
+    """Config metadata exposed by one federated algorithm plugin."""
+
+    federated_keys: frozenset[str] = frozenset()
+    root_blocks: frozenset[str] = frozenset()
+    uses_privacy_block: bool = False
+
+
 class FederatedMethod(ABC):
     """Abstract interface implemented by all federated algorithm modules.
 
@@ -30,6 +39,7 @@ class FederatedMethod(ABC):
 
     name: ClassVar[str]
     capabilities: ClassVar[MethodCapabilities] = MethodCapabilities()
+    config_spec: ClassVar[MethodConfigSpec] = MethodConfigSpec()
 
     def configure_client(self, client: Any) -> None:
         """Attach algorithm-specific state to a client before training starts."""

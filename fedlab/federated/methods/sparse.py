@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities
+from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities, MethodConfigSpec
 from fedlab.federated.methods.registry import federated_method
 from fedlab.federated.protocol import resolve_upload_mode, weighted_protocol_base_state
 from fedlab.utils.serialization import (
@@ -101,6 +101,7 @@ class CompressedFedAvgMethod(_SparseFedAvgMethod):
 
     name = 'compressed_fedavg'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Legacy top-k sparse FedAvg alias')
+    config_spec = MethodConfigSpec(federated_keys=frozenset({'topk_fraction'}))
 
     def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client=None, **_: Any):
         """Return a Top-k sparse payload from one local model state."""
@@ -129,6 +130,7 @@ class SparseFedAvgMethod(_SparseFedAvgMethod):
 
     name = 'sparse_fedavg'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Top-k sparse FedAvg baseline')
+    config_spec = MethodConfigSpec(federated_keys=frozenset({'topk_fraction'}))
 
     def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client=None, **_: Any):
         """Return a Top-k sparse payload from one local model state."""
@@ -157,6 +159,7 @@ class DpTopkFedAvgMethod(_SparseFedAvgMethod):
 
     name = 'dp_topk_fedavg'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Top-k sparse FedAvg with DP preprocessing')
+    config_spec = MethodConfigSpec(federated_keys=frozenset({'topk_fraction'}), uses_privacy_block=True)
 
     def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, **_: Any):
         """Return a DP-processed Top-k sparse payload from one local model state."""
@@ -191,6 +194,7 @@ class RandomkFedAvgMethod(_SparseFedAvgMethod):
 
     name = 'randomk_fedavg'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Random-k sparse FedAvg baseline')
+    config_spec = MethodConfigSpec(federated_keys=frozenset({'topk_fraction', 'randomk_seed'}))
 
     def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, round_index: int, **_: Any):
         """Return a Random-k sparse payload from one local model state."""
@@ -219,6 +223,7 @@ class SoteriaFLMethod(_SparseFedAvgMethod):
 
     name = 'soteriafl'
     capabilities = MethodCapabilities(compressed=True, implemented=True, description='Private random-k sparse upload baseline')
+    config_spec = MethodConfigSpec(federated_keys=frozenset({'topk_fraction', 'randomk_seed'}), uses_privacy_block=True)
 
     def client_update(self, *, model, global_state, received_global_state=None, common: dict[str, Any], evaluation_kwargs: dict[str, Any], result_cls, client, round_index: int, **_: Any):
         """Return a DP-processed Random-k sparse payload from one local model state."""
