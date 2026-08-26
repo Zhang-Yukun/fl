@@ -126,7 +126,7 @@ This block is interpreted by the concrete model implementation. Common fields in
 | `quantization_seed` | int, optional | Quantization random seed. |
 | `qsgd_levels` | int, optional | Number of QSGD quantization levels. |
 
-Currently integrated method names are `fedavg`, `compressed_fedavg`, `sparse_fedavg`, `dp_topk_fedavg`, `randomk_fedavg`, `soteriafl`, `secure_quantized_fedavg`, `qsgd_fedavg`, `sign_fedavg`, `fedaware`, `adaptive_clipped_rdp_fedavg`, and `ega_fedavg`.
+Currently integrated and retained federated method names are `fedavg`, `adaptive_clipped_rdp_fedavg`, `sparse_fedavg`, `randomk_fedavg`, `sign_fedavg`, `qsgd_fedavg`, `secure_quantized_fedavg`, and `ega_fedavg`. Centralized training uses the separate `centralized` entry path.
 
 #### `transport`
 
@@ -140,27 +140,32 @@ Currently integrated method names are `fedavg`, `compressed_fedavg`, `sparse_fed
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `enabled` | bool | Enable or disable attacks. |
-| `target_type` | string | Attack target type: `gradient` or `update_payload`. |
-| `reference_metric` | string | Primary attack metric: `reconstruction_mse` or `nearest_client_train_mse`. |
-| `report_metrics` | list[string] | Extra attack metrics to expose. By default, `update_payload` only reports `nearest_client_train_mse`. |
+| `target_type` | string | Attack target type. Currently only `update_payload` is supported. |
+| `reference_metric` | string | Legacy compatibility field controlling whether `reconstruction_mse` or `nearest_client_train_mse` style references are exposed. |
+| `report_metrics` | list[string] | Extra reference metrics to expose. Default `auto` only keeps `nearest_client_train_mse`. |
 | `steps` | int | Optimization steps per attack run. |
 | `lr` | float | Attack learning rate. |
-| `optimizer` | string | Attack optimizer, currently `adam` or `lbfgs`. |
+| `optimizer` | string | Attack optimizer. Currently only `adam` is supported. |
 | `restarts` | int | Random restarts per attack run. |
-| `lbfgs_history_size` | int | `lbfgs` history size. |
 | `input_clip` | float, optional | Optional clamp bound for dummy inputs. |
 | `target_clip` | float, optional | Optional clamp bound for dummy targets in DLG. |
 | `tv_weight` | float, optional | Total-variation regularizer weight. |
 | `seed` | int, optional | Attack seed. |
-| `success_mse_threshold` | float | Per-attack MSE success threshold. |
-| `success_ssim_threshold` | float, optional | Optional SSIM threshold used only when the primary metric is `reconstruction_mse`. |
+| `recovery_match_metric` | string | Metric used to build the one-to-one matching matrix. Supports `mse`, `psnr`, and `ssim`. |
+| `recovery_match_objective` | string | Matching objective direction: `auto`, `min`, or `max`. |
+| `recovery_success_metric` | string | Metric used to decide whether one matched sample is recovered. Supports `mse`, `psnr`, and `ssim`. |
+| `recovery_success_objective` | string | Success objective direction: `auto`, `min`, or `max`. |
+| `recovery_success_threshold` | float, optional | Explicit recovery-success threshold. When omitted, the default for the selected success metric is used. |
+| `success_mse_threshold` | float | Default MSE threshold, also used when deriving recovery defaults. |
+| `success_ssim_threshold` | float, optional | Default SSIM threshold, also used when deriving recovery defaults. |
 | `success_rate_threshold` | float | Aggregate pass/fail threshold used in attack summaries. |
 | `data_range` | float | Data range used by PSNR and SSIM. |
 | `client_selection` | string | Attacked-client selection strategy: `all`, `first`, or `round_robin`. |
 | `clients_per_round` | int | Number of attacked clients on each attacked round. |
 | `frequency_rounds` | int | Attack frequency in communication rounds. |
-| `sample_count` | int | Number of independent attack evaluations per attacked client on that round, each using a different `batch_index`. |
-| `max_samples` | int | Number of samples jointly reconstructed in one attack evaluation. |
+| `sample_count` | string or int | Number of independent attack evaluations per attacked client. `auto` currently resolves to `1`. |
+| `max_samples` | string or int | Number of samples jointly reconstructed in one attack evaluation. `auto` uses the attacked client's training-sample count. |
+| `max_samples_cap` | int | Cap applied when `max_samples=auto`. |
 | `model_mode` | string | Attack model mode, `train` or `eval`. |
 | `local_optimizer` | string | Assumed local optimizer for `update_payload` inversion. |
 | `local_lr` | float | Assumed local learning rate for `update_payload` inversion. |
@@ -221,12 +226,6 @@ Used by DP / privacy-aware methods only. Common fields include:
 | `delta` | float | DP delta. |
 | `seed` | int | Random seed. |
 
-#### `fedaware`
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `beta` | float, optional | Server-side FedAware blending factor. |
-
 #### `ega`
 
 EGA has a larger dedicated config surface. Use the active `configs/*ega*.yaml` files as the authoritative source for the exact field set. Common fields cover encoding width, codebook size, quantization width, pretraining schedule, pretraining optimizer settings, and round-context options.
@@ -245,6 +244,7 @@ EGA has a larger dedicated config surface. Use the active `configs/*ega*.yaml` f
 | `oracle_model.pt` | Saved only for federated runs with oracle evaluation. |
 | `attack_results.json` | One JSON record per DLG/iDLG attack. Empty or missing when attacks are disabled. |
 | `attack_artifacts/` | Raw tensor artifacts for attack reconstruction outputs. |
+| `saved_updates/` | Server-captured update payload snapshots saved at the configured attack frequency for offline replay. |
 | `snapshots/round_xxxx/` | Intermediate snapshots written when `artifacts.save_every_rounds > 0`. |
 | `resume_state.pt` | Snapshot resume state, only inside snapshot directories. |
 
@@ -317,11 +317,11 @@ EGA has a larger dedicated config surface. Use the active `configs/*ega*.yaml` f
 | `total_transport_bytes` | int | Cumulative actual total bytes. |
 | `total_transport_upload_overhead_bytes` | int | Cumulative upload overhead bytes. |
 | `total_transport_download_overhead_bytes` | int | Cumulative download overhead bytes. |
-| `attack_target_type` | string | Attack target type. |
-| `attack_primary_metric_name` | string | Primary metric used by the attack summary. |
-| `attack_primary_metric_direction` | string | Currently always `higher_is_more_private`. |
+| `attack_target_type` | string | Attack target type. Currently `update_payload`. |
+| `attack_primary_metric_name` | string | Primary metric used by the attack summary. The default is `budget_recovered_fraction`. |
+| `attack_primary_metric_direction` | string | Privacy interpretation direction derived from the primary metric. For `budget_recovered_fraction` it is `lower_is_more_private`. |
 | `attack_overall_avg_primary_metric_value` | float or null | Average primary attack metric across all attack records. |
-| `attack_overall_best_primary_metric_value` | float or null | Best primary attack metric across all attack records. For MSE-like metrics, this is the minimum. |
+| `attack_overall_best_primary_metric_value` | float or null | Best primary attack metric across all attack records. For recovery-rate metrics, this is the maximum. |
 | `attack_success_rate` | float | Aggregate attack success rate. |
 | `attack_evaluations` | int | Number of attack records. |
 | `attack_summary` | object | Nested attack summary, described below. |
@@ -403,24 +403,32 @@ Each element is one DLG or iDLG result.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `name` | string | Attack name, usually `DLG` or `iDLG`. |
-| `primary_metric_name` | string | Primary attack metric name. |
+| `primary_metric_name` | string | Primary attack metric name. The default is `budget_recovered_fraction`. |
 | `primary_metric_value` | float or null | Primary attack metric value. |
-| `psnr` | float or null | PSNR against the exact attacked sample. |
-| `ssim` | float or null | SSIM against the exact attacked sample. |
+| `psnr` | float or null | PSNR against the exact selected reference sample. |
+| `ssim` | float or null | SSIM against the exact selected reference sample. |
 | `iterations` | int | Attack optimization steps. |
 | `time_seconds` | float | Attack runtime. |
-| `success` | bool | Whether this attack passed the configured success rule. |
+| `success` | bool | Whether this attack satisfied the configured recovery rule. |
 | `success_threshold` | float | Per-attack success threshold. |
 | `objective_mse` | float | Optimization objective value. |
-| `target_type` | string | `gradient` or `update_payload`. |
-| `exact_target_mse` | float, optional | MSE against the exact attacked sample. |
+| `target_type` | string | Currently `update_payload`. |
+| `exact_target_mse` | float, optional | MSE against the exact selected attack batch. |
 | `nearest_client_train_mse` | float, optional | MSE against the nearest sample in the attacked client's training set. |
 | `nearest_client_train_indices` | list[int], optional | Indices of those nearest training samples. |
+| `matched_reference_indices` | list[int], optional | One-to-one matched reference indices after assignment. |
+| `matched_reference_metric_name` | string, optional | Metric used for recovery success on the matched references. |
+| `matched_reference_metric_value` | float, optional | Average matched metric value for this record. |
+| `recovered_count` | int, optional | Number of successfully recovered samples in this record. |
+| `reconstructed_count` | int, optional | Number of reconstructed samples in this record. |
+| `reference_count` | int, optional | Number of samples in the attacked client's reference set. |
+| `budget_recovered_fraction` | float, optional | `recovered_count / reconstructed_count`. |
+| `coverage_recovered_fraction` | float, optional | `recovered_count / reference_count`. |
 | `client_id` | string | Attacked client ID. |
 | `round_index` | int | Communication round index. |
 | `sample_index` | int | Independent attack-evaluation index for that client and round. |
 | `artifact_path` | string | Relative path to the `.pt` tensor artifact. |
-| `reference_label` | string | Visualization reference source: `exact_target` or `nearest_client_train`. |
+| `reference_label` | string | Visualization reference source such as `exact_target`, `nearest_client_train`, or `matched_client_train`. |
 
 ### 3.7 Nested `attack_summary`
 
@@ -428,14 +436,19 @@ Each element is one DLG or iDLG result.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `target_type` | string | Attack target type. |
+| `target_type` | string | Attack target type. Currently `update_payload`. |
 | `primary_metric_name` | string | Primary metric name. |
-| `primary_metric_direction` | string | Currently always `higher_is_more_private`. |
+| `primary_metric_direction` | string | Privacy interpretation direction for the primary metric. Recovery-rate metrics are typically `lower_is_more_private`. |
 | `success_rate_threshold` | float | Aggregate pass/fail threshold. |
 | `overall_avg_primary_metric_value` | float or null | Average primary metric across all attack results. |
 | `overall_best_primary_metric_value` | float or null | Best primary metric across all attack results. |
 | `overall_success_rate` | float | Aggregate attack success rate. |
 | `overall_passes` | bool | Whether the aggregate success rate is at most the threshold. |
+| `overall_avg_budget_recovered_fraction` | float or null | Average budget recovery fraction across all attack results. |
+| `overall_avg_coverage_recovered_fraction` | float or null | Average coverage recovery fraction across all attack results. |
+| `overall_avg_nearest_client_train_mse` | float or null | Average nearest-client-train MSE across all attack results. |
+| `overall_avg_exact_target_mse` | float or null | Average exact-target MSE across all attack results. |
+| `overall_avg_objective_mse` | float or null | Average objective residual across all attack results. |
 | `methods` | object | Method-level attack summaries. |
 | `clients` | object | Client-level attack summaries. |
 

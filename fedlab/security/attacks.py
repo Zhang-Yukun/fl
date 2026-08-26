@@ -484,14 +484,12 @@ def apply_set_recovery_metrics(
         result.success_threshold = float(success_threshold)
 
 
-def _create_optimizer(name: str, variables: list[torch.Tensor], lr: float, history_size: int) -> torch.optim.Optimizer:
+def _create_optimizer(name: str, variables: list[torch.Tensor], lr: float) -> torch.optim.Optimizer:
     """Create the configured optimizer for reconstruction."""
 
-    if name == "lbfgs":
-        return torch.optim.LBFGS(variables, lr=lr, max_iter=1, history_size=history_size, line_search_fn="strong_wolfe")
     if name == "adam":
         return torch.optim.Adam(variables, lr=lr)
-    raise ValueError(f"Unknown attack optimizer: {name}")
+    raise ValueError(f"Unknown attack optimizer: {name}; only adam is supported")
 
 
 def _attack_loop(
@@ -520,7 +518,6 @@ def _attack_loop(
     data_range = _attack_data_range(config)
     optimizer_name = str(attack_cfg.get("optimizer", "adam")).lower()
     restarts = max(1, int(attack_cfg.get("restarts", 1)))
-    history_size = int(attack_cfg.get("lbfgs_history_size", 20))
     input_clip = attack_cfg.get("input_clip")
     target_clip = attack_cfg.get("target_clip")
     tv_weight = float(attack_cfg.get("tv_weight", 0.0))
@@ -567,36 +564,19 @@ def _attack_loop(
             else:
                 dummy_y = real_y.to(device) if inferred_y is None else inferred_y
                 variables = [dummy_x]
-            optimizer = _create_optimizer(optimizer_name, variables, lr, history_size)
+            optimizer = _create_optimizer(optimizer_name, variables, lr)
             restart_best_objective = float("inf")
             restart_best_x = dummy_x.detach().clone()
             restart_best_y = dummy_y.detach().clone()
 
             for _ in range(steps):
-                if optimizer_name == "lbfgs":
-                    holder: dict[str, float] = {}
-
-                    def closure() -> torch.Tensor:
-                        """Evaluate the current dummy variables for one LBFGS step."""
-
-                        optimizer.zero_grad(set_to_none=True)
-                        dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
-                        if tv_weight > 0:
-                            dist = dist + tv_weight * time_series_total_variation(dummy_x)
-                        holder["loss"] = float(dist.detach().cpu().item())
-                        dist.backward()
-                        return dist
-
-                    optimizer.step(closure)
-                    dist_value = holder.get("loss", float("inf"))
-                else:
-                    optimizer.zero_grad(set_to_none=True)
-                    dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
-                    if tv_weight > 0:
-                        dist = dist + tv_weight * time_series_total_variation(dummy_x)
-                    dist_value = float(dist.detach().cpu().item())
-                    dist.backward()
-                    optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
+                if tv_weight > 0:
+                    dist = dist + tv_weight * time_series_total_variation(dummy_x)
+                dist_value = float(dist.detach().cpu().item())
+                dist.backward()
+                optimizer.step()
                 with torch.no_grad():
                     if input_clip is not None:
                         dummy_x.clamp_(min=-float(input_clip), max=float(input_clip))

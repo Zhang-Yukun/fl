@@ -32,6 +32,7 @@ def _deterministic_overrides(output_dir: Path, attack_enabled: bool) -> list[str
         "attack.optimizer=adam",
         "attack.local_optimizer=adam",
         "attack.async_enabled=false",
+        "attack.seed=2026",
         "tracking.enabled=false",
         "runtime.device=cpu",
         "runtime.seed=2026",

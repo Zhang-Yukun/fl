@@ -7,7 +7,7 @@ attack:
   recovery_match_objective: auto
   recovery_success_metric: mse
   recovery_success_objective: auto
-  frequency_rounds: 5
+  frequency_rounds: 10
   sample_count: auto
   max_samples: auto
   max_samples_cap: 8
@@ -15,7 +15,6 @@ attack:
   lr: 0.001
   optimizer: adam
   restarts: 1
-  lbfgs_history_size: 20
   client_selection: all
   clients_per_round: 3
   input_clip: 5.0

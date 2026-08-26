@@ -27,7 +27,7 @@ artifacts, and extension points, see
 - `fedlab.federated.client` and `fedlab.federated.server`: algorithm-agnostic FL endpoint runtime that delegates payload construction, aggregation, and attack-view extraction to the active method.
 - `fedlab.federated.algorithms`: single-process federated orchestration, attack scheduling, and evaluation flow built on the method registry.
 - `fedlab.utils.aggregation`: adaptive aggregation helpers.
-- `fedlab.security.attacks`: DLG and iDLG-style gradient reconstruction attacks.
+- `fedlab.security.attacks`: DLG and iDLG-style reconstruction attacks over server-visible update payloads, with replay support for saved updates.
 - `fedlab.communication.grpc_service`: gRPC transport helpers for multi-process training.
 
 To add a new federated algorithm, create one method module under

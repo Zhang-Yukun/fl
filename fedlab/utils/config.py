@@ -55,7 +55,6 @@ _RUNTIME_DEFAULTS = {
         "lr": 0.001,
         "optimizer": "adam",
         "restarts": 1,
-        "lbfgs_history_size": 20,
         "success_mse_threshold": 0.5,
         "success_rate_threshold": 0.03,
         "data_range": 1.0,

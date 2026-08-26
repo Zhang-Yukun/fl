@@ -11,7 +11,7 @@ Each round records client names, payload type, compressor, upload/download bytes
 
 ## Extra Top-k Compression Baseline
 
-The local `sparse_fedavg` / `compressed_fedavg` path remains available as an additional communication-compression baseline. It implements the core Top-k update upload idea: each client sends the largest-magnitude `topk_fraction` coordinates plus their indices, and the server reconstructs sparse updates before FedAvg-weighted aggregation. This path is kept for compression/attack analysis, but it is not the repository's Xu et al. comparison algorithm.
+The retained Top-k baseline is `sparse_fedavg`. It implements the core Top-k update upload idea: each client sends the largest-magnitude `topk_fraction` coordinates plus their indices, and the server reconstructs sparse updates before FedAvg-weighted aggregation.
 
 Run the rawdata2 full PatchTST Top-k experiment from `src`:
 

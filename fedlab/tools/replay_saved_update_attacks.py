@@ -18,6 +18,8 @@ from fedlab.federated.algorithms import (
     _execute_attack_round_task,
     _resolve_attack_device,
     build_update_attack_round_task,
+    configure_random_seed,
+    configure_torch_runtime,
     load_captured_update_records,
 )
 from fedlab.security.attacks import save_attack_artifacts, summarize_attack_results
@@ -71,6 +73,13 @@ def main() -> None:
     output_dir = args.output_dir.expanduser().resolve() if args.output_dir is not None else (run_dir / "offline_attack_replay")
     setup_logging(output_dir, replay_config.get("runtime", {}).get("log_level", "INFO"))
     save_experiment_config(replay_config, output_dir, replay_config.get("artifacts", {}).get("config_formats"))
+    configure_torch_runtime(replay_config)
+    configure_random_seed(replay_config)
+    if replay_config.get("attack", {}).get("seed") is None:
+        logger.warning(
+            "attack.seed is unset in replay config; replayed attack records will match online selection order, "
+            "but optimization metrics may drift if the original online run consumed random numbers before attacking"
+        )
 
     attack_device = _resolve_attack_device(replay_config)
     max_rounds = int(replay_config.get("federated", {}).get("rounds", 0) or (max(_round_indices(records)) + 1))

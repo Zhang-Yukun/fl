@@ -1,6 +1,6 @@
 # Server-Side Attack Timeline
 
-本文档用时序图说明当前框架中服务器端攻击与训练、聚合、评测之间的先后关系。
+本文档用时序图说明当前框架中服务器端攻击与训练、聚合、评测之间的先后关系。当前代码里攻击目标统一为 `update_payload`。
 
 ## 1. 单节点 FedAvg + 同步攻击
 
@@ -93,12 +93,6 @@ sequenceDiagram
 
 多节点版本在逻辑上与单节点一致，只是客户端更新通过 gRPC 传输。
 
-关键差异是：
-
-- 客户端先向服务器拉取全局模型
-- 客户端本地训练后通过 RPC 提交更新
-- 服务器收齐所有客户端的更新后，才进入聚合、验证与攻击阶段
-
 ```mermaid
 sequenceDiagram
     participant S as gRPC Server
@@ -135,14 +129,6 @@ sequenceDiagram
 ```
 
 ## 4. 多节点 gRPC + 异步攻击
-
-gRPC 异步攻击模式下：
-
-- 客户端 RPC 热路径里不等待攻击完成
-- 服务器在收齐更新并完成聚合、验证后，只提交攻击任务
-- 攻击在线程池后台执行
-- 服务端主循环继续推进轮次
-- 训练结束时再统一等待攻击任务全部完成
 
 ```mermaid
 sequenceDiagram
@@ -184,73 +170,32 @@ sequenceDiagram
     S->>S: persist summary and attack artifacts
 ```
 
-## 5. 攻击任务内部的细化时序
-
-无论是同步还是异步，单个攻击任务内部的步骤基本一致：
+## 5. 单个攻击任务的内部顺序
 
 1. 服务器选择需要攻击的客户端
-2. 为每个客户端选择一个或多个样本索引
+2. 为每个客户端确定攻击次数 `sample_count`
 3. 保存 `round_base_state`
-4. 保存攻击目标：
-   - `gradient` 模式：梯度
-   - `update_payload` 模式：客户端上传的更新
-5. 保存真实参考：
-   - `real_x`
-   - `real_y`
-   - `reference_inputs`
-6. 分别运行 `DLG` 与 `iDLG`
-7. 计算 `MSE / PSNR / SSIM / gradient_mse`
-8. 汇总成功率和平均指标
+4. 保存服务器可见的 `update_payload`
+5. 保存本次攻击批次 `real_x`、`real_y`
+6. 保存客户端训练参考集合 `reference_inputs`、`reference_targets`
+7. 分别运行 `DLG` 与 `iDLG`
+8. 计算 `exact_target_mse`、`nearest_client_train_mse`、`budget_recovered_fraction`、`coverage_recovered_fraction`、`PSNR`、`SSIM`、`objective_mse`
+9. 写入 `attack_results.json`、`attack_artifacts/` 和 `summary.json`
 
 ```mermaid
 flowchart TD
-    A[Select attacked clients] --> B[Select sample indices]
+    A[Select attacked clients] --> B[Resolve sample_count and max_samples]
     B --> C[Clone round_base_state]
-    C --> D[Capture target payload or gradients]
-    D --> E[Capture real_x real_y reference_inputs]
+    C --> D[Capture target update payload]
+    D --> E[Capture real_x real_y and reference set]
     E --> F[Run DLG]
     E --> G[Run iDLG]
-    F --> H[Compute metrics]
+    F --> H[Compute recovery metrics]
     G --> H
-    H --> I[Update round attack summary]
-    I --> J[Write tracker and summary artifacts]
+    H --> I[Update attack summary]
+    I --> J[Write tracker and artifacts]
 ```
 
-## 6. 需要特别注意的点
+## 6. 独立回放脚本
 
-### 6.1 性能评测与攻击评测的先后关系
-
-当前实现中，验证集评测发生在攻击任务提交之前。
-
-因此：
-
-- 攻击不会改变本轮验证集性能
-- 攻击结果只影响隐私评估指标，不影响该轮模型收敛判断
-
-### 6.2 异步攻击不会改变聚合结果
-
-异步攻击使用的是训练流程中分离出来的快照：
-
-- `round_base_state` 的克隆
-- payload 的克隆
-- 真实样本的克隆
-
-因此异步攻击不会反向污染训练或聚合状态。
-
-### 6.3 异步攻击仍可能影响运行速度
-
-虽然不污染数值结果，但异步攻击会与训练竞争资源，尤其是在同一张 GPU 上运行时，会带来：
-
-- 训练变慢
-- 验证变慢
-- 显存占用上升
-
-## 7. 相关代码位置
-
-- 单节点联邦主循环：
-  - `src/fedlab/federated/algorithms.py`
-- 多节点 gRPC 联邦训练：
-  - `src/fedlab/communication/grpc_training.py`
-- 攻击实现：
-  - `src/fedlab/security/attacks.py`
-
+训练流程会按攻击频率把服务器截获的更新保存到 `saved_updates/`。独立脚本 `replay_saved_update_attacks.py` 会扫描这些保存结果，并按当前配置顺序重新执行 DLG / iDLG。只要种子、模型模式和攻击配置保持一致，回放结果应与在线攻击保持同口径。
