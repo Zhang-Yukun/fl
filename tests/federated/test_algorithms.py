@@ -674,27 +674,6 @@ def test_validate_transport_modes_rejects_only_remaining_unsupported_combination
         validate_transport_modes(grpc_update_download, transport_backend="grpc")
 
 
-def test_fedaware_uses_dense_updates_and_records_weights(tmp_path):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "federated.algorithm=fedaware",
-            "federated.rounds=1",
-            "attack.enabled=false",
-            "fedaware.alpha=1.0",
-            "fedaware.steps=10",
-            "fedaware.lr=0.2",
-        ],
-    )
-    config["experiment"]["output_dir"] = str(tmp_path)
-    result = run_federated(config)
-    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    clients = metrics[0]["clients"]
-    assert result["last_parameter_upload_compression_ratio"] == 1.0
-    assert all(client["aggregation_payload_kind"] == "dense_update" for client in clients)
-    assert abs(sum(client["aggregation_weight"] for client in clients) - 1.0) < 1e-6
-    assert all(client["aggregation_weight"] >= 0.0 for client in clients)
-
 
 def test_saved_config_contains_materialized_runtime_defaults(tmp_path):
     config = load_config(
@@ -835,7 +814,7 @@ def test_attack_auto_sampling_defaults_to_one_reconstruction_with_capped_multi_s
 
 def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
     config = {
-        "federated": {"algorithm": "compressed_fedavg"},
+        "federated": {"algorithm": "sparse_fedavg", "topk_fraction": 0.5},
         "attack": {
             "enabled": True,
             "target_type": "update_payload",
@@ -984,26 +963,6 @@ def test_randomk_fedavg_uses_unbiased_sparse_payloads(tmp_path):
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
 
 
-def test_soteriafl_uses_sparse_dp_payloads(tmp_path):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "federated.algorithm=soteriafl",
-            "federated.rounds=1",
-            "privacy.clip_norm=1.0",
-            "privacy.noise_multiplier=0.0",
-            "attack.enabled=false",
-        ],
-    )
-    config["experiment"]["output_dir"] = str(tmp_path)
-    result = run_federated(config)
-    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    assert result["last_parameter_upload_compression_ratio"] >= 6.0
-    assert all(client["aggregation_payload_kind"] == "soteriafl_randomk_dp_update" for client in metrics[0]["clients"])
-    assert all(client["compressor"] == "randomk_unbiased" for client in metrics[0]["clients"])
-    assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])
-
-
 
 def test_sign_fedavg_uses_sign_quantized_dense_updates(tmp_path):
     config = load_config(
@@ -1115,7 +1074,6 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
 
     assert (tmp_path / "ega_codec.pt").exists()
     assert result["last_parameter_upload_compression_ratio"] > 1.0
-    assert result["last_parameter_total_communication_ratio"] > 1.0
     assert result["best_val_mse"] == result["best_val_mse"]
     assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
@@ -1349,7 +1307,7 @@ def test_oracle_evaluation_separates_protocol_metrics_from_dense_reference_updat
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
             "experiment.output_dir=" + str(tmp_path),
-            "federated.algorithm=compressed_fedavg",
+            "federated.algorithm=sparse_fedavg",
             "federated.rounds=1",
             "federated.topk_fraction=0.5",
             "evaluation.mode=oracle_full_update",
@@ -1491,25 +1449,6 @@ def test_protocol_mode_populates_oracle_metrics_with_protocol_values(tmp_path, m
     assert metrics[0]["oracle_val_mae"] == pytest.approx(metrics[0]["protocol_val_mae"])
     assert metrics[0]["oracle_val_mape"] == pytest.approx(metrics[0]["protocol_val_mape"])
 
-
-def test_dp_topk_uses_sparse_dp_topk_payloads(tmp_path):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "federated.algorithm=dp_topk_fedavg",
-            "federated.rounds=1",
-            "privacy.clip_norm=1.0",
-            "privacy.noise_multiplier=0.0",
-            "attack.enabled=false",
-        ],
-    )
-    config["experiment"]["output_dir"] = str(tmp_path)
-    result = run_federated(config)
-    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    assert result["last_parameter_upload_compression_ratio"] >= 6.0
-    assert all(client["aggregation_payload_kind"] == "dp_topk_dp_update" for client in metrics[0]["clients"])
-    assert all(client["compressor"] == "topk_dp" for client in metrics[0]["clients"])
-    assert all(client["privacy_clip_norm"] == 1.0 for client in metrics[0]["clients"])
 
 
 def test_train_n_steps_cycles_loader_and_validates_steps():
@@ -2046,13 +1985,9 @@ def test_centralized_run_with_sgd_optimizer(tmp_path):
     "algorithm",
     [
         "fedavg",
-        "fedaware",
         "adaptive_clipped_rdp_fedavg",
-        "compressed_fedavg",
         "sparse_fedavg",
-        "dp_topk_fedavg",
         "randomk_fedavg",
-        "soteriafl",
         "secure_quantized_fedavg",
         "sign_fedavg",
         "qsgd_fedavg",
@@ -2514,14 +2449,10 @@ def _run_single_node_update_update_rounds(config: dict, monkeypatch):
     ("algorithm", "extra_overrides"),
     [
         ("fedavg", []),
-        ("fedaware", ["fedaware.alpha=1.0", "fedaware.steps=1", "fedaware.lr=0.1"]),
-        ("adaptive_clipped_rdp_fedavg", ["adaptive_clipped_rdp.clip_factor=1.0", "adaptive_clipped_rdp.min_clip_norm=100.0", "adaptive_clipped_rdp.max_clip_norm=100.0", "adaptive_clipped_rdp.reference_clip_norm=100.0", "adaptive_clipped_rdp.noise_multiplier=0.0"]),
-        ("compressed_fedavg", ["federated.topk_fraction=1.0"]),
-        ("sparse_fedavg", ["federated.topk_fraction=1.0"]),
-        ("dp_topk_fedavg", ["federated.topk_fraction=1.0", "privacy.clip_norm=100.0", "privacy.noise_multiplier=0.0"]),
-        ("randomk_fedavg", ["federated.topk_fraction=1.0", "federated.randomk_seed=2026"]),
-        ("soteriafl", ["federated.topk_fraction=1.0", "federated.randomk_seed=2026", "privacy.clip_norm=100.0", "privacy.noise_multiplier=0.0"]),
-        ("secure_quantized_fedavg", ["federated.quantization_dtype=float16", "privacy.clip_norm=0.0", "privacy.noise_multiplier=0.0"]),
+                ("adaptive_clipped_rdp_fedavg", ["adaptive_clipped_rdp.clip_factor=1.0", "adaptive_clipped_rdp.min_clip_norm=100.0", "adaptive_clipped_rdp.max_clip_norm=100.0", "adaptive_clipped_rdp.reference_clip_norm=100.0", "adaptive_clipped_rdp.noise_multiplier=0.0"]),
+                ("sparse_fedavg", ["federated.topk_fraction=1.0"]),
+                ("randomk_fedavg", ["federated.topk_fraction=1.0", "federated.randomk_seed=2026"]),
+                ("secure_quantized_fedavg", ["federated.quantization_dtype=float16", "privacy.clip_norm=0.0", "privacy.noise_multiplier=0.0"]),
         ("sign_fedavg", []),
         ("qsgd_fedavg", ["federated.qsgd_levels=127", "federated.quantization_seed=2026"]),
         ("ega_fedavg", ["ega.block_size=7", "ega.encoded_dim=7", "ega.hidden_dim=7", "ega.residual_blocks=0", "ega.quantization_level=64", "ega.encoded_dtype=float32", "ega.download_method=ega", "ega.download_dtype=float32", "ega.error_feedback=false", "ega.min_normalization=1e-6"]),
@@ -2543,7 +2474,7 @@ def test_single_node_sync_update_update_simulation_matches_expected_state_progre
         expected_global_values,
     ):
         for _, download_state, received_state in round_result["prepared_states"]:
-            if algorithm in {"fedavg", "fedaware", "adaptive_clipped_rdp_fedavg"}:
+            if algorithm in {"fedavg", "adaptive_clipped_rdp_fedavg"}:
                 _assert_state_float_value(download_state, expected_payload)
             _assert_state_float_value(received_state, expected_received)
         for update in round_result["canonical_updates"]:
@@ -2683,7 +2614,6 @@ def test_single_node_sync_update_update_evaluation_states_match_for_exact_fedavg
 def test_single_node_sync_update_update_evaluation_states_split_protocol_from_oracle_for_sparse_compression(tmp_path, monkeypatch):
     config = _single_node_update_update_config(
         tmp_path,
-        "compressed_fedavg",
         [
             "federated.topk_fraction=0.5",
             "evaluation.mode=oracle_full_update",

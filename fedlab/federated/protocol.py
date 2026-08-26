@@ -8,7 +8,7 @@ from fedlab.utils.serialization import StateDict, add_update, average_states, su
 
 UPLOAD_MODES = {"update", "model"}
 DOWNLOAD_MODES = {"model", "update"}
-UPLOAD_MODEL_UNSUPPORTED = {"compressed_fedavg", "sparse_fedavg", "dp_topk_fedavg", "randomk_fedavg", "soteriafl", "secure_quantized_fedavg", "sign_fedavg", "qsgd_fedavg", "ega_fedavg"}
+UPLOAD_MODEL_UNSUPPORTED = {"sparse_fedavg", "randomk_fedavg", "secure_quantized_fedavg", "sign_fedavg", "qsgd_fedavg", "ega_fedavg"}
 DOWNLOAD_UPDATE_UNSUPPORTED: set[str] = set()
 
 

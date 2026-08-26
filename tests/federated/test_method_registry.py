@@ -11,16 +11,12 @@ from fedlab.federated.methods.base import FederatedMethod
 
 EXPECTED_METHODS = {
     'adaptive_clipped_rdp_fedavg': False,
-    'compressed_fedavg': True,
-    'dp_topk_fedavg': True,
     'ega_fedavg': False,
     'fedavg': False,
-    'fedaware': False,
     'qsgd_fedavg': False,
     'randomk_fedavg': True,
     'secure_quantized_fedavg': False,
     'sign_fedavg': False,
-    'soteriafl': True,
     'sparse_fedavg': True,
 }
 
@@ -29,13 +25,9 @@ IMPLEMENTED_METHODS = set(EXPECTED_METHODS)
 
 EXPECTED_CONFIG_SPECS = {
     'fedavg': MethodConfigSpec(),
-    'fedaware': MethodConfigSpec(root_blocks=frozenset({'fedaware'})),
     'adaptive_clipped_rdp_fedavg': MethodConfigSpec(root_blocks=frozenset({'adaptive_clipped_rdp'})),
-    'compressed_fedavg': MethodConfigSpec(federated_keys=frozenset({'topk_fraction'})),
     'sparse_fedavg': MethodConfigSpec(federated_keys=frozenset({'topk_fraction'})),
-    'dp_topk_fedavg': MethodConfigSpec(federated_keys=frozenset({'topk_fraction'}), uses_privacy_block=True),
     'randomk_fedavg': MethodConfigSpec(federated_keys=frozenset({'topk_fraction', 'randomk_seed'})),
-    'soteriafl': MethodConfigSpec(federated_keys=frozenset({'topk_fraction', 'randomk_seed'}), uses_privacy_block=True),
     'secure_quantized_fedavg': MethodConfigSpec(
         federated_keys=frozenset({'quantization_dtype', 'quantization_stochastic_rounding', 'quantization_seed'}),
         uses_privacy_block=True,

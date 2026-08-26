@@ -28,7 +28,6 @@ def test_load_config_prunes_irrelevant_algorithm_specific_fields():
             "federated.algorithm=fedavg",
             "federated.topk_fraction=0.25",
             "federated.quantization_dtype=int8",
-            "fedaware.alpha=0.7",
             "adaptive_clipped_rdp.noise_multiplier=0.5",
             "ega.block_size=64",
             "privacy.clip_norm=2.0",
@@ -36,7 +35,6 @@ def test_load_config_prunes_irrelevant_algorithm_specific_fields():
     )
     assert "topk_fraction" not in config["federated"]
     assert "quantization_dtype" not in config["federated"]
-    assert "fedaware" not in config
     assert "adaptive_clipped_rdp" not in config
     assert "ega" not in config
     assert "privacy" not in config
@@ -52,14 +50,12 @@ def test_load_config_keeps_only_active_algorithm_specific_fields():
             "federated.quantization_seed=2026",
             "privacy.clip_norm=2.0",
             "privacy.noise_multiplier=0.1",
-            "fedaware.alpha=0.7",
         ],
     )
     assert config["federated"]["quantization_dtype"] == "int8"
     assert config["federated"]["quantization_seed"] == 2026
     assert "topk_fraction" not in config["federated"]
     assert config["privacy"]["clip_norm"] == 2.0
-    assert "fedaware" not in config
 
 
 def test_deprecated_centralized_epochs_key_is_rejected():
@@ -129,7 +125,6 @@ def test_load_config_uses_registered_method_config_metadata(monkeypatch):
             'federated.custom_fraction=0.125',
             'federated.topk_fraction=0.25',
             'custom_block.enabled=true',
-            'fedaware.alpha=0.7',
             'privacy.clip_norm=2.0',
         ],
     )
@@ -137,5 +132,4 @@ def test_load_config_uses_registered_method_config_metadata(monkeypatch):
     assert config['federated']['custom_fraction'] == 0.125
     assert 'topk_fraction' not in config['federated']
     assert 'custom_block' in config
-    assert 'fedaware' not in config
     assert config['privacy']['clip_norm'] == 2.0

@@ -470,7 +470,7 @@ def test_grpc_coordinator_keeps_oracle_evaluation_out_of_attack_payload(tmp_path
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
             "experiment.output_dir=" + str(tmp_path),
-            "federated.algorithm=compressed_fedavg",
+            "federated.algorithm=sparse_fedavg",
             "federated.rounds=1",
             "federated.topk_fraction=0.5",
             "evaluation.mode=oracle_full_update",

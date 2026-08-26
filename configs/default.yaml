@@ -37,7 +37,7 @@ centralized:
   rounds: 10
 
 federated:
-  algorithm: compressed_fedavg
+  algorithm: fedavg
   rounds: 20
   local_epochs: 1
 
