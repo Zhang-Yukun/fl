@@ -2,18 +2,37 @@
 
 from __future__ import annotations
 
+import math
+from dataclasses import dataclass
 from typing import Any, Callable
+
+import torch
 
 
 AttackFn = Callable[..., Any]
+RecoveryMatrixFn = Callable[[torch.Tensor, torch.Tensor, float], torch.Tensor]
+RecoveryThresholdFn = Callable[[dict[str, Any], float], float]
+
+
+@dataclass(frozen=True)
+class RecoveryMetricSpec:
+    """One registered set-recovery metric definition."""
+
+    name: str
+    compute_matrix: RecoveryMatrixFn
+    default_objective: str
+    default_threshold: RecoveryThresholdFn
+
 
 _ATTACKS: dict[str, AttackFn] = {}
 _ATTACK_ORDER: list[str] = []
 _BUILTIN_ATTACKS_LOADED = False
+_RECOVERY_METRICS: dict[str, RecoveryMetricSpec] = {}
+_BUILTIN_RECOVERY_METRICS_LOADED = False
 
 
 def _normalize_name(name: str) -> str:
-    """Normalize attack names to a canonical lowercase key."""
+    """Normalize registry names to canonical lowercase keys."""
 
     return str(name).strip().lower()
 
@@ -131,3 +150,163 @@ def run_attacks(
             )
         )
     return results
+
+
+def _attack_threshold(config: dict[str, Any]) -> float:
+    return float(config.get('attack', {}).get('success_mse_threshold', 0.5))
+
+
+def _attack_ssim_threshold(config: dict[str, Any]) -> float | None:
+    value = config.get('attack', {}).get('success_ssim_threshold')
+    if value is None:
+        return None
+    return float(value)
+
+
+def _pairwise_mse_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Tensor, _data_range: float) -> torch.Tensor:
+    recon = reconstructed.detach().cpu().float().reshape(reconstructed.shape[0], -1)
+    refs = reference_inputs.detach().cpu().float().reshape(reference_inputs.shape[0], -1)
+    return torch.mean((recon[:, None, :] - refs[None, :, :]) ** 2, dim=-1)
+
+
+def _compute_psnr_from_mse(mse_value: float, data_range: float) -> float:
+    if mse_value <= 0:
+        return float('inf')
+    return float(20.0 * math.log10(data_range / math.sqrt(mse_value)))
+
+
+def _pairwise_psnr_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Tensor, data_range: float) -> torch.Tensor:
+    mse_matrix = _pairwise_mse_matrix(reconstructed, reference_inputs, data_range)
+    safe = torch.clamp(mse_matrix, min=torch.finfo(mse_matrix.dtype).tiny)
+    values = 20.0 * math.log10(data_range) - 10.0 * torch.log10(safe)
+    return torch.where(mse_matrix <= 0, torch.full_like(values, float('inf')), values)
+
+
+def _pairwise_ssim_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Tensor, data_range: float) -> torch.Tensor:
+    from fedlab.security import attacks as attacks_module
+
+    recon = reconstructed.detach().cpu().float()
+    refs = reference_inputs.detach().cpu().float()
+    values = torch.empty((recon.shape[0], refs.shape[0]), dtype=recon.dtype)
+    for row in range(recon.shape[0]):
+        for col in range(refs.shape[0]):
+            values[row, col] = attacks_module._compute_ssim(recon[row : row + 1], refs[col : col + 1], data_range)
+    return values
+
+
+def register_recovery_metric(
+    name: str,
+    compute_matrix: RecoveryMatrixFn,
+    *,
+    default_objective: str,
+    default_threshold: RecoveryThresholdFn,
+    aliases: tuple[str, ...] = (),
+    replace: bool = False,
+) -> RecoveryMetricSpec:
+    """Register one set-recovery evaluation metric and optional aliases."""
+
+    normalized_name = _normalize_name(name)
+    if default_objective not in {'min', 'max'}:
+        raise ValueError(f'Unsupported recovery metric objective: {default_objective}')
+    spec = RecoveryMetricSpec(
+        name=normalized_name,
+        compute_matrix=compute_matrix,
+        default_objective=default_objective,
+        default_threshold=default_threshold,
+    )
+    names = (normalized_name, *(_normalize_name(alias) for alias in aliases))
+    for candidate in names:
+        existing = _RECOVERY_METRICS.get(candidate)
+        if existing is not None and existing != spec and not replace:
+            raise ValueError(f'Recovery metric alias already registered: {candidate}')
+    for candidate in names:
+        _RECOVERY_METRICS[candidate] = spec
+    return spec
+
+
+def recovery_metric_plugin(
+    name: str,
+    *,
+    default_objective: str,
+    default_threshold: RecoveryThresholdFn,
+    aliases: tuple[str, ...] = (),
+    replace: bool = False,
+):
+    """Decorator for registering one recovery metric."""
+
+    def decorator(compute_matrix: RecoveryMatrixFn) -> RecoveryMatrixFn:
+        register_recovery_metric(
+            name,
+            compute_matrix,
+            default_objective=default_objective,
+            default_threshold=default_threshold,
+            aliases=aliases,
+            replace=replace,
+        )
+        return compute_matrix
+
+    return decorator
+
+
+def _ensure_builtin_recovery_metrics_registered() -> None:
+    """Register builtin mse/psnr/ssim recovery metrics once."""
+
+    global _BUILTIN_RECOVERY_METRICS_LOADED
+    if _BUILTIN_RECOVERY_METRICS_LOADED:
+        return
+    _BUILTIN_RECOVERY_METRICS_LOADED = True
+    register_recovery_metric('mse', _pairwise_mse_matrix, default_objective='min', default_threshold=lambda config, _data_range: _attack_threshold(config))
+    register_recovery_metric('psnr', _pairwise_psnr_matrix, default_objective='max', default_threshold=lambda config, data_range: _compute_psnr_from_mse(_attack_threshold(config), data_range))
+    register_recovery_metric('ssim', _pairwise_ssim_matrix, default_objective='max', default_threshold=lambda config, _data_range: 0.0 if _attack_ssim_threshold(config) is None else float(_attack_ssim_threshold(config)))
+
+
+def list_registered_recovery_metrics() -> dict[str, RecoveryMetricSpec]:
+    """Return a snapshot of registered recovery metrics."""
+
+    _ensure_builtin_recovery_metrics_registered()
+    return dict(_RECOVERY_METRICS)
+
+
+def get_recovery_metric(name: str) -> RecoveryMetricSpec:
+    """Return one registered recovery metric spec."""
+
+    _ensure_builtin_recovery_metrics_registered()
+    normalized = _normalize_name(name)
+    if normalized not in _RECOVERY_METRICS:
+        raise ValueError(f'Unsupported attack recovery metric: {name}')
+    return _RECOVERY_METRICS[normalized]
+
+
+def normalize_recovery_metric_name(value: Any, default: str = 'mse') -> str:
+    """Resolve one configured recovery metric name."""
+
+    metric = _normalize_name(default if value is None else value)
+    if metric == 'auto':
+        metric = _normalize_name(default)
+    return get_recovery_metric(metric).name
+
+
+def resolve_recovery_objective(value: Any, metric: str) -> str:
+    """Resolve matching/success direction for one recovery metric."""
+
+    objective = _normalize_name('auto' if value is None else value)
+    if objective == 'auto':
+        return get_recovery_metric(metric).default_objective
+    if objective not in {'min', 'max'}:
+        raise ValueError(f'Unsupported attack recovery objective: {objective}')
+    return objective
+
+
+def resolve_recovery_threshold(config: dict[str, Any], metric: str, data_range: float) -> float:
+    """Resolve the configured recovery success threshold."""
+
+    configured = config.get('attack', {}).get('recovery_success_threshold')
+    if configured is not None:
+        return float(configured)
+    return float(get_recovery_metric(metric).default_threshold(config, data_range))
+
+
+def compute_recovery_metric_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Tensor, metric: str, data_range: float) -> torch.Tensor:
+    """Return the pairwise matrix for one registered recovery metric."""
+
+    return get_recovery_metric(metric).compute_matrix(reconstructed, reference_inputs, data_range)

@@ -4,6 +4,7 @@ import torch
 from fedlab.modeling import build_model
 from fedlab.engine.training import first_batch_gradient, first_batch_sample
 from fedlab.security.attacks import AttackResult, apply_set_recovery_metrics, dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
+from fedlab.security.registry import register_recovery_metric
 from fedlab.utils.serialization import serialize_model, subtract_state
 
 
@@ -224,6 +225,56 @@ def test_attack_artifacts_persist_reconstructions(tmp_path):
     assert payload["reference_label"] is not None
     assert payload["reconstructed_x"].shape == x.shape
     assert payload["reconstructed_y"] is not None
+
+
+def test_apply_set_recovery_metrics_supports_custom_registered_metric(monkeypatch):
+    import fedlab.security.registry as registry_module
+
+    snapshot = registry_module.list_registered_recovery_metrics()
+    monkeypatch.setattr(registry_module, '_RECOVERY_METRICS', dict(snapshot))
+    monkeypatch.setattr(registry_module, '_BUILTIN_RECOVERY_METRICS_LOADED', True)
+
+    def custom_matrix(reconstructed, reference_inputs, _data_range):
+        recon = reconstructed.detach().cpu().float().reshape(reconstructed.shape[0], -1)
+        refs = reference_inputs.detach().cpu().float().reshape(reference_inputs.shape[0], -1)
+        return torch.mean(torch.abs(recon[:, None, :] - refs[None, :, :]), dim=-1)
+
+    register_recovery_metric(
+        'l1',
+        custom_matrix,
+        default_objective='min',
+        default_threshold=lambda _config, _data_range: 0.01,
+    )
+
+    config = _tiny_patchtst_config(target_type='update_payload')
+    config['attack']['recovery_match_metric'] = 'l1'
+    config['attack']['recovery_success_metric'] = 'l1'
+    results = [
+        AttackResult(
+            name='DLG',
+            mse=0.0,
+            psnr=0.0,
+            ssim=0.0,
+            iterations=1,
+            time_seconds=0.0,
+            success=False,
+            success_threshold=0.5,
+            gradient_mse=0.0,
+            target_type='update_payload',
+            reconstructed_x=torch.tensor([[[0.0], [0.0]]]),
+            reconstructed_y=torch.tensor([[[0.0]]]),
+        )
+    ]
+
+    apply_set_recovery_metrics(
+        results,
+        reference_inputs=torch.tensor([[[0.0], [0.0]], [[1.0], [1.0]]]),
+        reference_targets=torch.tensor([[[0.0]], [[1.0]]]),
+        config=config,
+    )
+
+    assert results[0].matched_reference_metric_name == 'l1'
+    assert results[0].budget_recovered_fraction == 1.0
 
 
 def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and_classification():

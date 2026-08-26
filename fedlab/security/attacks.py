@@ -14,6 +14,7 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 
 from fedlab.modeling import build_model
+from fedlab.security.registry import compute_recovery_metric_matrix, normalize_recovery_metric_name, resolve_recovery_objective, resolve_recovery_threshold
 from fedlab.tasks import create_loss
 from fedlab.utils.serialization import StateDict, load_serialized
 
@@ -128,45 +129,25 @@ def _normalize_report_metrics(config: dict[str, Any], target_type: str) -> set[s
 def _normalize_recovery_metric(value: Any, default: str = "mse") -> str:
     """Resolve one configured set-recovery metric name."""
 
-    metric = str(default if value is None else value).strip().lower()
-    if metric == "auto":
-        metric = default
-    allowed = {"mse", "psnr", "ssim"}
-    if metric not in allowed:
-        raise ValueError(f"Unsupported attack recovery metric: {metric}")
-    return metric
+    return normalize_recovery_metric_name(value, default=default)
 
 
 def _default_metric_objective(metric: str) -> str:
     """Return whether smaller or larger values are better for one metric."""
 
-    return "min" if metric == "mse" else "max"
+    return resolve_recovery_objective("auto", metric)
 
 
 def _normalize_recovery_objective(value: Any, metric: str) -> str:
     """Resolve the configured set-recovery matching or success objective."""
 
-    objective = str(value if value is not None else "auto").strip().lower()
-    if objective == "auto":
-        objective = _default_metric_objective(metric)
-    if objective not in {"min", "max"}:
-        raise ValueError(f"Unsupported attack recovery objective: {objective}")
-    return objective
+    return resolve_recovery_objective(value, metric)
 
 
 def _resolve_recovery_threshold(config: dict[str, Any], metric: str, data_range: float) -> float:
     """Resolve the configured set-recovery success threshold."""
 
-    attack_cfg = config.get("attack", {})
-    configured = attack_cfg.get("recovery_success_threshold")
-    if configured is not None:
-        return float(configured)
-    if metric == "mse":
-        return _attack_threshold(config)
-    if metric == "ssim":
-        threshold = _attack_ssim_threshold(config)
-        return 0.0 if threshold is None else float(threshold)
-    return _compute_psnr(_attack_threshold(config), data_range)
+    return resolve_recovery_threshold(config, metric, data_range)
 
 
 def _is_classification_attack(config: dict[str, Any], real_y: torch.Tensor) -> bool:
@@ -410,24 +391,7 @@ def _select_reference_targets(
 def _pairwise_metric_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Tensor, metric: str, data_range: float) -> torch.Tensor:
     """Return one pairwise reconstruction-quality matrix for set matching."""
 
-    recon = reconstructed.detach().cpu().float()
-    refs = reference_inputs.detach().cpu().float()
-    recon_flat = recon.reshape(recon.shape[0], -1)
-    refs_flat = refs.reshape(refs.shape[0], -1)
-    mse_matrix = torch.mean((recon_flat[:, None, :] - refs_flat[None, :, :]) ** 2, dim=-1)
-    if metric == "mse":
-        return mse_matrix
-    if metric == "psnr":
-        safe = torch.clamp(mse_matrix, min=torch.finfo(mse_matrix.dtype).tiny)
-        values = 20.0 * math.log10(data_range) - 10.0 * torch.log10(safe)
-        return torch.where(mse_matrix <= 0, torch.full_like(values, float("inf")), values)
-    if metric == "ssim":
-        values = torch.empty_like(mse_matrix)
-        for row in range(recon.shape[0]):
-            for col in range(refs.shape[0]):
-                values[row, col] = _compute_ssim(recon[row : row + 1], refs[col : col + 1], data_range)
-        return values
-    raise ValueError(f"Unsupported pairwise metric: {metric}")
+    return compute_recovery_metric_matrix(reconstructed, reference_inputs, metric, data_range)
 
 
 def _metric_passes_threshold(value: float | None, metric: str, objective: str, threshold: float) -> bool:
