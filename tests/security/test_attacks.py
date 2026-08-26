@@ -532,7 +532,7 @@ def test_classification_update_payload_idlg_broadcasts_one_inferred_pseudo_label
 
 
 
-def test_time_series_idlg_does_not_reuse_probe_targets_for_update_payloads():
+def test_time_series_idlg_degenerates_to_dlg_for_update_payloads():
     config = _tiny_patchtst_config(target_type="update_payload")
     device = torch.device("cpu")
     model = build_model(config).to(device)
@@ -547,11 +547,16 @@ def test_time_series_idlg_does_not_reuse_probe_targets_for_update_payloads():
     optimizer.step()
     target_update = subtract_state(serialize_model(model), state)
 
-    result = idlg_attack(config, state, target_update, x, decoy_y, device, target_type="update_payload")
+    dlg = dlg_attack(config, state, target_update, x, decoy_y, device, target_type="update_payload")
+    idlg = idlg_attack(config, state, target_update, x, decoy_y, device, target_type="update_payload")
 
-    assert result.reconstructed_y is not None
-    assert result.reconstructed_y.shape == true_y.shape
-    assert not torch.allclose(result.reconstructed_y.cpu(), decoy_y)
+    assert dlg.reconstructed_x is not None and idlg.reconstructed_x is not None
+    assert dlg.reconstructed_y is not None and idlg.reconstructed_y is not None
+    assert torch.allclose(idlg.reconstructed_x, dlg.reconstructed_x)
+    assert torch.allclose(idlg.reconstructed_y, dlg.reconstructed_y)
+    assert idlg.reconstructed_y.shape == true_y.shape
+    assert torch.allclose(idlg.reconstructed_y.cpu(), dlg.reconstructed_y.cpu())
+    assert idlg.gradient_mse == pytest.approx(dlg.gradient_mse)
 
 
 

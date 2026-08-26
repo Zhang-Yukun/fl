@@ -14,7 +14,12 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 
 from fedlab.modeling import build_model
-from fedlab.security.attack_tasks import infer_classification_label, is_classification_attack, time_series_total_variation
+from fedlab.security.attack_tasks import (
+    idlg_uses_dlg_target_optimization,
+    infer_classification_label,
+    is_classification_attack,
+    time_series_total_variation,
+)
 from fedlab.security.registry import (
     attack_primary_metric_direction,
     build_attack_artifact_payload,
@@ -566,10 +571,9 @@ def _attack_loop(
                     inferred_y = None
                 if inferred_y is None:
                     optimize_dummy_y = True
-            elif not optimize_dummy_y:
-                # iDLG's label-inference shortcut is specific to single-sample classification.
-                # For forecasting/regression payloads, fixing the probe target would inject oracle
-                # information, so fall back to optimizing the target tensor jointly.
+            elif not optimize_dummy_y and idlg_uses_dlg_target_optimization():
+                # Time-series iDLG has no paper-backed closed-form target inference, so
+                # it intentionally degenerates to DLG's joint target optimization.
                 optimize_dummy_y = True
             if optimize_dummy_y:
                 if real_y.ndim == 1 and not torch.is_floating_point(real_y):
