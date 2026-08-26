@@ -111,7 +111,7 @@ def _classification_config(
         'centralized': {'rounds': 1},
         'federated': {'algorithm': algorithm, 'rounds': 1, 'local_epochs': 1},
         'transport': {'upload_mode': 'update', 'download_mode': 'model'},
-        'attack': {'enabled': False, 'target_type': 'gradient', 'frequency_rounds': 1, 'steps': 1, 'async_enabled': False, 'device': 'same'},
+        'attack': {'enabled': False, 'target_type': 'update_payload', 'frequency_rounds': 1, 'steps': 1, 'async_enabled': False, 'device': 'same'},
         'tracking': {'enabled': False},
         'evaluation': {'metrics': ['accuracy']},
         'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},

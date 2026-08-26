@@ -1,4 +1,4 @@
-"""DLG and iDLG-style reconstruction attacks for gradients and transmitted updates."""
+"""DLG and iDLG-style reconstruction attacks for transmitted updates."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ class AttackResult:
     success: bool
     success_threshold: float
     gradient_mse: float
-    target_type: str = "gradient"
+    target_type: str = "update_payload"
     exact_target_mse: float | None = None
     nearest_client_train_mse: float | None = None
     nearest_client_train_indices: list[int] | None = None
@@ -96,8 +96,8 @@ def _normalize_target_type(target_type: str | None, config: dict[str, Any]) -> s
 
     value = target_type or config.get("attack", {}).get("target_type", "update_payload")
     normalized = str(value).lower()
-    if normalized not in {"gradient", "update_payload"}:
-        raise ValueError(f"Unsupported attack target type: {value}")
+    if normalized != "update_payload":
+        raise ValueError(f"Unsupported attack target type: {value}; only update_payload is supported")
     return normalized
 
 
@@ -106,9 +106,7 @@ def _normalize_reference_metric(config: dict[str, Any], target_type: str) -> str
 
     value = str(config.get("attack", {}).get("reference_metric", "auto")).lower()
     if value == "auto":
-        if target_type == "update_payload":
-            return "nearest_client_train_mse"
-        return "reconstruction_mse"
+        return "nearest_client_train_mse"
     if value not in {"reconstruction_mse", "nearest_client_train_mse"}:
         raise ValueError(f"Unsupported attack reference metric: {value}")
     return value
@@ -119,7 +117,7 @@ def _normalize_report_metrics(config: dict[str, Any], target_type: str) -> set[s
 
     value = config.get("attack", {}).get("report_metrics", "auto")
     if value == "auto" or value is None:
-        return {"nearest_client_train_mse"} if target_type == "update_payload" else {"exact_target_mse"}
+        return {"nearest_client_train_mse"}
     if isinstance(value, str):
         items = [item.strip().lower() for item in value.split(",") if item.strip()]
     else:
@@ -165,15 +163,6 @@ def _attack_loss(config: dict[str, Any], pred: torch.Tensor, target: torch.Tenso
     return criterion(pred, target)
 
 
-def _gradient_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_grads: list[torch.Tensor], config: dict[str, Any]) -> torch.Tensor:
-    """Compute squared distance between dummy and intercepted gradients."""
-
-    pred = model(x)
-    loss = _attack_loss(config, pred, y)
-    trainable_parameters = tuple(parameter for parameter in model.parameters() if parameter.requires_grad)
-    grads = torch.autograd.grad(loss, trainable_parameters, create_graph=True)
-    return sum(torch.mean((grad - target.to(grad.device)) ** 2) for grad, target in zip(grads, target_grads))
-
 
 def _predicted_trainable_update(model: nn.Module, x: torch.Tensor, y: torch.Tensor, config: dict[str, Any]) -> OrderedDict[str, torch.Tensor]:
     """Approximate the transmitted one-step local update for one dummy batch."""
@@ -215,13 +204,6 @@ def _update_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_
         raise ValueError("Attack target update does not overlap with any trainable model parameter")
     return distance
 
-
-def _time_series_total_variation(x: torch.Tensor) -> torch.Tensor:
-    """Return a small total-variation regularizer for 1D windows."""
-
-    if x.ndim < 3 or x.shape[1] <= 1:
-        return torch.tensor(0.0, device=x.device, dtype=x.dtype)
-    return torch.mean(torch.abs(x[:, 1:, :] - x[:, :-1, :]))
 
 
 def _prepare_attack_model(config: dict[str, Any], state: StateDict, device: torch.device) -> nn.Module:
@@ -543,10 +525,7 @@ def _attack_loop(
     target_clip = attack_cfg.get("target_clip")
     tv_weight = float(attack_cfg.get("tv_weight", 0.0))
     seed = attack_cfg.get("seed")
-    if resolved_target_type == "gradient":
-        prepared_target = [grad.to(device) for grad in target]
-    else:
-        prepared_target = OrderedDict((name, tensor.detach().cpu().clone()) for name, tensor in target.items())
+    prepared_target = OrderedDict((name, tensor.detach().cpu().clone()) for name, tensor in target.items())
     overall_start = time.perf_counter()
     best_objective_mse = float("inf")
     best_x = real_x.to(device)
@@ -601,10 +580,7 @@ def _attack_loop(
                         """Evaluate the current dummy variables for one LBFGS step."""
 
                         optimizer.zero_grad(set_to_none=True)
-                        if resolved_target_type == "gradient":
-                            dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target, config)
-                        else:
-                            dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
+                        dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
                         if tv_weight > 0:
                             dist = dist + tv_weight * time_series_total_variation(dummy_x)
                         holder["loss"] = float(dist.detach().cpu().item())
@@ -615,10 +591,7 @@ def _attack_loop(
                     dist_value = holder.get("loss", float("inf"))
                 else:
                     optimizer.zero_grad(set_to_none=True)
-                    if resolved_target_type == "gradient":
-                        dist = _gradient_distance(model, dummy_x, dummy_y, prepared_target, config)
-                    else:
-                        dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
+                    dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
                     if tv_weight > 0:
                         dist = dist + tv_weight * time_series_total_variation(dummy_x)
                     dist_value = float(dist.detach().cpu().item())

@@ -2,13 +2,13 @@ import pytest
 import torch
 
 from fedlab.modeling import build_model
-from fedlab.engine.training import first_batch_gradient, first_batch_sample
+from fedlab.engine.training import first_batch_sample
 from fedlab.security.attacks import AttackResult, apply_set_recovery_metrics, dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
 from fedlab.security.registry import register_attack_artifact_field, register_attack_record_field, register_attack_summary_metric, register_recovery_metric
 from fedlab.utils.serialization import serialize_model, subtract_state
 
 
-def _tiny_patchtst_config(target_type: str = "update_payload"):
+def _tiny_patchtst_config():
     return {
         "runtime": {"device": "cpu"},
         "data": {"seq_len": 8, "pred_len": 2},
@@ -27,7 +27,7 @@ def _tiny_patchtst_config(target_type: str = "update_payload"):
             "dropout": 0.0,
         },
         "attack": {
-            "target_type": target_type,
+            "target_type": "update_payload",
             "report_metrics": "auto",
             "steps": 1,
             "lr": 0.05,
@@ -47,7 +47,7 @@ def _tiny_patchtst_config(target_type: str = "update_payload"):
     }
 
 
-def _tiny_classification_config(target_type: str = "update_payload"):
+def _tiny_classification_config():
     return {
         "runtime": {"device": "cpu"},
         "task": {"type": "classification"},
@@ -55,7 +55,7 @@ def _tiny_classification_config(target_type: str = "update_payload"):
         "training": {"lr": 0.01, "loss": "cross_entropy", "optimizer": "adam"},
         "model": {"name": "small_cnn", "hidden_channels": 4, "dropout": 0.0},
         "attack": {
-            "target_type": target_type,
+            "target_type": "update_payload",
             "report_metrics": "auto",
             "steps": 2,
             "lr": 0.05,
@@ -74,51 +74,6 @@ def _tiny_classification_config(target_type: str = "update_payload"):
         "evaluation": {"metrics": ["cross_entropy", "accuracy"]},
     }
 
-
-def test_gradient_attacks_run_on_vendored_patchtst():
-    config = _tiny_patchtst_config(target_type="gradient")
-    device = torch.device("cpu")
-    model = build_model(config).to(device)
-    x = torch.randn(1, 8, 1)
-    y = torch.randn(1, 2, 1)
-    loss = torch.nn.functional.mse_loss(model(x), y)
-    grads = torch.autograd.grad(loss, tuple(model.parameters()))
-    state = serialize_model(model)
-
-    dlg = dlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
-    idlg = idlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
-
-    assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
-    assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
-    for result in (dlg, idlg):
-        assert result.mse == result.reconstruction_mse
-        assert result.target_type == "gradient"
-        assert torch.isfinite(torch.tensor(result.psnr))
-        assert torch.isfinite(torch.tensor(result.ssim))
-        assert result.iterations == 1
-        assert result.time_seconds >= 0.0
-        assert result.success_threshold == 0.5
-        record = result.to_record()
-        assert record["primary_metric_name"] == result.metric_name
-        assert record["primary_metric_value"] == result.mse
-        assert {"psnr", "ssim", "iterations", "time_seconds", "objective_mse", "primary_metric_name", "primary_metric_value", "target_type"} <= set(record)
-        assert "mse" not in record
-        assert "gradient_mse" not in record
-
-    dlg.client_id = "Nd2O3"
-    idlg.client_id = "CeO2"
-    summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
-    assert set(summary["methods"]) == {"DLG", "iDLG"}
-    assert summary["primary_metric_name"] == "reconstruction_mse"
-    assert summary["primary_metric_direction"] == "higher_is_more_private"
-    assert summary["target_type"] == "gradient"
-    assert summary["overall_avg_primary_metric_value"] is not None
-    assert summary["success_rate_threshold"] == 0.03
-    assert summary["methods"]["DLG"]["primary_metric_name"] == "reconstruction_mse"
-    assert summary["methods"]["DLG"]["total_count"] == 1
-    assert "avg_objective_mse" in summary["methods"]["DLG"]
-    assert set(summary["clients"]) == {"Nd2O3", "CeO2"}
-    assert summary["clients"]["Nd2O3"]["methods"]["DLG"]["total_count"] == 1
 
 
 def test_attack_summary_uses_registered_primary_metric_direction(monkeypatch):
@@ -147,7 +102,7 @@ def test_attack_summary_uses_registered_primary_metric_direction(monkeypatch):
         success=False,
         success_threshold=0.5,
         gradient_mse=0.0,
-        target_type='gradient',
+        target_type='update_payload',
         metric_name='custom_privacy',
     )
     result.custom_privacy = 0.8
@@ -161,7 +116,7 @@ def test_attack_summary_uses_registered_primary_metric_direction(monkeypatch):
 
 
 def test_update_payload_attacks_run_on_vendored_patchtst():
-    config = _tiny_patchtst_config(target_type="update_payload")
+    config = _tiny_patchtst_config()
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(1, 8, 1)
@@ -217,29 +172,12 @@ def test_first_batch_sample_can_span_multiple_batches_when_max_samples_exceeds_b
 
 
 
-def test_attack_gradient_sampling_supports_eval_mode():
-    config = _tiny_patchtst_config(target_type="gradient")
-    config["model"]["dropout"] = 0.5
-    device = torch.device("cpu")
-    x = torch.randn(2, 8, 1)
-    y = torch.randn(2, 2, 1)
-    loader = [(x, y)]
-
-    torch.manual_seed(11)
-    model_a = build_model(config).to(device)
-    grads_a, sample_x_a, _ = first_batch_gradient(model_a, loader, device, max_samples=1, model_mode="eval")
-    torch.manual_seed(11)
-    model_b = build_model(config).to(device)
-    grads_b, sample_x_b, _ = first_batch_gradient(model_b, loader, device, max_samples=1, model_mode="eval")
-
-    assert torch.allclose(sample_x_a, sample_x_b)
-    assert all(torch.allclose(left, right) for left, right in zip(grads_a, grads_b))
-
-
 
 def test_attack_serialization_supports_custom_registered_fields(tmp_path, monkeypatch):
     import fedlab.security.registry as registry_module
 
+    registry_module.list_registered_attack_record_fields()
+    registry_module.list_registered_attack_artifact_fields()
     snapshot_record_fields = dict(registry_module._ATTACK_RECORD_FIELDS)
     snapshot_record_order = list(registry_module._ATTACK_RECORD_FIELD_ORDER)
     snapshot_artifact_fields = dict(registry_module._ATTACK_ARTIFACT_FIELDS)
@@ -276,16 +214,20 @@ def test_attack_serialization_supports_custom_registered_fields(tmp_path, monkey
 
 
 def test_attack_artifacts_persist_reconstructions(tmp_path):
-    config = _tiny_patchtst_config(target_type="gradient")
+    config = _tiny_patchtst_config()
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(1, 8, 1)
     y = torch.randn(1, 2, 1)
-    loss = torch.nn.functional.mse_loss(model(x), y)
-    grads = torch.autograd.grad(loss, tuple(model.parameters()))
     state = serialize_model(model)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["lr"])
+    optimizer.zero_grad(set_to_none=True)
+    loss = torch.nn.functional.mse_loss(model(x), y)
+    loss.backward()
+    optimizer.step()
+    target_update = subtract_state(serialize_model(model), state)
 
-    result = dlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
+    result = dlg_attack(config, state, target_update, x, y, device, target_type="update_payload")
     result.client_id = "Nd2O3"
     result.round_index = 2
     result.sample_index = 0
@@ -323,7 +265,7 @@ def test_apply_set_recovery_metrics_supports_custom_registered_metric(monkeypatc
         default_threshold=lambda _config, _data_range: 0.01,
     )
 
-    config = _tiny_patchtst_config(target_type='update_payload')
+    config = _tiny_patchtst_config()
     config['attack']['recovery_match_metric'] = 'l1'
     config['attack']['recovery_success_metric'] = 'l1'
     results = [
@@ -355,7 +297,7 @@ def test_apply_set_recovery_metrics_supports_custom_registered_metric(monkeypatc
 
 
 def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and_classification():
-    ts_config = _tiny_patchtst_config(target_type="update_payload")
+    ts_config = _tiny_patchtst_config()
     ts_config["attack"]["recovery_success_threshold"] = 0.01
     ts_results = [
         AttackResult(
@@ -399,7 +341,7 @@ def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and
     assert ts_results[0].success is True
     assert ts_results[1].success is False
 
-    cls_config = _tiny_classification_config(target_type="update_payload")
+    cls_config = _tiny_classification_config()
     cls_config["attack"]["recovery_success_threshold"] = 0.01
     cls_results = [
         AttackResult(
@@ -427,46 +369,10 @@ def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and
 
 
 
-def test_classification_attacks_support_integer_labels_and_logits():
-    config = _tiny_classification_config(target_type="gradient")
-    device = torch.device("cpu")
-    model = build_model(config).to(device)
-    x = torch.randn(1, 1, 4, 4)
-    y = torch.tensor([2], dtype=torch.long)
-    loss = torch.nn.functional.cross_entropy(model(x), y)
-    grads = torch.autograd.grad(loss, tuple(model.parameters()))
-    state = serialize_model(model)
-
-    dlg = dlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
-    idlg = idlg_attack(config, state, [grad.detach() for grad in grads], x, y, device, target_type="gradient")
-
-    assert dlg.reconstructed_x.shape == x.shape
-    assert dlg.reconstructed_y.shape == (1, 3)
-    assert idlg.reconstructed_y.shape == y.shape
-    assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
-    assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
-
-
-def test_classification_idlg_inferrs_label_from_gradient_target():
-    config = _tiny_classification_config(target_type="gradient")
-    device = torch.device("cpu")
-    model = build_model(config).to(device)
-    x = torch.randn(1, 1, 4, 4)
-    true_y = torch.tensor([2], dtype=torch.long)
-    decoy_y = torch.tensor([0], dtype=torch.long)
-    loss = torch.nn.functional.cross_entropy(model(x), true_y)
-    grads = torch.autograd.grad(loss, tuple(model.parameters()))
-    state = serialize_model(model)
-
-    result = idlg_attack(config, state, [grad.detach() for grad in grads], x, decoy_y, device, target_type="gradient")
-
-    assert result.reconstructed_y is not None
-    assert torch.equal(result.reconstructed_y.cpu(), true_y)
-    assert not torch.equal(result.reconstructed_y.cpu(), decoy_y)
 
 
 def test_classification_idlg_inferrs_label_from_update_payload():
-    config = _tiny_classification_config(target_type="update_payload")
+    config = _tiny_classification_config()
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(1, 1, 4, 4)
@@ -487,28 +393,9 @@ def test_classification_idlg_inferrs_label_from_update_payload():
     assert not torch.equal(result.reconstructed_y.cpu(), decoy_y)
 
 
-def test_classification_idlg_broadcasts_one_inferred_pseudo_label_for_multi_sample_gradients():
-    config = _tiny_classification_config(target_type="gradient")
-    device = torch.device("cpu")
-    model = build_model(config).to(device)
-    x = torch.randn(2, 1, 4, 4)
-    true_y = torch.tensor([2, 2], dtype=torch.long)
-    decoy_y = torch.tensor([0, 0], dtype=torch.long)
-    loss = torch.nn.functional.cross_entropy(model(x), true_y)
-    grads = torch.autograd.grad(loss, tuple(model.parameters()))
-    state = serialize_model(model)
-
-    result = idlg_attack(config, state, [grad.detach() for grad in grads], x, decoy_y, device, target_type="gradient")
-
-    assert result.reconstructed_y is not None
-    assert result.reconstructed_y.shape == (2,)
-    assert result.reconstructed_y.dtype == torch.long
-    assert torch.equal(result.reconstructed_y.cpu(), true_y)
-    assert not torch.equal(result.reconstructed_y.cpu(), decoy_y)
-
 
 def test_classification_update_payload_idlg_broadcasts_one_inferred_pseudo_label_for_multi_sample_batches():
-    config = _tiny_classification_config(target_type="update_payload")
+    config = _tiny_classification_config()
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(2, 1, 4, 4)
@@ -533,7 +420,7 @@ def test_classification_update_payload_idlg_broadcasts_one_inferred_pseudo_label
 
 
 def test_time_series_idlg_degenerates_to_dlg_for_update_payloads():
-    config = _tiny_patchtst_config(target_type="update_payload")
+    config = _tiny_patchtst_config()
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(1, 8, 1)
@@ -561,7 +448,7 @@ def test_time_series_idlg_degenerates_to_dlg_for_update_payloads():
 
 
 def test_classification_update_payload_attacks_keep_reference_labels():
-    config = _tiny_classification_config(target_type="update_payload")
+    config = _tiny_classification_config()
     device = torch.device("cpu")
     model = build_model(config).to(device)
     x = torch.randn(1, 1, 4, 4)

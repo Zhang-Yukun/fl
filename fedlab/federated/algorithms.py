@@ -448,106 +448,6 @@ def _resolve_test_metric_views(server, active_test_metrics):
     return protocol_test_metrics, oracle_test_metrics
 
 
-def _protect_attack_gradients(
-    config: dict[str, Any],
-    grads: list[torch.Tensor],
-    round_index: int,
-    client_index: int,
-    sample_index: int,
-) -> list[torch.Tensor]:
-    """Apply the configured upload protection to intercepted attack gradients.
-
-    Example:
-        ``protected = _protect_attack_gradients(config, grads, 0, 0, 0)`` mirrors
-        the client-side clipping, noise, and sparsification seen by the server.
-    """
-
-    protected = [grad.detach().cpu().clone() for grad in grads]
-    algorithm = str(config.get("federated", {}).get("algorithm", "fedavg")).lower()
-    if not protected or algorithm in {"fedavg", "fedaware"}:
-        return protected
-
-    shapes = [tuple(grad.shape) for grad in protected]
-    flat = torch.cat([grad.reshape(-1) for grad in protected])
-    attack_cfg = config.get("attack", {})
-    seed = attack_cfg.get("seed")
-    generator = None
-    if seed is not None:
-        generator = torch.Generator(device="cpu")
-        generator.manual_seed(int(seed) + round_index * 1000 + client_index * 100 + sample_index)
-
-    if algorithm in {"soteriafl", "dp_topk_fedavg"}:
-        privacy_cfg = config.get("privacy", {})
-        clip_norm = float(privacy_cfg.get("clip_norm", 1.0))
-        noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.1))
-        if clip_norm > 0:
-            norm = torch.linalg.vector_norm(flat)
-            scale = min(1.0, float(clip_norm / (norm + 1e-12)))
-            flat = flat * scale
-        if noise_multiplier > 0 and clip_norm > 0:
-            flat = flat + torch.randn(flat.shape, generator=generator, dtype=flat.dtype) * (noise_multiplier * clip_norm)
-
-    if algorithm == "secure_quantized_fedavg":
-        privacy_cfg = config.get("privacy", {})
-        clip_norm = float(privacy_cfg.get("clip_norm", 0.0))
-        noise_multiplier = float(privacy_cfg.get("noise_multiplier", 0.0))
-        if clip_norm > 0:
-            norm = torch.linalg.vector_norm(flat)
-            scale = min(1.0, float(clip_norm / (norm + 1e-12)))
-            flat = flat * scale
-        if noise_multiplier > 0 and clip_norm > 0:
-            flat = flat + torch.randn(flat.shape, generator=generator, dtype=flat.dtype) * (noise_multiplier * clip_norm)
-        quant_dtype = str(config.get("federated", {}).get("quantization_dtype", "float16")).lower()
-        if quant_dtype == "float16":
-            flat = flat.to(torch.float16).to(torch.float32)
-        elif quant_dtype == "bfloat16":
-            flat = flat.to(torch.bfloat16).to(torch.float32)
-        elif quant_dtype in {"int8", "qint8", "absmax_int8", "scaled_int8"}:
-            max_abs = float(flat.abs().max().item())
-            scale = max(max_abs / 127.0, 1e-12)
-            normalized = torch.clamp(flat / scale, -127.0, 127.0)
-            if bool(config.get("federated", {}).get("quantization_stochastic_rounding", False)):
-                lower = torch.floor(normalized)
-                probability = normalized - lower
-                random = torch.rand(normalized.shape, generator=generator, dtype=torch.float32)
-                rounded = lower + (random < probability).to(torch.float32)
-            else:
-                rounded = torch.round(normalized)
-            flat = torch.clamp(rounded, -127.0, 127.0).to(torch.int8).to(torch.float32) * scale
-    if algorithm == "sign_fedavg":
-        scale = max(float(flat.abs().mean().item()), 1e-12)
-        flat = torch.sign(flat).to(torch.float32) * scale
-    if algorithm == "qsgd_fedavg":
-        levels = int(config.get("federated", {}).get("qsgd_levels", 127))
-        norm = max(float(torch.linalg.vector_norm(flat).item()), 1e-12)
-        scaled = torch.clamp(flat.abs() / norm, 0.0, 1.0) * float(levels)
-        lower = torch.floor(scaled)
-        probability = scaled - lower
-        random = torch.rand(scaled.shape, generator=generator, dtype=torch.float32) if generator is not None else torch.rand(scaled.shape, dtype=torch.float32)
-        bucket = torch.clamp(lower + (random < probability).to(torch.float32), 0.0, float(levels))
-        flat = torch.sign(flat).to(torch.float32) * bucket * (norm / float(levels))
-
-    if algorithm in {"compressed_fedavg", "sparse_fedavg", "dp_topk_fedavg", "soteriafl", "randomk_fedavg"}:
-        fraction = float(config.get("federated", {}).get("topk_fraction", 0.05))
-        total = flat.numel()
-        k = max(1, int(total * fraction))
-        sparse = torch.zeros_like(flat)
-        if algorithm in {"soteriafl", "randomk_fedavg"}:
-            indices = torch.randperm(total, generator=generator)[:k]
-            sparse[indices] = flat[indices] * (float(total) / float(k))
-        else:
-            _, indices = torch.topk(flat.abs(), k)
-            sparse[indices] = flat[indices]
-        flat = sparse
-
-    rebuilt: list[torch.Tensor] = []
-    offset = 0
-    for grad, shape in zip(protected, shapes):
-        length = grad.numel()
-        rebuilt.append(flat[offset : offset + length].reshape(shape).to(dtype=grad.dtype))
-        offset += length
-    return rebuilt
-
 
 def _clone_state(state: StateDict) -> StateDict:
     """Return a detached CPU clone of a serialized model state."""
@@ -589,9 +489,12 @@ def _update_best_checkpoint(
 
 
 def _attack_target_type(config: dict[str, Any]) -> str:
-    """Return the configured interception target for reconstruction attacks."""
+    """Return the only supported interception target for reconstruction attacks."""
 
-    return str(config.get("attack", {}).get("target_type", "update_payload")).lower()
+    configured = str(config.get("attack", {}).get("target_type", "update_payload")).lower()
+    if configured not in {"", "update_payload"}:
+        logger.warning("Ignoring unsupported attack.target_type=%s and using update_payload", configured)
+    return "update_payload"
 
 
 def _extract_attack_payload(
@@ -926,89 +829,6 @@ def _resolve_attack_device(config: dict[str, Any]) -> torch.device:
         requested = "cpu"
     return torch.device(requested)
 
-
-def _build_attack_round_task(
-    config: dict[str, Any],
-    clients: list[FederatedClient],
-    results,
-    round_index: int,
-    max_rounds: int,
-    round_base_state: StateDict,
-    attack_target_type: str,
-    server: FederatedServer | None = None,
-    round_context: dict[str, Any] | None = None,
-) -> AttackRoundTask | None:
-    """Capture one round of attack inputs as immutable CPU snapshots."""
-
-    if not _should_run_attack(config, round_index, max_rounds):
-        return None
-    attack_cfg = config.get("attack", {})
-    max_samples = None
-    selected_clients = _select_attack_clients(clients, config, round_index)
-    round_context = round_context or {}
-    results_by_client = {result.client_id: result for result in results}
-    samples: list[AttackSampleTask] = []
-    evaluations_per_client = 0
-    for client_index, client in enumerate(selected_clients):
-        result = results_by_client[client.client_id]
-        sample_count = _resolve_attack_sample_count(attack_cfg, _client_attack_available_batches(client))
-        max_samples = _resolve_attack_max_samples(attack_cfg, _client_attack_available_samples(client))
-        evaluations_per_client = max(evaluations_per_client, sample_count)
-        for sample_index in range(sample_count):
-            reference_inputs = None
-            reference_targets = None
-            train_loader = getattr(client, "train_loader", None)
-            scaler = getattr(train_loader, "scaler", None)
-            if attack_target_type == "gradient":
-                grads, real_x, real_y = client.gradient_sample(
-                    round_base_state,
-                    max_samples=max_samples,
-                    batch_index=sample_index,
-                )
-                target = _protect_attack_gradients(
-                    config,
-                    grads,
-                    round_index=round_index,
-                    client_index=client_index,
-                    sample_index=sample_index,
-                )
-            else:
-                real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
-                target = _extract_attack_payload(
-                    config,
-                    result,
-                    results,
-                    server=server,
-                    round_base_state=round_base_state,
-                    round_index=round_index,
-                    round_context=round_context,
-                )
-                reference_inputs = client.train_reference_inputs()
-                reference_target_getter = getattr(client, "train_reference_targets", None)
-                if callable(reference_target_getter):
-                    reference_targets = reference_target_getter()
-            samples.append(
-                AttackSampleTask(
-                    client_id=client.client_id,
-                    round_index=round_index,
-                    sample_index=sample_index,
-                    target_type=attack_target_type,
-                    round_base_state=_clone_state(round_base_state),
-                    target=_clone_attack_target(target),
-                    real_x=real_x.detach().cpu().clone(),
-                    real_y=real_y.detach().cpu().clone(),
-                    reference_inputs=None if reference_inputs is None else reference_inputs.detach().cpu().clone(),
-                    reference_targets=None if reference_targets is None else reference_targets.detach().cpu().clone(),
-                    scale_mean=None if getattr(scaler, "mean", None) is None else [float(value) for value in scaler.mean.reshape(-1).tolist()],
-                    scale_std=None if getattr(scaler, "std", None) is None else [float(value) for value in scaler.std.reshape(-1).tolist()],
-                )
-            )
-    return AttackRoundTask(
-        round_index=round_index,
-        clients_this_round=len(selected_clients),
-        evaluations_per_client=evaluations_per_client,
-        samples=samples,
-    )
 
 
 def _inverse_plot_tensor(values: torch.Tensor, mean: list[float] | None, std: list[float] | None) -> torch.Tensor:
@@ -1662,20 +1482,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             round_context=round_context,
         )
         save_captured_update_records(output_dir, captured_update_records)
-        if attack_target_type == "update_payload":
-            attack_task = build_update_attack_round_task(config, captured_update_records, round_index, max_rounds)
-        else:
-            attack_task = _build_attack_round_task(
-                config,
-                clients,
-                results,
-                round_index,
-                max_rounds,
-                round_base_state,
-                attack_target_type,
-                server=server,
-                round_context=round_context,
-            )
+        attack_task = build_update_attack_round_task(config, captured_update_records, round_index, max_rounds)
         attack_manager.submit(attack_task)
         _save_periodic_federated_snapshot(
             output_dir=output_dir,

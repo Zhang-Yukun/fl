@@ -27,7 +27,7 @@ from fedlab.utils.transport import (
     estimate_download_transport_bytes,
     estimate_upload_transport_bytes,
 )
-from fedlab.engine.training import build_training_optimizer, first_batch_gradient, first_batch_sample, train_n_steps, train_one_epoch
+from fedlab.engine.training import build_training_optimizer, first_batch_sample, train_n_steps, train_one_epoch
 
 
 @dataclass
@@ -285,19 +285,6 @@ class FederatedClient:
         estimate_upload_transport_bytes(result, round_index=round_index)
         return result
 
-    def gradient_sample(self, global_state: StateDict, max_samples: int | None = None, batch_index: int = 0):
-        """Return gradients for a selected batch for DLG/iDLG evaluation."""
-
-        model = build_model(self.config).to(self.device)
-        load_serialized(model, copy.deepcopy(global_state), self.device)
-        return first_batch_gradient(
-            model,
-            self.train_loader,
-            self.device,
-            max_samples=max_samples,
-            model_mode=str(self.config.get("attack", {}).get("model_mode", "train")),
-            batch_index=batch_index,
-        )
 
     def sample_batch(self, max_samples: int | None = None, batch_index: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
         """Return one selected local batch for payload-based reconstruction attacks.

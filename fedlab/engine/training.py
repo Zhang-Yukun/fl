@@ -208,32 +208,3 @@ def first_batch_sample(
     x, y = _select_loader_samples(loader, max_samples=max_samples, batch_index=batch_index)
     return x.to(device), y.to(device)
 
-
-def first_batch_gradient(
-    model: nn.Module,
-    loader: Iterable,
-    device: torch.device,
-    max_samples: int | None = None,
-    model_mode: str = "train",
-    batch_index: int = 0,
-) -> tuple[list[torch.Tensor], torch.Tensor, torch.Tensor]:
-    """Return gradients for a selected batch, useful for reconstruction attacks.
-
-    Example:
-        ``first_batch_gradient(model, loader, device, max_samples=1, model_mode="eval", batch_index=2)``
-        attacks the third batch from the current loader order.
-    """
-
-    if model_mode == "eval":
-        model.eval()
-    else:
-        model.train()
-    criterion = _loss_fn(model)
-    x, y = _select_loader_samples(loader, max_samples=max_samples, batch_index=batch_index)
-    x = x.to(device)
-    y = y.to(device)
-    model.zero_grad(set_to_none=True)
-    loss = criterion(_prediction(model, x), y)
-    trainable_parameters = tuple(parameter for parameter in model.parameters() if parameter.requires_grad)
-    grads = torch.autograd.grad(loss, trainable_parameters, create_graph=False)
-    return [grad.detach().cpu() for grad in grads], x.detach().cpu(), y.detach().cpu()

@@ -58,20 +58,15 @@ def infer_classification_label(
     num_classes = _classification_num_classes(config, model=model, sample_x=reference_x[:1])
     named_parameters = [(name, parameter) for name, parameter in model.named_parameters() if parameter.requires_grad]
     candidate_signals: list[tuple[str, torch.Tensor]] = []
-    if target_type == "gradient":
-        for (_name, _parameter), tensor in zip(named_parameters, target):
-            signal = _candidate_label_signal_from_tensor(tensor, num_classes)
-            if signal is not None:
-                candidate_signals.append(("", signal))
-    else:
-        for name, _parameter in named_parameters:
-            if name not in target:
-                continue
-            signal = _candidate_label_signal_from_tensor(target[name], num_classes)
-            if signal is not None:
-                candidate_signals.append((name, signal))
+    for name, _parameter in named_parameters:
+        if name not in target:
+            continue
+        signal = _candidate_label_signal_from_tensor(target[name], num_classes)
+        if signal is not None:
+            candidate_signals.append((name, signal))
     if not candidate_signals:
         return None
     _preferred_name, preferred_signal = candidate_signals[-1]
-    inferred = int(torch.argmin(preferred_signal).item()) if target_type == "gradient" else int(torch.argmax(preferred_signal).item())
+    del target_type
+    inferred = int(torch.argmax(preferred_signal).item())
     return torch.full((int(reference_x.shape[0]),), inferred, device=reference_x.device, dtype=torch.long)

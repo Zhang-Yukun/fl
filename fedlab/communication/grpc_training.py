@@ -22,11 +22,9 @@ from fedlab.communication.grpc_service import FederatedRpcClient, FederatedRpcSe
 from fedlab.datasets import build_federated_loaders
 from fedlab.federated.algorithms import (
     AsyncAttackManager,
-    _attack_target_type,
     _build_federated_resume_state,
     _build_federated_summary,
     _resolve_test_metric_views,
-    _build_attack_round_task,
     _capture_round_update_records,
     _clone_state,
     _round_history_communication_summary,
@@ -160,7 +158,7 @@ class GrpcFederatedCoordinator:
         self.lock = threading.Lock()
         self.attack_manager = AsyncAttackManager(config, self.tracker)
         self.attack_results = self.attack_manager.attack_results
-        self.attack_target_type = _attack_target_type(config)
+        self.attack_target_type = 'update_payload'
         self.best_global_state = _clone_state(self.server.global_state)
         self.best_oracle_state = None if not self.server._uses_oracle_evaluation() else _clone_state(self.server.oracle_global_state)
         self.best_metrics: dict[str, float] | None = None

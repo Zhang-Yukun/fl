@@ -25,7 +25,6 @@ from fedlab.federated.algorithms import (
     AsyncAttackManager,
     AttackRoundResult,
     AttackRoundTask,
-    _protect_attack_gradients,
     _round_attack_payload,
     _round_history_communication_summary,
     _wandb_cumulative_communication_payload,
@@ -109,30 +108,6 @@ def test_wandb_cumulative_communication_payload_uses_history_totals(tmp_path):
     assert payload["cumulative/total_transport_bytes"] == metrics[0]["total_transport_bytes"]
 
 
-def test_protect_attack_gradients_keeps_fedavg_dense_signal():
-    config = {"federated": {"algorithm": "fedavg"}, "attack": {"seed": 7}}
-    grads = [torch.tensor([[1.0, -2.0]]), torch.tensor([3.0])]
-
-    protected = _protect_attack_gradients(config, grads, round_index=0, client_index=0, sample_index=0)
-
-    assert len(protected) == len(grads)
-    assert all(torch.equal(left, right) for left, right in zip(protected, grads))
-
-
-def test_protect_attack_gradients_applies_dp_topk_mask():
-    config = {
-        "federated": {"algorithm": "dp_topk_fedavg", "topk_fraction": 0.25},
-        "privacy": {"clip_norm": 100.0, "noise_multiplier": 0.0},
-        "attack": {"seed": 11},
-    }
-    grads = [torch.tensor([1.0, -3.0, 2.0, 0.5]), torch.tensor([0.1, -0.2, 5.0, 0.3])]
-
-    protected = _protect_attack_gradients(config, grads, round_index=0, client_index=0, sample_index=0)
-    flat = torch.cat([tensor.reshape(-1) for tensor in protected])
-
-    assert torch.count_nonzero(flat).item() == 2
-    assert flat[1].item() == -3.0
-    assert flat[6].item() == 5.0
 
 
 def test_standard_fedavg_uses_dense_updates(tmp_path):
@@ -816,26 +791,6 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert set(result["attack_summary"]["clients"]) == {"Nd2O3", "CeO2", "La2O3"}
     assert result["attack_summary"]["clients"]["Nd2O3"]["methods"]["DLG"]["total_count"] == 1
 
-
-def test_federated_run_supports_legacy_gradient_attacks(tmp_path):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "attack.enabled=true",
-            "attack.target_type=gradient",
-            "attack.frequency_rounds=1",
-            "attack.max_samples=1",
-            "attack.sample_count=1",
-            "attack.steps=1",
-            "federated.algorithm=fedavg",
-            "federated.rounds=1",
-        ],
-    )
-    config["experiment"]["output_dir"] = str(tmp_path)
-    result = run_federated(config)
-    attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
-    assert {entry["target_type"] for entry in attack_results} == {"gradient"}
-    assert result["attack_target_type"] == "gradient"
 
 
 def test_federated_run_supports_configured_attack_method_subset(tmp_path):
