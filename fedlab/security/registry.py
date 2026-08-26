@@ -32,6 +32,16 @@ class AttackSummaryMetricSpec:
 
 
 @dataclass(frozen=True)
+class AttackTrackingMetricSpec:
+    """One registered attack tracking payload metric."""
+
+    name: str
+    value_getter: Callable[[Any], Any]
+    current_key: str
+    cumulative_key: str | None = None
+
+
+@dataclass(frozen=True)
 class AttackRecordFieldSpec:
     """One registered JSON record field serializer."""
 
@@ -73,6 +83,9 @@ _BUILTIN_ATTACK_RECORD_FIELDS_LOADED = False
 _ATTACK_ARTIFACT_FIELDS: dict[str, AttackArtifactFieldSpec] = {}
 _ATTACK_ARTIFACT_FIELD_ORDER: list[str] = []
 _BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED = False
+_ATTACK_TRACKING_METRICS: dict[str, AttackTrackingMetricSpec] = {}
+_ATTACK_TRACKING_METRIC_ORDER: list[str] = []
+_BUILTIN_ATTACK_TRACKING_METRICS_LOADED = False
 
 
 def _normalize_name(name: str) -> str:
@@ -525,6 +538,53 @@ def build_attack_artifact_payload(result: Any) -> dict[str, Any]:
             value = value.detach().cpu()
         payload[spec.output_key] = value
     return payload
+
+
+def register_attack_tracking_metric(
+    name: str,
+    value_getter: Callable[[Any], Any],
+    *,
+    current_key: str,
+    cumulative_key: str | None = None,
+    replace: bool = False,
+) -> AttackTrackingMetricSpec:
+    """Register one attack tracking payload metric."""
+
+    normalized_name = _normalize_name(name)
+    spec = AttackTrackingMetricSpec(
+        name=normalized_name,
+        value_getter=value_getter,
+        current_key=str(current_key),
+        cumulative_key=None if cumulative_key is None else str(cumulative_key),
+    )
+    existing = _ATTACK_TRACKING_METRICS.get(normalized_name)
+    if existing is not None and existing != spec and not replace:
+        raise ValueError(f'Attack tracking metric already registered: {normalized_name}')
+    _ATTACK_TRACKING_METRICS[normalized_name] = spec
+    if normalized_name not in _ATTACK_TRACKING_METRIC_ORDER:
+        _ATTACK_TRACKING_METRIC_ORDER.append(normalized_name)
+    return spec
+
+
+def _ensure_builtin_attack_tracking_metrics_registered() -> None:
+    global _BUILTIN_ATTACK_TRACKING_METRICS_LOADED
+    if _BUILTIN_ATTACK_TRACKING_METRICS_LOADED:
+        return
+    _BUILTIN_ATTACK_TRACKING_METRICS_LOADED = True
+    register_attack_tracking_metric('exact_target_mse', lambda result: getattr(result, 'exact_target_mse', None), current_key='exact_target_mse', cumulative_key='cumulative_avg_exact_target_mse')
+    register_attack_tracking_metric('nearest_client_train_mse', lambda result: getattr(result, 'nearest_client_train_mse', None), current_key='nearest_client_train_mse', cumulative_key='cumulative_avg_nearest_client_train_mse')
+    register_attack_tracking_metric('budget_recovered_fraction', lambda result: getattr(result, 'budget_recovered_fraction', None), current_key='budget_recovered_fraction', cumulative_key='cumulative_avg_budget_recovered_fraction')
+    register_attack_tracking_metric('coverage_recovered_fraction', lambda result: getattr(result, 'coverage_recovered_fraction', None), current_key='coverage_recovered_fraction', cumulative_key='cumulative_avg_coverage_recovered_fraction')
+    register_attack_tracking_metric('psnr', lambda result: getattr(result, 'psnr', None), current_key='psnr')
+    register_attack_tracking_metric('ssim', lambda result: getattr(result, 'ssim', None), current_key='ssim')
+    register_attack_tracking_metric('iterations', lambda result: getattr(result, 'iterations', None), current_key='iterations')
+    register_attack_tracking_metric('time_seconds', lambda result: getattr(result, 'time_seconds', None), current_key='time_seconds')
+    register_attack_tracking_metric('objective_mse', lambda result: getattr(result, 'gradient_mse', None), current_key='objective_mse', cumulative_key='cumulative_avg_objective_mse')
+
+
+def list_registered_attack_tracking_metrics() -> tuple[AttackTrackingMetricSpec, ...]:
+    _ensure_builtin_attack_tracking_metrics_registered()
+    return tuple(_ATTACK_TRACKING_METRICS[name] for name in _ATTACK_TRACKING_METRIC_ORDER)
 
 
 def _attack_threshold(config: dict[str, Any]) -> float:

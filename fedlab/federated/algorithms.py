@@ -27,7 +27,7 @@ from fedlab.security.attacks import (
     save_attack_artifacts,
     summarize_attack_results,
 )
-from fedlab.security.registry import run_attacks
+from fedlab.security.registry import list_registered_attack_tracking_metrics, run_attacks
 from fedlab.federated.client import FederatedClient
 from fedlab.federated.methods import build_method, is_registered_compressed
 from fedlab.datasets import build_federated_loaders
@@ -1112,32 +1112,14 @@ def _attack_payload_metrics(subset: list[Any], cumulative_subset: list[Any], pre
     payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "reconstruction_mse")
     payload[f"{prefix}/primary_metric_value"] = sum(result.mse for result in subset) / len(subset)
     payload[f"{prefix}/cumulative_avg_primary_metric_value"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
-    exact_values = [getattr(result, "exact_target_mse", None) for result in subset if getattr(result, "exact_target_mse", None) is not None]
-    exact_so_far = [getattr(result, "exact_target_mse", None) for result in cumulative_subset if getattr(result, "exact_target_mse", None) is not None]
-    nearest_values = [getattr(result, "nearest_client_train_mse", None) for result in subset if getattr(result, "nearest_client_train_mse", None) is not None]
-    nearest_so_far = [getattr(result, "nearest_client_train_mse", None) for result in cumulative_subset if getattr(result, "nearest_client_train_mse", None) is not None]
-    if exact_values:
-        payload[f"{prefix}/exact_target_mse"] = _mean_finite(exact_values)
-        payload[f"{prefix}/cumulative_avg_exact_target_mse"] = _mean_finite(exact_so_far)
-    if nearest_values:
-        payload[f"{prefix}/nearest_client_train_mse"] = _mean_finite(nearest_values)
-        payload[f"{prefix}/cumulative_avg_nearest_client_train_mse"] = _mean_finite(nearest_so_far)
-    budget_values = [getattr(result, "budget_recovered_fraction", None) for result in subset if getattr(result, "budget_recovered_fraction", None) is not None]
-    budget_so_far = [getattr(result, "budget_recovered_fraction", None) for result in cumulative_subset if getattr(result, "budget_recovered_fraction", None) is not None]
-    coverage_values = [getattr(result, "coverage_recovered_fraction", None) for result in subset if getattr(result, "coverage_recovered_fraction", None) is not None]
-    coverage_so_far = [getattr(result, "coverage_recovered_fraction", None) for result in cumulative_subset if getattr(result, "coverage_recovered_fraction", None) is not None]
-    if budget_values:
-        payload[f"{prefix}/budget_recovered_fraction"] = _mean_finite(budget_values)
-        payload[f"{prefix}/cumulative_avg_budget_recovered_fraction"] = _mean_finite(budget_so_far)
-    if coverage_values:
-        payload[f"{prefix}/coverage_recovered_fraction"] = _mean_finite(coverage_values)
-        payload[f"{prefix}/cumulative_avg_coverage_recovered_fraction"] = _mean_finite(coverage_so_far)
-    payload[f"{prefix}/psnr"] = sum(result.psnr for result in subset) / len(subset)
-    payload[f"{prefix}/ssim"] = sum(result.ssim for result in subset) / len(subset)
-    payload[f"{prefix}/iterations"] = float(subset[0].iterations)
-    payload[f"{prefix}/time_seconds"] = sum(result.time_seconds for result in subset) / len(subset)
-    payload[f"{prefix}/objective_mse"] = sum(result.gradient_mse for result in subset) / len(subset)
-    payload[f"{prefix}/cumulative_avg_objective_mse"] = _mean_finite([result.gradient_mse for result in cumulative_subset])
+    for spec in list_registered_attack_tracking_metrics():
+        values = [spec.value_getter(result) for result in subset if spec.value_getter(result) is not None]
+        if values:
+            payload[f"{prefix}/{spec.current_key}"] = _mean_finite(values)
+        if spec.cumulative_key is not None:
+            cumulative_values = [spec.value_getter(result) for result in cumulative_subset if spec.value_getter(result) is not None]
+            if cumulative_values:
+                payload[f"{prefix}/{spec.cumulative_key}"] = _mean_finite(cumulative_values)
     payload[f"{prefix}/success_fraction"] = sum(float(result.success) for result in subset) / len(subset)
     payload[f"{prefix}/cumulative_success_rate"] = attack_success_rate(cumulative_subset)
     return payload

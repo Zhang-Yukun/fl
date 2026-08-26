@@ -34,6 +34,7 @@ from fedlab.federated.algorithms import (
 )
 from fedlab.utils.config import load_config
 from fedlab.utils.consistency import compare_fedavg_runs
+from fedlab.security.registry import register_attack_tracking_metric
 
 
 def test_one_round_federated_run(tmp_path):
@@ -1785,6 +1786,32 @@ def test_async_attack_manager_applies_pending_round_backpressure(monkeypatch):
     manager.finalize()
     assert [step for step, _ in tracker.logs] == [0, 1]
     assert len(manager.attack_results) == 2
+
+
+def test_round_attack_payload_uses_registered_tracking_metrics(monkeypatch):
+    import fedlab.security.registry as registry_module
+
+    snapshot = dict(registry_module._ATTACK_TRACKING_METRICS)
+    order = list(registry_module._ATTACK_TRACKING_METRIC_ORDER)
+    monkeypatch.setattr(registry_module, '_ATTACK_TRACKING_METRICS', dict(snapshot))
+    monkeypatch.setattr(registry_module, '_ATTACK_TRACKING_METRIC_ORDER', list(order))
+    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_TRACKING_METRICS_LOADED', True)
+
+    register_attack_tracking_metric('custom_track', lambda result: getattr(result, 'custom_track', None), current_key='custom_track', cumulative_key='cumulative_avg_custom_track')
+    attack = _attack_result_stub('DLG', mse=0.4, client_id='Nd2O3')
+    attack.custom_track = 0.75
+    round_result = AttackRoundResult(
+        round_index=3,
+        time_seconds=0.2,
+        clients_this_round=1,
+        evaluations_per_client=1,
+        attacks=[attack],
+    )
+
+    payload = _round_attack_payload(round_result, round_result.attacks)
+
+    assert payload['attack/DLG/custom_track'] == 0.75
+    assert payload['attack/DLG/cumulative_avg_custom_track'] == 0.75
 
 
 def test_round_attack_payload_includes_explicit_round_index():

@@ -11,10 +11,12 @@ from fedlab.security.registry import (
     list_registered_attack_artifact_fields,
     list_registered_attack_record_fields,
     list_registered_attack_summary_metrics,
+    list_registered_attack_tracking_metrics,
     register_attack,
     register_attack_artifact_field,
     register_attack_record_field,
     register_attack_summary_metric,
+    register_attack_tracking_metric,
     register_recovery_metric,
     resolve_recovery_objective,
     resolve_recovery_threshold,
@@ -167,3 +169,22 @@ def test_attack_record_and_artifact_serialization_are_registry_driven(monkeypatc
     assert artifact['custom_artifact_field'] == 'payload'
     assert list_registered_attack_record_fields()
     assert list_registered_attack_artifact_fields()
+
+
+def test_register_attack_tracking_metric_supports_custom_metric(monkeypatch):
+    import fedlab.security.registry as registry_module
+
+    snapshot = dict(registry_module._ATTACK_TRACKING_METRICS)
+    order = list(registry_module._ATTACK_TRACKING_METRIC_ORDER)
+    monkeypatch.setattr(registry_module, '_ATTACK_TRACKING_METRICS', dict(snapshot))
+    monkeypatch.setattr(registry_module, '_ATTACK_TRACKING_METRIC_ORDER', list(order))
+    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_TRACKING_METRICS_LOADED', True)
+
+    register_attack_tracking_metric('custom_track', lambda result: getattr(result, 'custom_track', None), current_key='custom_track')
+
+    class Dummy:
+        custom_track = 1.25
+
+    tracked = {spec.name: spec for spec in list_registered_attack_tracking_metrics()}
+    assert 'custom_track' in tracked
+    assert tracked['custom_track'].value_getter(Dummy()) == 1.25
