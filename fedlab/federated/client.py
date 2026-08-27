@@ -68,8 +68,6 @@ class ClientResult:
     compressor: str = "none"
     privacy_clip_norm: float = 0.0
     privacy_noise_multiplier: float = 0.0
-    evaluation_state: StateDict | None = None
-    evaluation_payload_kind: str = "none"
 
     @property
     def sent_bytes(self) -> int:
@@ -101,17 +99,6 @@ class ClientResult:
 
         self.aggregation_payload_kind = value
 
-    @property
-    def evaluation_update(self) -> StateDict | None:
-        """Backward-compatible alias for the oracle-only evaluation state."""
-
-        return self.evaluation_state
-
-    @evaluation_update.setter
-    def evaluation_update(self, value: StateDict | None) -> None:
-        """Keep legacy callers functional while the codebase uses explicit names."""
-
-        self.evaluation_state = value
 
 
 class FederatedClient:
@@ -172,16 +159,6 @@ class FederatedClient:
         generator.manual_seed(int(seed) + round_index * 2000 + offset)
         return generator
 
-    def _evaluation_result_kwargs(self, local_state: StateDict, global_state: StateDict) -> dict[str, Any]:
-        """Return optional evaluation payloads used only by oracle evaluation mode."""
-
-        evaluation_mode = str(self.config.get("evaluation", {}).get("mode", "protocol")).lower()
-        if evaluation_mode != "oracle_full_update":
-            return {}
-        return {
-            "evaluation_state": subtract_state(local_state, global_state),
-            "evaluation_payload_kind": "dense_full_update",
-        }
 
     def prepare_round_state(
         self,
@@ -240,7 +217,6 @@ class FederatedClient:
             for _ in range(int(self.config["federated"].get("local_epochs", 1))):
                 losses.append(train_one_epoch(model, self.train_loader, optimizer, self.device))
         local_state = serialize_model(model)
-        evaluation_kwargs = self._evaluation_result_kwargs(local_state, global_state)
         dense_bytes = state_num_bytes(local_state)
         dense_parameters = state_num_parameters(local_state)
         round_context_payload = round_context or {}
@@ -277,7 +253,7 @@ class FederatedClient:
             round_index=round_index,
             round_context=round_context or {},
             common=common,
-            evaluation_kwargs=evaluation_kwargs,
+            evaluation_kwargs={},
             result_cls=ClientResult,
         )
         estimate_upload_transport_bytes(result, round_index=round_index)

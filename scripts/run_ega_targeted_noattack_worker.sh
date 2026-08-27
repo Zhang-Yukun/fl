@@ -35,7 +35,6 @@ run_case() {
     --override "tracking.group=${GROUP_NAME}" \
     --override "tracking.name=${tracking_name}" \
     --override "attack.enabled=false" \
-    --override "evaluation.mode=protocol" \
     --override "federated.algorithm=ega_fedavg" \
     --override "federated.rounds=${ROUNDS}" \
     --override "federated.local_epochs=1" \

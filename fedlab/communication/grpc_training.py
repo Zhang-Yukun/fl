@@ -24,7 +24,6 @@ from fedlab.federated.algorithms import (
     AsyncAttackManager,
     _build_federated_resume_state,
     _build_federated_summary,
-    _resolve_test_metric_views,
     _capture_round_update_records,
     _clone_state,
     _round_history_communication_summary,
@@ -160,7 +159,6 @@ class GrpcFederatedCoordinator:
         self.attack_results = self.attack_manager.attack_results
         self.attack_target_type = 'update_payload'
         self.best_global_state = _clone_state(self.server.global_state)
-        self.best_oracle_state = None if not self.server._uses_oracle_evaluation() else _clone_state(self.server.oracle_global_state)
         self.best_metrics: dict[str, float] | None = None
         self.best_round = -1
         self.tracker.log({
@@ -256,8 +254,7 @@ class GrpcFederatedCoordinator:
         """Complete final-round validation and artifact bookkeeping off the submit hot path."""
 
         metrics = self.server.evaluate_global()
-        protocol_metrics = self.server.evaluate_protocol() if self.server._uses_oracle_evaluation() else metrics
-        oracle_metrics = self.server.evaluate_oracle() if self.server._uses_oracle_evaluation() else protocol_metrics
+        protocol_metrics = metrics
         self.best_global_state, self.best_metrics, self.best_round, improved = _update_best_checkpoint(
             best_state=self.best_global_state,
             best_metrics=self.best_metrics,
@@ -269,8 +266,6 @@ class GrpcFederatedCoordinator:
             metric_name=self.primary_metric_name,
             metric_mode=self.primary_metric_mode,
         )
-        if improved and self.server._uses_oracle_evaluation():
-            self.best_oracle_state = _clone_state(self.server.oracle_global_state)
         record = self.server.record_round(
             round_index,
             results,
@@ -279,7 +274,6 @@ class GrpcFederatedCoordinator:
             round_time_seconds=time.perf_counter() - self.round_start_time,
             elapsed_time_seconds=time.perf_counter() - self.start_time,
             protocol_metrics=protocol_metrics,
-            oracle_metrics=oracle_metrics,
             silent=True,
         )
         self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=round_index)
@@ -294,18 +288,6 @@ class GrpcFederatedCoordinator:
                 step=round_index,
                 client_ids=list(self.expected_clients),
                 state=self.server.global_state,
-            )
-            oracle_state = self.server.oracle_global_state if self.server.oracle_global_state is not None else self.server.global_state
-            _log_prediction_views(
-                self.tracker,
-                'prediction/grpc/val_oracle',
-                'grpc val oracle prediction',
-                self.server.model,
-                self.server.val_loader,
-                self.server.device,
-                step=round_index,
-                client_ids=list(self.expected_clients),
-                state=oracle_state,
             )
         except Exception as exc:
             logger.debug('Skip gRPC val prediction plot: {}', exc)
@@ -329,7 +311,6 @@ class GrpcFederatedCoordinator:
                 round_index=round_index,
                 start_time=self.start_time,
                 best_global_state=self.best_global_state,
-                best_oracle_state=self.best_oracle_state,
                 best_metrics=self.best_metrics,
                 best_round=self.best_round,
                 attack_results=self.attack_results,
@@ -341,11 +322,9 @@ class GrpcFederatedCoordinator:
         """Persist final model artifacts and a summary compatible with the main FL path."""
 
         self.server.global_state = _clone_state(self.best_global_state)
-        if self.server._uses_oracle_evaluation() and self.best_oracle_state is not None:
-            self.server.oracle_global_state = _clone_state(self.best_oracle_state)
         logger.info('Restored best gRPC federated checkpoint from round {} for final test', self.best_round)
         test_metrics = self.server.test_global()
-        protocol_test_metrics, oracle_test_metrics = _resolve_test_metric_views(self.server, test_metrics)
+        protocol_test_metrics = test_metrics
         self.server.save(self.output_dir, self.config)
         final_test_step = max(len(self.server.history), self.best_round + 1)
         self.attack_manager.finalize()
@@ -367,7 +346,6 @@ class GrpcFederatedCoordinator:
             attack_summary=attack_summary,
             attack_target_type=self.attack_target_type,
             protocol_test_metrics=protocol_test_metrics,
-            oracle_test_metrics=oracle_test_metrics,
             transport='grpc',
         )
         final_log_payload = {
@@ -375,7 +353,6 @@ class GrpcFederatedCoordinator:
             'run/rounds': len(self.server.history),
             'run/total_time_seconds': total_elapsed,
             'run/transport': 'grpc',
-            'run/evaluation_mode': self.server.evaluation_mode,
             'run/best_round': self.best_round,
             'run/best_val_metric_name': self.primary_metric_name,
             'run/best_val_metric_value': self.best_metrics[self.primary_metric_name],
@@ -388,8 +365,6 @@ class GrpcFederatedCoordinator:
         }
         if protocol_test_metrics is not None:
             final_log_payload.update({f'protocol_test/{key}': value for key, value in protocol_test_metrics.items()})
-        if oracle_test_metrics is not None:
-            final_log_payload.update({f'oracle_test/{key}': value for key, value in oracle_test_metrics.items()})
         self.tracker.log(final_log_payload)
         try:
             _log_prediction_views(
@@ -402,18 +377,6 @@ class GrpcFederatedCoordinator:
                 step=final_test_step,
                 client_ids=list(self.expected_clients),
                 state=self.server.global_state,
-            )
-            oracle_state = self.server.oracle_global_state if self.server.oracle_global_state is not None else self.server.global_state
-            _log_prediction_views(
-                self.tracker,
-                'prediction/grpc/test_oracle',
-                'grpc test oracle prediction',
-                self.server.model,
-                self.server.test_loader,
-                self.server.device,
-                step=final_test_step,
-                client_ids=list(self.expected_clients),
-                state=oracle_state,
             )
         except Exception as exc:
             logger.debug('Skip gRPC prediction plot: {}', exc)
@@ -459,8 +422,7 @@ class GrpcFederatedCoordinator:
                     self.pending_final_round_thread.start()
                 else:
                     metrics = self.server.evaluate_global()
-                    protocol_metrics = self.server.evaluate_protocol() if self.server._uses_oracle_evaluation() else metrics
-                    oracle_metrics = self.server.evaluate_oracle() if self.server._uses_oracle_evaluation() else None
+                    protocol_metrics = metrics
                     self.best_global_state, self.best_metrics, self.best_round, improved = _update_best_checkpoint(
                         best_state=self.best_global_state,
                         best_metrics=self.best_metrics,
@@ -472,8 +434,6 @@ class GrpcFederatedCoordinator:
                         metric_name=self.primary_metric_name,
                         metric_mode=self.primary_metric_mode,
                     )
-                    if improved and self.server._uses_oracle_evaluation():
-                        self.best_oracle_state = _clone_state(self.server.oracle_global_state)
                     will_stop = self.stopper.update(metrics[self.primary_metric_name])
                     record = self.server.record_round(
                         self.round_index,
@@ -483,8 +443,7 @@ class GrpcFederatedCoordinator:
                         round_time_seconds=time.perf_counter() - self.round_start_time,
                         elapsed_time_seconds=time.perf_counter() - self.start_time,
                         protocol_metrics=protocol_metrics,
-                        oracle_metrics=oracle_metrics,
-                        silent=will_stop,
+                                    silent=will_stop,
                     )
                     if not will_stop:
                         self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=self.round_index)
@@ -514,8 +473,7 @@ class GrpcFederatedCoordinator:
                             round_index=self.round_index,
                             start_time=self.start_time,
                             best_global_state=self.best_global_state,
-                            best_oracle_state=self.best_oracle_state,
-                            best_metrics=self.best_metrics,
+                                        best_metrics=self.best_metrics,
                             best_round=self.best_round,
                             attack_results=self.attack_results,
                             attack_target_type=self.attack_target_type,

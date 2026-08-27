@@ -155,7 +155,7 @@ def predict_first_batch_for_state(
 
     Example:
         ``predict_first_batch_for_state(model, global_state, val_loader, device)``
-        renders protocol/oracle predictions from explicitly selected states.
+        renders predictions from explicitly selected serialized model states.
     """
 
     model.load_state_dict(state)

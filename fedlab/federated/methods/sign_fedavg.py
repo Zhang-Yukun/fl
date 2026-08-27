@@ -35,7 +35,6 @@ class SignFedAvgMethod(QuantizedDenseMethodBase):
         dense_updates = [dequantize_state_update(result.aggregation_state) for result in results]
         averaged_update = average_states(dense_updates, sample_weights)
         server.global_state = add_update(server.global_state, averaged_update)
-        server._update_oracle_evaluation_state(round_base_state, results, sample_weights)
         return weights
 
     def extract_attack_payload(self, *, result, server=None, **kwargs: object):

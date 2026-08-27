@@ -64,7 +64,7 @@ ega:
 - `federated.algorithm = ega_fedavg`
 - 上传语义固定为 `update`
 - 下载语义固定为 `model`
-- `evaluation.mode = protocol`
+- 评测固定走 protocol 路径
 
 结合上面这组参数，本文中的整套流程固定为：
 
@@ -75,7 +75,7 @@ ega:
 5. 下载侧使用框架公共的 `model` 下发逻辑，因此没有 EGA 专属下载配置。
 6. error feedback 开启。
 7. normalization 采用 `ema_reported_client_max_abs`，衰减系数 `0.9`。
-8. 评测看 protocol 模型，不展开 oracle 分支。
+8. 评测只看 protocol 模型。
 
 ## 3. 关键符号
 
@@ -499,7 +499,7 @@ EGA 下载阶段还要额外把 `round_context` 算进参数字节：
 
 ## 17. EGA 与 protocol 评测的关系
 
-本文配置使用 `evaluation.mode=protocol`，所以主要看的是：
+本文当前只保留 protocol 评测路径，主要看的是：
 
 - `server.global_state`
 

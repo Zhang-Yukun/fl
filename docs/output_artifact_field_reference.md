@@ -16,11 +16,9 @@ This reference matches the current implementation and does not document removed 
 - `transport_*`: actual serialized bytes sent through the local or grpc transport, including serialization and protocol overhead.
 - `*_compression_ratio` / `*_communication_ratio`: numerator is the dense FedAvg reference volume for the same round, denominator is the current method volume. Larger means better compression.
 
-### 1.2 Protocol vs oracle evaluation
+### 1.2 Protocol evaluation
 
 - `protocol_*`: metrics computed from the actually transmitted and actually reconstructed state.
-- `oracle_*`: evaluation-only metrics computed from the exact uncompressed updates. Oracle never affects the real training loop.
-- `active_*`: the evaluation path actually used for early stopping, best-round selection, and final `test`, controlled by `evaluation.mode`.
 
 ### 1.3 Attack metric names
 
@@ -102,7 +100,6 @@ This block is interpreted by the concrete model implementation. Common fields in
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `mode` | string | `protocol` or `oracle`. Controls best-validation selection and the final `test` payload. |
 | `metrics` | list[string] | Extra evaluation metrics. The framework always keeps `mse`, `mae`, and `mape` available. |
 
 #### `centralized`
@@ -238,7 +235,6 @@ EGA has a larger dedicated config surface. Use the active `configs/*ega*.yaml` f
 | `metrics.json` | Per-round detailed records. |
 | `run.log` | Text logs written by loguru. |
 | `model.pt` / `model.pt` | Best-validation model used for final testing. |
-| `oracle_model.pt` | Saved only for federated runs with oracle evaluation. |
 | `attack_results.json` | One JSON record per DLG/iDLG attack. Empty or missing when attacks are disabled. |
 | `attack_artifacts/` | Raw tensor artifacts for attack reconstruction outputs. |
 | `saved_updates/` | Server-captured update payload snapshots saved at the configured attack frequency for offline replay. |
@@ -282,11 +278,7 @@ EGA has a larger dedicated config surface. Use the active `configs/*ega*.yaml` f
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `test` | object | Final test metrics for the active evaluation mode. |
-| `active_test_scope` | string | Whether `test` comes from `protocol` or `oracle`. |
-| `evaluation_mode` | string | Configured evaluation mode. |
-| `best_val_scope` | string | Validation path used for best-round selection. |
 | `protocol_test` | object | Protocol-path test metrics. |
-| `oracle_test` | object | Oracle-path test metrics. When oracle is disabled, this equals `protocol_test`. |
 | `rounds` | int | Executed communication rounds. |
 | `total_time_seconds` | float | Total runtime. |
 | `best_round` | int | Best validation round index. |
@@ -364,11 +356,9 @@ EGA has a larger dedicated config surface. Use the active `configs/*ega*.yaml` f
 | `transport_upload_compression_ratio` | float | `fedavg_reference_upload_bytes / total_transport_upload_bytes`. |
 | `transport_total_communication_ratio` | float | `fedavg_reference_total_bytes / total_transport_bytes`. |
 | `privacy_*` and `adaptive_*` | number/string/null | Same meanings as in `summary.json`, but recorded for the current round. |
-| `evaluation_mode` | string | Configured evaluation mode. |
 | `active_val_scope` | string | Validation path actually used for early-stop and best-round logic. |
 | `active_val_mse` / `active_val_mae` / `active_val_mape` | float | Active validation metrics. |
 | `protocol_val_mse` / `protocol_val_mae` / `protocol_val_mape` | float | Protocol-path validation metrics. |
-| `oracle_val_mse` / `oracle_val_mae` / `oracle_val_mape` | float or null | Oracle-path validation metrics. |
 | `clients` | list[object] | Per-client communication records. |
 
 #### Client-level fields in `clients[]`
@@ -476,7 +466,6 @@ Each element is one DLG or iDLG result.
 | `run/best_val_mse` / `run/best_val_mae` / `run/best_val_mape` | Best validation metrics. |
 | `test/mse` / `test/mae` / `test/mape` | Final centralized test metrics. |
 | `protocol_test/<metric>` | Final federated protocol-path test metrics. |
-| `oracle_test/<metric>` | Final federated oracle-path test metrics. |
 
 ### 4.2 Centralized per-round scalars
 
@@ -508,10 +497,8 @@ wandb logs every `RoundRecord` field as `round/<field>`, including:
 - `round/parameter_upload_compression_ratio`, `round/parameter_total_communication_ratio`
 - `round/transport_upload_compression_ratio`, `round/transport_total_communication_ratio`
 - `round/privacy_*`, `round/adaptive_*`
-- `round/evaluation_mode`, `round/active_val_scope`
 - `round/active_val_mse`, `round/active_val_mae`, `round/active_val_mape`
 - `round/protocol_val_mse`, `round/protocol_val_mae`, `round/protocol_val_mape`
-- `round/oracle_val_mse`, `round/oracle_val_mae`, `round/oracle_val_mape`
 
 #### Client-level keys
 
@@ -586,10 +573,7 @@ The prefix is `attack/client/<client_id>/`, with the same suffix set as the meth
 | `prediction/centralized/val` | First validation-batch, first-sample input/prediction/target plot for centralized training. |
 | `prediction/centralized/test` | Centralized test plot. |
 | `prediction/federated/val_protocol` | Federated protocol-path validation plot. |
-| `prediction/federated/val_oracle` | Federated oracle-path validation plot. |
 | `prediction/federated/test_protocol` | Federated protocol-path test plot. |
-| `prediction/federated/test_oracle` | Federated oracle-path test plot. |
-| `prediction/grpc/val_protocol` / `val_oracle` / `test_protocol` / `test_oracle` | grpc-mode counterparts. |
 
 These plots are inverse-transformed back to the original data scale by default and contain the input context, the predicted horizon, and the true target horizon in the same figure.
 

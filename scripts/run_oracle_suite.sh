@@ -31,7 +31,6 @@ TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-}"
 TRAIN_MOMENTUM="${TRAIN_MOMENTUM:-}"
 TRAIN_WEIGHT_DECAY="${TRAIN_WEIGHT_DECAY:-}"
 TRAIN_OPTIMIZER_EPS="${TRAIN_OPTIMIZER_EPS:-}"
-EVAL_MODE="${EVAL_MODE:-protocol}"
 SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-true}"
 MODEL_DROPOUT="${MODEL_DROPOUT:-0.1}"
 ATTACK_LR="${ATTACK_LR:-}"
@@ -83,7 +82,7 @@ Examples:
   bash SCRIPT --modes single_sync
   TRAIN_OPTIMIZER=adam TRAIN_LR=0.001 bash SCRIPT --modes centralized,single_sync
   SUITE_SEED=42 bash SCRIPT --modes single_sync
-  EVAL_MODE=protocol SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync
+  SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync
   FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync
   RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   RUN_NAME_PREFIX=debug_ RUN_NAME_SUFFIX=_trial1 bash SCRIPT --modes single_sync
@@ -388,12 +387,10 @@ experiment.mode=federated
 --override
 --override
 --override
-evaluation.mode=%s
---override
 attack.enabled=%s
 --override
 attack.async_enabled=false
-' "${EVAL_MODE}" "${ATTACK_ENABLED}"
+' "${ATTACK_ENABLED}"
   if [[ "${ATTACK_ENABLED}" == "true" ]]; then
     printf -- '--override
 attack.frequency_rounds=%s

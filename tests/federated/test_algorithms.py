@@ -728,7 +728,7 @@ def test_attack_auto_sampling_defaults_to_one_reconstruction_with_capped_multi_s
 
 
 
-def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
+def test_attack_task_uses_uploaded_protocol_payload():
     config = {
         "federated": {"algorithm": "sparse_fedavg", "topk_fraction": 0.5},
         "attack": {
@@ -742,14 +742,11 @@ def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
     }
     protocol_update = serialize_model(torch.nn.Linear(2, 1, bias=False))
     protocol_update["weight"] = torch.tensor([[0.0, 2.0]])
-    oracle_update = serialize_model(torch.nn.Linear(2, 1, bias=False))
-    oracle_update["weight"] = torch.tensor([[9.0, 9.0]])
     result = client_module.ClientResult(
         client_id="Nd2O3",
         num_samples=1,
         loss=0.0,
         sparse_update=compress_topk(protocol_update, 0.5),
-        evaluation_state=oracle_update,
         aggregation_payload_kind="sparse_update",
     )
     client = SimpleNamespace(
@@ -779,7 +776,6 @@ def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
     target = task.samples[0].target
     assert isinstance(target, dict)
     assert torch.equal(target["weight"], torch.tensor([[0.0, 2.0]]))
-    assert not torch.equal(target["weight"], oracle_update["weight"])
 
 
 def test_dense_attack_payload_uses_uploaded_update_directly():
@@ -1007,7 +1003,6 @@ def test_ega_protocol_aggregation_uses_client_visible_base(monkeypatch):
         config={"ega": {}},
         global_state=OrderedDict([("weight", torch.tensor([10.0]))]),
         ega_normalization=1.0,
-        _update_oracle_evaluation_state=lambda *args, **kwargs: None,
     )
     protocol_base = OrderedDict([("weight", torch.tensor([6.5]))])
     decoded_update = OrderedDict([("weight", torch.tensor([1.0]))])
@@ -1057,154 +1052,6 @@ def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
     assert all(client["parameter_download_bytes"] > 0 for client in clients)
     assert all(client["parameter_upload_bytes"] == client["upload_bytes"] for client in clients)
     assert all(client["parameter_download_bytes"] == client["download_bytes"] for client in clients)
-
-
-def test_oracle_evaluation_separates_protocol_metrics_from_dense_reference_updates(tmp_path, monkeypatch):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "experiment.output_dir=" + str(tmp_path),
-            "federated.algorithm=sparse_fedavg",
-            "federated.rounds=1",
-            "federated.topk_fraction=0.5",
-            "evaluation.mode=oracle_full_update",
-            "attack.enabled=false",
-            "tracking.enabled=false",
-            "runtime.device=cpu",
-        ],
-    )
-    val_loader = object()
-    test_loader = object()
-
-    def _build_linear(_config):
-        model = torch.nn.Linear(2, 1, bias=False)
-        with torch.no_grad():
-            model.weight.zero_()
-        return model
-
-    class _StaticLoader:
-        def __init__(self):
-            self.dataset = [(torch.zeros(1, 2), torch.zeros(1, 1))]
-
-        def __iter__(self):
-            return iter(self.dataset)
-
-    monkeypatch.setattr(algorithms_module, "build_model", _build_linear)
-    monkeypatch.setattr(server_module, "build_model", _build_linear)
-    monkeypatch.setattr(client_module, "build_model", _build_linear)
-    monkeypatch.setattr(
-        algorithms_module,
-        "build_federated_loaders",
-        lambda _config: ({"Nd2O3": _StaticLoader(), "CeO2": _StaticLoader(), "La2O3": _StaticLoader()}, val_loader, test_loader),
-    )
-
-    dense_update = serialize_model(_build_linear(config))
-    dense_update["weight"] = torch.tensor([[1.0, 2.0]])
-
-    def fake_train(self, global_state, compressed=False, round_index=0):
-        return client_module.ClientResult(
-            client_id=self.client_id,
-            num_samples=1,
-            loss=0.0,
-            sparse_update=compress_topk(dense_update, 0.5),
-            evaluation_state=dense_update,
-            dense_bytes=8,
-            dense_parameters=2,
-            download_bytes=8,
-            download_parameters=2,
-            parameter_download_bytes=8,
-            parameter_download_parameters=2,
-            dense_download_reference_bytes=8,
-            dense_download_reference_parameters=2,
-            upload_bytes=4,
-            upload_parameters=1,
-            parameter_upload_bytes=4,
-            parameter_upload_parameters=1,
-            transport_download_bytes=8,
-            transport_upload_bytes=4,
-            aggregation_payload_kind="sparse_update",
-            compressor="topk",
-        )
-
-    def fake_evaluate(model, loader, device):
-        weight = model.weight.detach().cpu().clone()
-        first = float(weight[0, 0].item())
-        second = float(weight[0, 1].item())
-        mse = (1.0 - first) ** 2 + (2.0 - second) ** 2
-        return {"mse": mse, "mae": abs(1.0 - first) + abs(2.0 - second), "mape": mse}
-
-    monkeypatch.setattr(client_module.FederatedClient, "train", fake_train)
-    monkeypatch.setattr(algorithms_module, "evaluate", fake_evaluate)
-    monkeypatch.setattr(server_module, "evaluate", fake_evaluate)
-
-    summary = run_federated(config)
-    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-
-    assert summary["evaluation_mode"] == "oracle_full_update"
-    assert summary["active_test_scope"] == "oracle_full_update"
-    assert summary["best_val_scope"] == "oracle_full_update"
-    assert summary["test"]["mse"] == pytest.approx(0.0)
-    assert summary["protocol_test"]["mse"] > 0.0
-    assert summary["oracle_test"]["mse"] == pytest.approx(0.0)
-    assert metrics[0]["protocol_val_mse"] > 0.0
-    assert metrics[0]["oracle_val_mse"] == pytest.approx(0.0)
-    assert (tmp_path / "oracle_model.pt").exists()
-
-
-def test_protocol_mode_populates_oracle_metrics_with_protocol_values(tmp_path, monkeypatch):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "experiment.output_dir=" + str(tmp_path),
-            "federated.algorithm=fedavg",
-            "federated.rounds=1",
-            "attack.enabled=false",
-            "tracking.enabled=false",
-            "runtime.device=cpu",
-        ],
-    )
-    val_loader = object()
-    test_loader = object()
-
-    def _build_linear(_config):
-        model = torch.nn.Linear(2, 1, bias=False)
-        with torch.no_grad():
-            model.weight.zero_()
-        return model
-
-    class _StaticLoader:
-        def __init__(self):
-            self.dataset = [(torch.zeros(1, 2), torch.zeros(1, 1))]
-
-        def __iter__(self):
-            return iter(self.dataset)
-
-    def fake_evaluate(model, loader, device):
-        weight = model.weight.detach().cpu().clone()
-        mse = float(weight.square().sum().item())
-        mae = float(weight.abs().sum().item())
-        return {"mse": mse, "mae": mae, "mape": mse}
-
-    monkeypatch.setattr(algorithms_module, "build_model", _build_linear)
-    monkeypatch.setattr(server_module, "build_model", _build_linear)
-    monkeypatch.setattr(client_module, "build_model", _build_linear)
-    monkeypatch.setattr(
-        algorithms_module,
-        "build_federated_loaders",
-        lambda _config: ({"Nd2O3": _StaticLoader(), "CeO2": _StaticLoader(), "La2O3": _StaticLoader()}, val_loader, test_loader),
-    )
-    monkeypatch.setattr(algorithms_module, "evaluate", fake_evaluate)
-    monkeypatch.setattr(server_module, "evaluate", fake_evaluate)
-
-    summary = run_federated(config)
-    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-
-    assert summary["evaluation_mode"] == "protocol"
-    assert summary["test"] == summary["protocol_test"]
-    assert summary["oracle_test"] == summary["protocol_test"]
-    assert metrics[0]["oracle_val_mse"] == pytest.approx(metrics[0]["protocol_val_mse"])
-    assert metrics[0]["oracle_val_mae"] == pytest.approx(metrics[0]["protocol_val_mae"])
-    assert metrics[0]["oracle_val_mape"] == pytest.approx(metrics[0]["protocol_val_mape"])
 
 
 
@@ -1658,7 +1505,7 @@ def test_federated_run_restores_best_validation_checkpoint(tmp_path, monkeypatch
     assert float(saved_state["weight"].item()) == pytest.approx(1.0)
 
 
-def test_client_skips_evaluation_update_in_protocol_mode():
+def test_client_train_returns_aggregation_payload():
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
@@ -1674,29 +1521,8 @@ def test_client_skips_evaluation_update_in_protocol_mode():
 
     result = client.train(global_state, compressed=False, round_index=0)
 
-    assert result.evaluation_update is None
-    assert result.evaluation_payload_kind == "none"
+    assert result.aggregation_state is not None
 
-
-def test_client_emits_evaluation_update_in_oracle_mode():
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "federated.algorithm=fedavg",
-            "evaluation.mode=oracle_full_update",
-            "attack.enabled=false",
-            "runtime.device=cpu",
-        ],
-    )
-    train_loaders, _, _ = build_federated_loaders(config)
-    client_id, loader = next(iter(train_loaders.items()))
-    client = FederatedClient(client_id, loader, config, torch.device("cpu"))
-    global_state = serialize_model(build_model(config))
-
-    result = client.train(global_state, compressed=False, round_index=0)
-
-    assert result.evaluation_update is not None
-    assert result.evaluation_payload_kind == "dense_full_update"
 
 
 def test_attack_device_defaults_to_runtime_device():
@@ -2319,98 +2145,7 @@ def _run_single_node_update_update_rounds_with_server(config: dict, monkeypatch)
                 "results": results,
                 "aggregation_weights": aggregation_weights,
                 "global_state": _clone_state_dict(server.global_state),
-                "oracle_global_state": _clone_state_dict(server.oracle_global_state),
                 "canonical_updates": [_canonical_update_from_result(result, server) for result in results],
             }
         )
     return server, rounds
-
-
-def test_single_node_sync_update_update_evaluation_states_match_for_exact_fedavg(tmp_path, monkeypatch):
-    config = _single_node_update_update_config(
-        tmp_path,
-        "fedavg",
-        ["evaluation.mode=oracle_full_update"],
-    )
-    server, rounds = _run_single_node_update_update_rounds_with_server(config, monkeypatch)
-
-    for round_result, expected_value in zip(rounds, [1.0, 2.0, 3.0]):
-        _assert_state_float_value(round_result["global_state"], expected_value)
-        _assert_state_float_value(round_result["oracle_global_state"], expected_value)
-
-    captured = []
-
-    def _capture_evaluate(model, loader, device):
-        del loader, device
-        state = serialize_model(model)
-        captured.append(_clone_state_dict(state))
-        total = sum(float(tensor.sum().item()) for name, tensor in state.items() if tensor.dtype.is_floating_point and not name.endswith("num_batches_tracked"))
-        return {"mse": total, "mae": total, "mape": total}
-
-    monkeypatch.setattr(server_module, "evaluate", _capture_evaluate)
-
-    server.evaluate_protocol()
-    server.evaluate_oracle()
-    server.test_protocol()
-    server.test_oracle()
-
-    assert len(captured) == 4
-    for state in captured:
-        _assert_state_float_value(state, 3.0)
-
-
-def test_single_node_sync_update_update_evaluation_states_split_protocol_from_oracle_for_sparse_compression(tmp_path, monkeypatch):
-    config = _single_node_update_update_config(
-        tmp_path,
-        "sparse_fedavg",
-        [
-            "federated.topk_fraction=0.5",
-            "evaluation.mode=oracle_full_update",
-        ],
-    )
-    server, rounds = _run_single_node_update_update_rounds_with_server(config, monkeypatch)
-
-    last_round = rounds[-1]
-    protocol_state = last_round["global_state"]
-    oracle_state = last_round["oracle_global_state"]
-
-    protocol_values = {
-        name: float(tensor.reshape(-1)[0].item())
-        for name, tensor in protocol_state.items()
-        if tensor.dtype.is_floating_point and not name.endswith("num_batches_tracked")
-    }
-    oracle_values = {
-        name: float(tensor.reshape(-1)[0].item())
-        for name, tensor in oracle_state.items()
-        if tensor.dtype.is_floating_point and not name.endswith("num_batches_tracked")
-    }
-
-    assert protocol_state != oracle_state
-    assert any(value < 3.0 for value in protocol_values.values())
-    assert any(value < 3.0 for value in oracle_values.values())
-    assert any(oracle_values[name] > protocol_values[name] for name in protocol_values.keys())
-    assert all(oracle_values[name] >= protocol_values[name] for name in protocol_values.keys())
-
-    captured = []
-
-    def _capture_evaluate(model, loader, device):
-        del loader, device
-        state = serialize_model(model)
-        captured.append(_clone_state_dict(state))
-        total = sum(float(tensor.sum().item()) for name, tensor in state.items() if tensor.dtype.is_floating_point and not name.endswith("num_batches_tracked"))
-        return {"mse": total, "mae": total, "mape": total}
-
-    monkeypatch.setattr(server_module, "evaluate", _capture_evaluate)
-
-    server.evaluate_protocol()
-    server.evaluate_oracle()
-    server.test_protocol()
-    server.test_oracle()
-
-    assert len(captured) == 4
-    protocol_eval_state, oracle_eval_state, protocol_test_state, oracle_test_state = captured
-
-    _assert_full_state_equal(protocol_eval_state, protocol_state)
-    _assert_full_state_equal(oracle_eval_state, oracle_state)
-    _assert_full_state_equal(protocol_test_state, protocol_state)
-    _assert_full_state_equal(oracle_test_state, oracle_state)

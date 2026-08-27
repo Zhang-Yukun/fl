@@ -39,7 +39,6 @@ def test_save_federated_snapshot_writes_expected_files(tmp_path):
         config,
         snapshot_name="round_0002",
         model_state={"weight": torch.tensor([1.0])},
-        oracle_model_state={"weight": torch.tensor([2.0])},
         metrics_history=[{"round": 1, "val_mse": 0.1}],
         summary={"rounds": 1, "test": {"mse": 0.2}},
         attack_records=[{"name": "DLG", "mse": 1.0}],
@@ -52,6 +51,5 @@ def test_save_federated_snapshot_writes_expected_files(tmp_path):
     assert (snapshot_dir / "summary.json").exists()
     assert (snapshot_dir / "attack_results.json").exists()
     assert (snapshot_dir / "model.pt").exists()
-    assert (snapshot_dir / "oracle_model.pt").exists()
     assert (snapshot_dir / "resume_state.pt").exists()
     assert json.loads((snapshot_dir / "summary.json").read_text(encoding="utf-8"))["rounds"] == 1

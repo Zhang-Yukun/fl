@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 
 # Oracle suite wrapper with the old strong EGA-style protocol settings.
-# Shared overrides: training optimizer=adam, loss=mse, evaluation.mode=protocol,
+# Shared overrides: training optimizer=adam, loss=mse, protocol-only evaluation,
 # data.shuffle_train=true, model.dropout=0.1, federated algorithms=fedavg,topk,ega.
 BASE_OUTPUT_ROOT="${BASE_OUTPUT_ROOT:-outputs/oracle_4script_manual_adam_$(date +%Y%m%d_%H%M%S)}"
 

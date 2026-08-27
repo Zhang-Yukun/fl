@@ -72,8 +72,8 @@ folder:
 
 The `scripts/` directory keeps only three categories of launchers:
 
-- suite scripts such as `run_oracle_suite.sh`, `run_formal_*.sh`, and `run_suite_500r_*.sh`
-- oracle wrapper scripts such as `run_oracle_gpu0_batch.sh`
+- suite scripts such as `run_suite.sh`, `run_oracle_suite.sh`, and `run_suite_500r_*.sh`
+- wrapper scripts such as `run_oracle_gpu0_batch.sh`
 - EGA sweep scripts such as `run_ega_*` and `run_rawdata2_ega_sweep_*.sh`
 
 Per-algorithm one-off launchers and older repro/test-matrix shell wrappers were removed.

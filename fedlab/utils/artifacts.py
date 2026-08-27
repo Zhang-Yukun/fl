@@ -170,7 +170,6 @@ def save_federated_snapshot(
     metrics_history: Any,
     summary: dict[str, Any],
     attack_records: list[dict[str, Any]],
-    oracle_model_state: Any | None = None,
     resume_state: dict[str, Any] | None = None,
 ) -> Path:
     """Persist one round snapshot with the same artifact shape as final outputs."""
@@ -178,8 +177,6 @@ def save_federated_snapshot(
     snapshot_dir = Path(output_dir) / "snapshots" / snapshot_name
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model_state, snapshot_dir / "model.pt")
-    if oracle_model_state is not None:
-        torch.save(oracle_model_state, snapshot_dir / "oracle_model.pt")
     if resume_state is not None:
         torch.save(resume_state, snapshot_dir / "resume_state.pt")
     save_experiment_config(config, snapshot_dir, config.get("artifacts", {}).get("config_formats"))

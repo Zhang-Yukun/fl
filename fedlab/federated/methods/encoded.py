@@ -217,7 +217,6 @@ class EGAFedAvgMethod(FederatedMethod):
             round_index=round_index,
         )
         server.global_state = add_update(protocol_base_state, full_update)
-        server._update_oracle_evaluation_state(round_base_state, results, sample_weights)
         ega_cfg = server.config.get("ega", {})
         strategy = str(ega_cfg.get("normalization_strategy", "fixed")).lower()
         min_norm = float(ega_cfg.get("min_normalization", 1e-6))

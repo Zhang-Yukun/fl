@@ -251,7 +251,7 @@ def load_run(run_dir: Path) -> RunRecord:
     test_blob = summary.get('test') or summary.get('protocol_test') or {}
     test_mse = float(test_blob['mse']) if 'mse' in test_blob else None
     total_upload_bytes = int(summary.get('total_parameter_upload_bytes', summary.get('total_upload_bytes', 0)) or 0)
-    algorithm = str(summary.get('algorithm') or summary.get('evaluation_mode') or 'unknown')
+    algorithm = str(summary.get('algorithm') or 'unknown')
     attack_info = _resolve_attack_info(summary)
 
     return RunRecord(

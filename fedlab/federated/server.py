@@ -59,7 +59,6 @@ class ClientCommunicationRecord:
     num_samples: int
     loss: float
     aggregation_payload_kind: str
-    evaluation_payload_kind: str
     download_bytes: int
     download_parameters: int
     parameter_download_bytes: int
@@ -137,23 +136,13 @@ class RoundRecord:
     adaptive_clip_median_norm: float | None = None
     adaptive_reference_clip_norm: float | None = None
     adaptive_noise_std: float | None = None
-    evaluation_mode: str = "protocol"
-    active_val_scope: str = "protocol"
-    active_val_metrics: dict[str, float] = field(default_factory=dict)
     protocol_val_metrics: dict[str, float] = field(default_factory=dict)
-    oracle_val_metrics: dict[str, float] | None = None
     val_mse: float | None = None
     val_mae: float | None = None
     val_mape: float | None = None
-    active_val_mse: float | None = None
-    active_val_mae: float | None = None
-    active_val_mape: float | None = None
     protocol_val_mse: float | None = None
     protocol_val_mae: float | None = None
     protocol_val_mape: float | None = None
-    oracle_val_mse: float | None = None
-    oracle_val_mae: float | None = None
-    oracle_val_mape: float | None = None
     clients: list[ClientCommunicationRecord] = field(default_factory=list)
 
 
@@ -203,8 +192,6 @@ class FederatedServer:
     history: list[RoundRecord] = field(default_factory=list)
     adaptive_accountant: AdaptiveClippedRdpAccountant | None = field(init=False, default=None)
     last_privacy_step: AdaptiveRdpStep | None = field(init=False, default=None)
-    oracle_global_state: StateDict | None = field(init=False, default=None)
-    evaluation_mode: str = field(init=False, default="protocol")
     ega_codec: Any | None = field(init=False, default=None)
     ega_normalization: float | None = field(init=False, default=None)
 
@@ -214,8 +201,6 @@ class FederatedServer:
         self.model = build_model(self.config).to(self.device)
         self.method = build_method(str(self.config.get("federated", {}).get("algorithm", "fedavg")))
         self.global_state = serialize_model(self.model)
-        self.oracle_global_state = _clone_state_dict(self.global_state)
-        self.evaluation_mode = str(self.config.get("evaluation", {}).get("mode", "protocol")).lower()
         self.method.configure_server(self)
         logger.info(
             "Initialized global model with {} parameters ({} bytes) using method={}",
@@ -236,23 +221,6 @@ class FederatedServer:
             raise RuntimeError("EGA codec is not initialized on the server")
         return decode_attack_view_from_mean_difference(payloads, target_index, self.ega_codec)
 
-    def _uses_oracle_evaluation(self) -> bool:
-        """Return whether validation/test should use oracle full updates."""
-
-        return self.evaluation_mode == "oracle_full_update"
-
-    def _update_oracle_evaluation_state(self, round_base_state: StateDict, results, sample_weights: list[int]) -> None:
-        """Build a server-side oracle evaluation state from full dense client updates."""
-
-        if not self._uses_oracle_evaluation():
-            self.oracle_global_state = _clone_state_dict(self.global_state)
-            return
-        evaluation_states = [result.evaluation_state for result in results]
-        if any(update is None for update in evaluation_states):
-            self.oracle_global_state = _clone_state_dict(self.global_state)
-            return
-        averaged_update = average_states(evaluation_states, sample_weights)
-        self.oracle_global_state = add_update(round_base_state, averaged_update)
 
     def _adaptive_noise_generator(self, round_index: int) -> torch.Generator | None:
         """Create a deterministic server-side generator for adaptive DP noise."""
@@ -305,7 +273,6 @@ class FederatedServer:
         )
         protocol_base_state = weighted_protocol_base_state(self, results, round_base_state, round_index, round_context)
         self.global_state = add_update(protocol_base_state, noisy_update)
-        self._update_oracle_evaluation_state(round_base_state, results, sample_weights)
         total_clients = int(adaptive_cfg.get("total_clients", len(results)))
         sampling_rate = float(len(results)) / float(max(total_clients, 1))
         if self.adaptive_accountant is not None:
@@ -351,18 +318,9 @@ class FederatedServer:
         self.model.load_state_dict(self.global_state)
         return evaluate(self.model, self.val_loader, self.device)
 
-    def evaluate_oracle(self) -> dict[str, float]:
-        """Evaluate the oracle full-update model on the validation set."""
-
-        state = self.oracle_global_state if self.oracle_global_state is not None else self.global_state
-        self.model.load_state_dict(state)
-        return evaluate(self.model, self.val_loader, self.device)
-
     def evaluate_global(self) -> dict[str, float]:
-        """Evaluate the active validation state according to the configured mode."""
+        """Evaluate the protocol-visible global model on the validation set."""
 
-        if self._uses_oracle_evaluation():
-            return self.evaluate_oracle()
         return self.evaluate_protocol()
 
     def test_protocol(self) -> dict[str, float]:
@@ -371,18 +329,9 @@ class FederatedServer:
         self.model.load_state_dict(self.global_state)
         return evaluate(self.model, self.test_loader, self.device)
 
-    def test_oracle(self) -> dict[str, float]:
-        """Evaluate the oracle full-update model on the test set."""
-
-        state = self.oracle_global_state if self.oracle_global_state is not None else self.global_state
-        self.model.load_state_dict(state)
-        return evaluate(self.model, self.test_loader, self.device)
-
     def test_global(self) -> dict[str, float]:
-        """Evaluate the active test state according to the configured mode."""
+        """Evaluate the protocol-visible global model on the test set."""
 
-        if self._uses_oracle_evaluation():
-            return self.test_oracle()
         return self.test_protocol()
 
     def record_round(
@@ -394,7 +343,6 @@ class FederatedServer:
         round_time_seconds: float,
         elapsed_time_seconds: float,
         protocol_metrics: dict[str, float] | None = None,
-        oracle_metrics: dict[str, float] | None = None,
         silent: bool = False,
     ) -> RoundRecord:
         """Create and log a round record with communication metadata.
@@ -436,7 +384,6 @@ class FederatedServer:
                 num_samples=result.num_samples,
                 loss=result.loss,
                 aggregation_payload_kind=result.aggregation_payload_kind,
-                evaluation_payload_kind=result.evaluation_payload_kind,
                 download_bytes=result.parameter_download_bytes,
                 download_parameters=result.parameter_download_parameters,
                 parameter_download_bytes=result.parameter_download_bytes,
@@ -510,23 +457,13 @@ class FederatedServer:
             adaptive_clip_median_norm=None if self.last_privacy_step is None else self.last_privacy_step.median_update_norm,
             adaptive_reference_clip_norm=None if self.last_privacy_step is None else self.last_privacy_step.reference_clip_norm,
             adaptive_noise_std=None if self.last_privacy_step is None else self.last_privacy_step.noise_std,
-            evaluation_mode=self.evaluation_mode,
-            active_val_scope=self.evaluation_mode,
-            active_val_metrics={key: float(value) for key, value in metrics.items()},
             protocol_val_metrics={key: float(value) for key, value in protocol_metrics.items()},
-            oracle_val_metrics=None if oracle_metrics is None else {key: float(value) for key, value in oracle_metrics.items()},
             val_mse=None if "mse" not in metrics else float(metrics["mse"]),
             val_mae=None if "mae" not in metrics else float(metrics["mae"]),
             val_mape=None if "mape" not in metrics else float(metrics["mape"]),
-            active_val_mse=None if "mse" not in metrics else float(metrics["mse"]),
-            active_val_mae=None if "mae" not in metrics else float(metrics["mae"]),
-            active_val_mape=None if "mape" not in metrics else float(metrics["mape"]),
             protocol_val_mse=None if "mse" not in protocol_metrics else float(protocol_metrics["mse"]),
             protocol_val_mae=None if "mae" not in protocol_metrics else float(protocol_metrics["mae"]),
             protocol_val_mape=None if "mape" not in protocol_metrics else float(protocol_metrics["mape"]),
-            oracle_val_mse=None if oracle_metrics is None or "mse" not in oracle_metrics else float(oracle_metrics["mse"]),
-            oracle_val_mae=None if oracle_metrics is None or "mae" not in oracle_metrics else float(oracle_metrics["mae"]),
-            oracle_val_mape=None if oracle_metrics is None or "mape" not in oracle_metrics else float(oracle_metrics["mape"]),
             clients=client_records,
         )
         self.history.append(record)
@@ -616,8 +553,6 @@ class FederatedServer:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         torch.save(self.global_state, output_dir / "model.pt")
-        if self._uses_oracle_evaluation() and self.oracle_global_state is not None:
-            torch.save(self.oracle_global_state, output_dir / "oracle_model.pt")
         config_formats = config.get("artifacts", {}).get("config_formats")
         saved_configs = save_experiment_config(config, output_dir, config_formats)
         logger.info("Saved experiment config artifacts: {}", [str(path) for path in saved_configs])

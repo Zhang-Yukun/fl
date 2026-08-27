@@ -117,7 +117,6 @@ A:
 
 | 字段 | 默认值 | 可选值 | 作用 |
 | --- | --- | --- | --- |
-| `evaluation.mode` | `protocol` | `protocol`, `oracle_full_update` | 联邦训练里验证/测试走协议路径还是 oracle dense 路径。 |
 | `evaluation.metrics` | forecasting 默认 `[mse, mae, mape]` | 由任务注册表支持；当前常用 `mse`, `mae`, `mape`, `accuracy`, `cross_entropy` | 评测指标列表。任务主指标会被自动补全。 |
 
 ### 3.6 `centralized`

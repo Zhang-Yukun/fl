@@ -77,7 +77,6 @@ class SparseFedAvgMethodBase(FederatedMethod):
             update = scaled if update is None else {name: update[name] + scaled[name] for name in scaled}
         protocol_base_state = weighted_protocol_base_state(server, results, round_base_state, round_index, round_context or {})
         server.global_state = add_update(protocol_base_state, update)
-        server._update_oracle_evaluation_state(round_base_state, results, weights)
         return [weight / total for weight in weights]
 
     def extract_attack_payload(self, *, result, clone_state, **_: object):

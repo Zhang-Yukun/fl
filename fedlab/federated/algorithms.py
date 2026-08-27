@@ -187,15 +187,10 @@ def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
     data = asdict(record)
     clients = data.pop("clients")
     val_metrics = data.pop('val_metrics', {})
-    active_val_metrics = data.pop('active_val_metrics', {})
     protocol_val_metrics = data.pop('protocol_val_metrics', {})
-    oracle_val_metrics = data.pop('oracle_val_metrics', None)
     payload = {f"round/{key}": value for key, value in data.items() if value is not None}
     payload.update({f"round/val_{key}": value for key, value in val_metrics.items()})
-    payload.update({f"round/active_val_{key}": value for key, value in active_val_metrics.items()})
     payload.update({f"round/protocol_val_{key}": value for key, value in protocol_val_metrics.items()})
-    if oracle_val_metrics is not None:
-        payload.update({f"round/oracle_val_{key}": value for key, value in oracle_val_metrics.items()})
     for client in clients:
         prefix = f"client/{client['client_id']}"
         for key, value in client.items():
@@ -299,7 +294,6 @@ def _build_federated_summary(
     attack_summary: dict[str, Any],
     attack_target_type: str,
     protocol_test_metrics: dict[str, float] | None = None,
-    oracle_test_metrics: dict[str, float] | None = None,
     transport: str | None = None,
 ) -> dict[str, Any]:
     """Build a summary payload shared by final outputs and periodic snapshots."""
@@ -307,15 +301,10 @@ def _build_federated_summary(
     history = server.history
     last_privacy = history[-1] if history else None
     protocol_test = test_metrics if protocol_test_metrics is None else protocol_test_metrics
-    oracle_test = protocol_test if oracle_test_metrics is None else oracle_test_metrics
     primary_metric_name = _configured_primary_metric_name(server.config)
     summary = {
         "test": test_metrics,
-        "active_test_scope": server.evaluation_mode,
-        "evaluation_mode": server.evaluation_mode,
-        "best_val_scope": server.evaluation_mode,
         "protocol_test": protocol_test,
-        "oracle_test": oracle_test,
         "rounds": len(history),
         "total_time_seconds": total_elapsed,
         "best_round": best_round,
@@ -355,7 +344,6 @@ def _build_federated_resume_state(
     round_index: int,
     server: FederatedServer,
     best_global_state: StateDict,
-    best_oracle_state: StateDict | None,
     best_metrics: dict[str, float],
     best_round: int,
 ) -> dict[str, Any]:
@@ -364,9 +352,7 @@ def _build_federated_resume_state(
     return {
         "round_index": int(round_index),
         "global_state": _clone_state(server.global_state),
-        "oracle_global_state": None if server.oracle_global_state is None else _clone_state(server.oracle_global_state),
         "best_global_state": _clone_state(best_global_state),
-        "best_oracle_state": None if best_oracle_state is None else _clone_state(best_oracle_state),
         "best_metrics": dict(best_metrics),
         "best_round": int(best_round),
         "history": [asdict(record) for record in server.history],
@@ -381,7 +367,6 @@ def _save_periodic_federated_snapshot(
     round_index: int,
     start_time: float,
     best_global_state: StateDict,
-    best_oracle_state: StateDict | None,
     best_metrics: dict[str, float],
     best_round: int,
     attack_results: list[Any],
@@ -393,7 +378,7 @@ def _save_periodic_federated_snapshot(
     if not should_save_periodic_artifacts(config, round_index + 1):
         return
     test_metrics = server.test_global()
-    protocol_test_metrics, oracle_test_metrics = _resolve_test_metric_views(server, test_metrics)
+    protocol_test_metrics = test_metrics
     attack_records = [result.to_record() for result in attack_results]
     attack_summary = summarize_attack_results(
         attack_results,
@@ -409,7 +394,6 @@ def _save_periodic_federated_snapshot(
         attack_summary=attack_summary,
         attack_target_type=attack_target_type,
         protocol_test_metrics=protocol_test_metrics,
-        oracle_test_metrics=oracle_test_metrics,
         transport=transport,
     )
     snapshot_dir = save_federated_snapshot(
@@ -417,7 +401,6 @@ def _save_periodic_federated_snapshot(
         config,
         snapshot_name=f"round_{round_index + 1:04d}",
         model_state=server.global_state,
-        oracle_model_state=server.oracle_global_state if server._uses_oracle_evaluation() else None,
         metrics_history=server.history,
         summary=summary,
         attack_records=attack_records,
@@ -425,7 +408,6 @@ def _save_periodic_federated_snapshot(
             round_index=round_index + 1,
             server=server,
             best_global_state=best_global_state,
-            best_oracle_state=best_oracle_state,
             best_metrics=best_metrics,
             best_round=best_round,
         ),
@@ -438,14 +420,6 @@ def _wandb_cumulative_communication_payload(history: list[RoundRecord]) -> dict[
 
     summary = _round_history_communication_summary(history)
     return {f"cumulative/{key}": value for key, value in summary.items()}
-
-
-def _resolve_test_metric_views(server, active_test_metrics):
-    """Return protocol/oracle test metrics, defaulting oracle to protocol when not configured."""
-
-    protocol_test_metrics = server.test_protocol() if server._uses_oracle_evaluation() else active_test_metrics
-    oracle_test_metrics = server.test_oracle() if server._uses_oracle_evaluation() else protocol_test_metrics
-    return protocol_test_metrics, oracle_test_metrics
 
 
 
@@ -1398,7 +1372,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     max_rounds = int(config["federated"].get("rounds", 20))
     attack_manager = AsyncAttackManager(config, tracker)
     best_global_state = _clone_state(server.global_state)
-    best_oracle_state = None if not server._uses_oracle_evaluation() else _clone_state(server.oracle_global_state)
     best_metrics: dict[str, float] | None = None
     best_round = -1
     for round_index in range(max_rounds):
@@ -1418,8 +1391,7 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         else:
             aggregation_weights = server.aggregate_dense(results, round_index=round_index, round_base_state=round_base_state, round_context=round_context)
         metrics = server.evaluate_global()
-        protocol_metrics = server.evaluate_protocol() if server._uses_oracle_evaluation() else metrics
-        oracle_metrics = server.evaluate_oracle() if server._uses_oracle_evaluation() else protocol_metrics
+        protocol_metrics = metrics
         best_global_state, best_metrics, best_round, improved = _update_best_checkpoint(
             best_state=best_global_state,
             best_metrics=best_metrics,
@@ -1431,8 +1403,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             metric_name=primary_metric_name,
             metric_mode=primary_metric_mode,
         )
-        if improved and server._uses_oracle_evaluation():
-            best_oracle_state = _clone_state(server.oracle_global_state)
         record = server.record_round(
             round_index,
             results,
@@ -1441,7 +1411,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             round_time_seconds=time.perf_counter() - round_start,
             elapsed_time_seconds=time.perf_counter() - start_time,
             protocol_metrics=protocol_metrics,
-            oracle_metrics=oracle_metrics,
         )
         tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(server.history)}, step=round_index)
         try:
@@ -1455,18 +1424,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
                 step=round_index,
                 client_ids=client_ids,
                 state=server.global_state,
-            )
-            oracle_state = server.oracle_global_state if server.oracle_global_state is not None else server.global_state
-            _log_prediction_views(
-                tracker,
-                "prediction/federated/val_oracle",
-                "federated val oracle prediction",
-                server.model,
-                val_loader,
-                device,
-                step=round_index,
-                client_ids=client_ids,
-                state=oracle_state,
             )
         except Exception as exc:
             logger.debug("Skip federated val prediction plot: {}", exc)
@@ -1490,7 +1447,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             round_index=round_index,
             start_time=start_time,
             best_global_state=best_global_state,
-            best_oracle_state=best_oracle_state,
             best_metrics=best_metrics,
             best_round=best_round,
             attack_results=attack_manager.attack_results,
@@ -1500,20 +1456,16 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             logger.info("Early stopping at round {}", round_index)
             break
     server.global_state = _clone_state(best_global_state)
-    if server._uses_oracle_evaluation() and best_oracle_state is not None:
-        server.oracle_global_state = _clone_state(best_oracle_state)
     logger.info("Restored best federated checkpoint from round {} for final test", best_round)
     test_metrics = server.test_global()
-    protocol_test_metrics, oracle_test_metrics = _resolve_test_metric_views(server, test_metrics)
+    protocol_test_metrics = test_metrics
     final_test_step = max(len(server.history), best_round + 1)
     attack_manager.finalize()
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
-    final_log_payload = {**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed, "run/evaluation_mode": server.evaluation_mode}
+    final_log_payload = {**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed}
     if protocol_test_metrics is not None:
         final_log_payload.update({f"protocol_test/{key}": value for key, value in protocol_test_metrics.items()})
-    if oracle_test_metrics is not None:
-        final_log_payload.update({f"oracle_test/{key}": value for key, value in oracle_test_metrics.items()})
     tracker.log(final_log_payload)
     try:
         _log_prediction_views(
@@ -1526,18 +1478,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             step=final_test_step,
             client_ids=client_ids,
             state=server.global_state,
-        )
-        oracle_state = server.oracle_global_state if server.oracle_global_state is not None else server.global_state
-        _log_prediction_views(
-            tracker,
-            "prediction/federated/test_oracle",
-            "federated test oracle prediction",
-            server.model,
-            test_loader,
-            device,
-            step=final_test_step,
-            client_ids=client_ids,
-            state=oracle_state,
         )
     except Exception as exc:
         logger.debug("Skip federated prediction plot: {}", exc)
@@ -1558,7 +1498,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         attack_summary=attack_summary,
         attack_target_type=attack_target_type,
         protocol_test_metrics=protocol_test_metrics,
-        oracle_test_metrics=oracle_test_metrics,
     )
     tracker.log({
         "run/best_round": best_round,
