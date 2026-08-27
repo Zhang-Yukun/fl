@@ -209,6 +209,16 @@ class FederatedServer:
             self.method.name,
         )
 
+    def initialize_runtime(self) -> None:
+        """Finish any deferred algorithm-specific runtime initialization."""
+
+        self.method.initialize_server_runtime(self)
+
+    def runtime_ready(self) -> bool:
+        """Return whether algorithm-specific server runtime state is ready."""
+
+        return self.method.server_ready(self)
+
     def build_round_context(self) -> dict[str, Any]:
         """Return server-controlled per-round context forwarded to clients."""
 

@@ -76,24 +76,41 @@ class EGAFedAvgMethod(FederatedMethod):
         client.ega_residual = None
 
     def configure_server(self, server: Any) -> None:
-        """Initialize the server-owned EGA codec and normalization state."""
+        """Initialize the server-owned EGA bookkeeping and optionally defer codec loading."""
 
         ega_cfg = server.config.get("ega", {})
         total_clients = int(ega_cfg.get("num_clients", len(server.config.get("data", {}).get("clients", [])) or 1))
         server.ega_total_clients = total_clients
+        server.ega_codec = None
+        server.ega_codec_bootstrap_payload = None
+        server.ega_codec_bootstrap_pending = False
+        server.ega_normalization = float(ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)))
+        if bool(server.config.get("grpc", {}).get("defer_server_runtime_init", False)):
+            return
+        self.initialize_server_runtime(server)
+
+    def initialize_server_runtime(self, server: Any) -> None:
+        """Load or pretrain the server-owned EGA codec when the transport is ready."""
+
+        if server.ega_codec is not None:
+            return
         server.ega_codec = load_ega_codec(
             server.config,
             device=server.device,
-            num_clients=total_clients,
+            num_clients=server.ega_total_clients,
             allow_pretrain=True,
         )
         server.ega_codec_bootstrap_payload = export_ega_codec_payload(
             server.ega_codec,
             config=server.config,
-            num_clients=total_clients,
+            num_clients=server.ega_total_clients,
         )
         server.ega_codec_bootstrap_pending = True
-        server.ega_normalization = float(ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)))
+
+    def server_ready(self, server: Any) -> bool:
+        """Return whether the EGA codec is ready for round-0 communication."""
+
+        return server.ega_codec is not None
 
     def build_round_context(self, server: Any) -> dict[str, Any]:
         """Broadcast the current EGA normalization and first-round codec bootstrap."""

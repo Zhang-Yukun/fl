@@ -47,6 +47,14 @@ class FederatedMethod(ABC):
     def configure_server(self, server: Any) -> None:
         """Attach algorithm-specific state to a server before training starts."""
 
+    def initialize_server_runtime(self, server: Any) -> None:
+        """Finish any deferred server-side runtime initialization before clients can train."""
+
+    def server_ready(self, server: Any) -> bool:
+        """Return whether the server can safely start round-0 communication."""
+
+        return True
+
     def build_round_context(self, server: Any) -> dict[str, Any]:
         """Return any per-round context the server must broadcast to clients."""
 

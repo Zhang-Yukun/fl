@@ -401,6 +401,41 @@ def test_grpc_coordinator_saves_update_captures_when_attacks_disabled(tmp_path):
     assert (tmp_path / "saved_updates" / "index.json").exists()
 
 
+def test_grpc_coordinator_defers_ega_runtime_until_explicit_start(tmp_path, monkeypatch):
+    config = _classification_grpc_config(tmp_path, algorithm='ega_fedavg')
+    config['grpc']['defer_server_runtime_init'] = True
+
+    ready_event = Event()
+
+    def _delayed_load_ega_codec(config, device, num_clients, allow_pretrain):
+        del config, device, num_clients, allow_pretrain
+        assert ready_event.wait(timeout=1.0)
+        return _IdentityEgaCodec(block_size=8)
+
+    monkeypatch.setattr(encoded_methods, 'load_ega_codec', _delayed_load_ega_codec)
+
+    coordinator = GrpcFederatedCoordinator(config)
+    initial_payload = coordinator.get_global()
+    assert initial_payload['ready'] is False
+    assert initial_payload['round_context'] == {}
+
+    coordinator.start_runtime_initialization()
+    time.sleep(0.05)
+    waiting_payload = coordinator.get_global()
+    assert waiting_payload['ready'] is False
+
+    ready_event.set()
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        payload = coordinator.get_global()
+        if payload['ready']:
+            assert 'ega_codec_payload' in payload['round_context']
+            break
+        time.sleep(0.01)
+    else:  # pragma: no cover - defensive timeout path
+        pytest.fail('deferred EGA runtime initialization did not complete in time')
+
+
 @pytest.mark.parametrize('algorithm', ['fedavg', 'sparse_fedavg', 'ega_fedavg'])
 def test_grpc_coordinator_supports_classification_task(tmp_path, monkeypatch, algorithm):
     config = _classification_grpc_config(tmp_path, algorithm=algorithm)
@@ -570,6 +605,31 @@ def test_real_grpc_sync_and_async_match_when_randomness_disabled(tmp_path):
     _run_networked_grpc(async_config)
 
     assert compare_fedavg_runs(sync_dir, async_dir, ignore_transport=True) == []
+
+
+def test_networked_grpc_ega_deferred_runtime_startup(tmp_path):
+    config = _classification_grpc_config(tmp_path, algorithm='ega_fedavg')
+    port = _free_port()
+    config['grpc']['address'] = f'127.0.0.1:{port}'
+    config['grpc']['server_address'] = f'127.0.0.1:{port}'
+    config['ega']['pretrain'] = {
+        'epochs': 1,
+        'patience': 1,
+        'min_delta': 0.0,
+        'batch_size': 8,
+        'lr': 1e-3,
+        'train_groups': 32,
+        'val_groups': 16,
+        'seed': 2026,
+        'device': 'cpu',
+    }
+
+    _run_networked_grpc(config)
+
+    summary = json.loads((Path(config['experiment']['output_dir']) / 'summary.json').read_text(encoding='utf-8'))
+    assert summary['transport'] == 'grpc'
+    assert 'accuracy' in summary['test']
+    assert Path(config['ega']['artifact_path']).exists()
 
 
 def test_grpc_finalization_does_not_block_last_submit_response(tmp_path, monkeypatch):

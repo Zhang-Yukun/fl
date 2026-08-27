@@ -10,6 +10,7 @@ Example:
 
 from __future__ import annotations
 
+import copy
 import json
 import threading
 import time
@@ -161,6 +162,9 @@ class GrpcFederatedCoordinator:
         self.best_global_state = _clone_state(self.server.global_state)
         self.best_metrics: dict[str, float] | None = None
         self.best_round = -1
+        self.runtime_ready = self.server.runtime_ready()
+        self.runtime_error: str | None = None
+        self.runtime_init_thread: threading.Thread | None = None
         self.tracker.log({
             'run/algorithm': str(config['federated'].get('algorithm', 'fedavg')),
             'run/client_count': len(self.expected_clients),
@@ -169,6 +173,36 @@ class GrpcFederatedCoordinator:
             'run/compressed_uploads': self.compressed,
             'run/transport': 'grpc',
         })
+
+    def start_runtime_initialization(self) -> None:
+        """Kick off any deferred server runtime initialization after the gRPC server starts listening."""
+
+        with self.lock:
+            if self.runtime_ready or self.runtime_error is not None or self.runtime_init_thread is not None:
+                return
+            self.runtime_init_thread = threading.Thread(
+                target=self._initialize_runtime,
+                name='grpc-runtime-init',
+                daemon=True,
+            )
+            self.runtime_init_thread.start()
+
+    def _initialize_runtime(self) -> None:
+        """Prepare any deferred algorithm-specific server runtime state."""
+
+        try:
+            self.server.initialize_runtime()
+        except Exception as exc:  # pragma: no cover - defensive logging path
+            logger.exception('Failed to initialize deferred gRPC server runtime: {}', exc)
+            with self.lock:
+                self.runtime_error = str(exc)
+                self.stopped = True
+                self.stop_time_seconds = time.perf_counter()
+                self.finalization_completed = True
+            return
+        with self.lock:
+            self.runtime_ready = True
+        logger.info('Deferred gRPC server runtime initialization finished')
 
     def ack_stop(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Record that one client received the stop signal."""
@@ -220,8 +254,10 @@ class GrpcFederatedCoordinator:
                 'round': self.round_index,
                 'state': self.server.global_state,
                 'compressed': self.compressed,
-                'round_context': self.server.build_round_context(),
+                'round_context': self.server.build_round_context() if self.runtime_ready else {},
                 'stop': self.stopped,
+                'ready': self.runtime_ready,
+                'runtime_error': self.runtime_error,
             }
 
     def _run_attacks(
@@ -391,6 +427,8 @@ class GrpcFederatedCoordinator:
         with self.lock:
             if self.stopped:
                 return {'accepted': False, 'stop': True, 'round': self.round_index}
+            if not self.runtime_ready:
+                return {'accepted': False, 'stop': False, 'round': self.round_index}
             if payload['round'] != self.round_index:
                 return {'accepted': False, 'stop': False, 'round': self.round_index}
             result = payload['result']
@@ -492,7 +530,9 @@ class GrpcFederatedCoordinator:
 def serve(config: dict[str, Any]) -> None:
     """Start a blocking gRPC federated server."""
 
-    grpc_cfg = config.get('grpc', {})
+    config = copy.deepcopy(config)
+    grpc_cfg = config.setdefault('grpc', {})
+    grpc_cfg['defer_server_runtime_init'] = True
     address = grpc_cfg.get('address', '0.0.0.0:50051')
     poll_seconds = float(grpc_cfg.get('poll_seconds', 1.0))
     shutdown_grace_seconds = float(grpc_cfg.get('shutdown_grace_seconds', max(3.0, poll_seconds * 3.0)))
@@ -510,6 +550,7 @@ def serve(config: dict[str, Any]) -> None:
         max_message_length=max_message_length,
     )
     rpc_server.start()
+    coordinator.start_runtime_initialization()
     try:
         while True:
             coordinator.finalize_if_requested()
@@ -569,6 +610,7 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
             logger.warning('Client {} could not acknowledge stop to {}: {}', client_id, address, exc)
 
     last_submitted = -1
+    last_waiting_ready_log = -1
     last_transport_snapshot = rpc.snapshot_counters()
     while True:
         try:
@@ -581,6 +623,17 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
             logger.info('Client {} received stop signal', client_id)
             _ack_stop()
             return
+        if not global_payload.get('ready', True):
+            runtime_error = global_payload.get('runtime_error')
+            if runtime_error:
+                logger.error('Client {} observed server runtime initialization failure: {}', client_id, runtime_error)
+                time.sleep(poll_seconds)
+                continue
+            if last_waiting_ready_log != global_payload['round']:
+                logger.info('Client {} waiting for server runtime readiness before round {}', client_id, global_payload['round'])
+                last_waiting_ready_log = global_payload['round']
+            time.sleep(poll_seconds)
+            continue
         round_index = global_payload['round']
         if round_index == last_submitted:
             time.sleep(poll_seconds)
