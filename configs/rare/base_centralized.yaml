@@ -1,4 +1,6 @@
 includes:
   - ../common/forecasting_patchtst.yaml
-  - ../common/centralized.yaml
   - ../common/evaluation_protocol.yaml
+
+experiment:
+  mode: centralized

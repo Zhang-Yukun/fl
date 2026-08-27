@@ -1,3 +1,0 @@
-training:
-  # Number of centralized training epochs.
-  epochs: 300

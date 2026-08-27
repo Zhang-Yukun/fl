@@ -9,8 +9,3 @@ attack:
   steps: 20
   async_enabled: false
   device: same
-
-data:
-  batch_size: 64
-  shuffle_train: true
-  num_workers: 0

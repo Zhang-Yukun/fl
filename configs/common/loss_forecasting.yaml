@@ -1,0 +1,3 @@
+training:
+  # Supported losses from the registry include mse, mae, smooth_l1, huber, cross_entropy.
+  loss: mse

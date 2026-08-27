@@ -1,17 +1,11 @@
 includes:
   - ../common/task_classification.yaml
   - ../common/model_small_cnn.yaml
-  - ../common/training_classification.yaml
+  - ../common/training.yaml
+  - ../common/loss_classification.yaml
   - ../common/federated.yaml
   - ../common/evaluation_accuracy.yaml
   - ../common/tracking_disabled.yaml
-  - ../common/artifacts_yaml.yaml
   - ../common/grpc_default.yaml
   - ../common/classification_federated_defaults.yaml
-
-data:
-  dataset_name: mnist
-  split_dir: ../data/mnist
-  clients: [m1, m2, m3]
-  image_shape: [1, 28, 28]
-  num_classes: 10
+  - ../common/data_mnist.yaml

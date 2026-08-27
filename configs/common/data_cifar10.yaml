@@ -1,0 +1,9 @@
+data:
+  dataset_name: cifar10
+  split_dir: ../data/cifar10
+  clients: [c1, c2, c3]
+  image_shape: [3, 32, 32]
+  num_classes: 10
+  batch_size: 128
+  shuffle_train: true
+  num_workers: 0

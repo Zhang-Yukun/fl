@@ -48,6 +48,23 @@ def test_image_classification_centralized_configs_match_expected_dataset(config_
     assert config['evaluation']['metrics'] == ['accuracy']
 
 
+
+@pytest.mark.parametrize(
+    ("config_name", "dataset_name"),
+    [
+        ("mnist/fedavg.yaml", "mnist"),
+        ("cifar10/fedavg.yaml", "cifar10"),
+    ],
+)
+def test_image_classification_configs_load_data_from_dedicated_common_files(config_name, dataset_name):
+    config = load_config(CONFIG_DIR / config_name)
+
+    assert config['data']['dataset_name'] == dataset_name
+    assert config['data']['batch_size'] == 128
+    assert config['training']['epochs'] == 1
+    assert config['training']['optimizer'] == 'adam'
+
+
 def test_classification_algorithm_configs_only_define_relevant_blocks():
     mnist_topk = load_config(CONFIG_DIR / 'mnist/topk.yaml')
     mnist_ega = load_config(CONFIG_DIR / 'mnist/ega.yaml')

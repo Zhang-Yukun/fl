@@ -1,3 +1,0 @@
-artifacts:
-  config_formats: [yaml]
-  save_every_rounds: 0

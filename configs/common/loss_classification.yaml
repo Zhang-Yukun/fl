@@ -1,0 +1,3 @@
+training:
+  # Classification tasks normally use cross_entropy.
+  loss: cross_entropy
