@@ -83,3 +83,16 @@ def test_classification_algorithm_configs_only_define_relevant_blocks():
     assert 'ega' in mnist_ega
     assert 'ega' in cifar_ega
 
+
+
+def test_classification_ega_configs_use_shared_common_defaults_without_stale_keys():
+    for config_name in ('mnist/ega.yaml', 'cifar10/ega.yaml'):
+        config = load_config(CONFIG_DIR / config_name)
+        assert config['ega']['encoded_dtype'] == 'int8'
+        assert config['ega']['encoded_stochastic_rounding'] is False
+        assert config['ega']['encoded_noise_std'] == 0.0
+        assert config['ega']['error_feedback'] is True
+        assert config['ega']['pretrain']['batch_size'] == 128
+        assert config['ega']['pretrain']['lr'] == 0.0005
+        assert config['ega']['pretrain']['seed'] == 2026
+        assert 'download_encoded_dtype' not in config['ega']

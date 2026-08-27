@@ -1,5 +1,6 @@
 includes:
   - base_federated.yaml
+  - ../common/ega/default.yaml
 
 experiment:
   name: mnist_ega_classification
@@ -17,22 +18,9 @@ ega:
   hidden_dim: 128
   residual_blocks: 1
   quantization_level: 127
-  encode_buffers: false
-  normalization: 0.00025
-  initial_normalization: 0.00025
-  min_normalization: 0.000001
-  normalization_strategy: ema_reported_client_max_abs
   normalization_ema: 0.9
-  encoded_dtype: int8
-  encoded_stochastic_rounding: false
-  encoded_noise_std: 0.0
-  error_feedback: true
   pretrain:
     epochs: 20
     patience: 5
-    min_delta: 0.0
-    batch_size: 128
-    lr: 0.0005
     train_groups: 2000
     val_groups: 500
-    seed: 2026

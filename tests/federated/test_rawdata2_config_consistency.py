@@ -57,3 +57,16 @@ def test_centralized_and_federated_rare_bases_keep_separate_epoch_defaults():
     assert centralized["federated"]["rounds"] == 20
     assert fedavg["training"]["epochs"] == 1
     assert fedavg["federated"]["rounds"] == 300
+
+
+def test_retained_rare_ega_config_uses_shared_common_defaults_without_stale_keys():
+    ega = load_config(CONFIG_DIR / "rare/ega.yaml")
+
+    assert ega["ega"]["encoded_dtype"] == "int8"
+    assert ega["ega"]["encoded_stochastic_rounding"] is False
+    assert ega["ega"]["encoded_noise_std"] == 0.0
+    assert ega["ega"]["error_feedback"] is True
+    assert ega["ega"]["pretrain"]["batch_size"] == 128
+    assert ega["ega"]["pretrain"]["lr"] == 0.0005
+    assert ega["ega"]["pretrain"]["seed"] == 2026
+    assert "download_encoded_dtype" not in ega["ega"]

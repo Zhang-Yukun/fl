@@ -1,5 +1,6 @@
 includes:
   - base_federated.yaml
+  - ../common/ega/default.yaml
 
 experiment:
   name: ega
@@ -18,22 +19,9 @@ ega:
   hidden_dim: 1024
   residual_blocks: 2
   quantization_level: 127
-  encode_buffers: false
-  normalization: 0.00025
-  initial_normalization: 0.00025
-  min_normalization: 0.000001
-  normalization_strategy: ema_reported_client_max_abs
   normalization_ema: 0.9
-  encoded_dtype: int8
-  encoded_stochastic_rounding: false
-  encoded_noise_std: 0.0
-  error_feedback: true
   pretrain:
     epochs: 100
     patience: 20
-    min_delta: 0.0
-    batch_size: 128
-    lr: 0.0005
     train_groups: 30000
     val_groups: 15000
-    seed: 2026

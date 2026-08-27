@@ -1,0 +1,15 @@
+ega:
+  encode_buffers: false
+  normalization: 0.00025
+  initial_normalization: 0.00025
+  min_normalization: 0.000001
+  normalization_strategy: ema_reported_client_max_abs
+  encoded_dtype: int8
+  encoded_stochastic_rounding: false
+  encoded_noise_std: 0.0
+  error_feedback: true
+  pretrain:
+    min_delta: 0.0
+    batch_size: 128
+    lr: 0.0005
+    seed: 2026
