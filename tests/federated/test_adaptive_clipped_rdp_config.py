@@ -11,6 +11,7 @@ def test_rawdata2_adaptive_clipped_rdp_config_matches_formal_round_budget():
 
     assert config["federated"]["algorithm"] == "adaptive_clipped_rdp_fedavg"
     assert config["federated"]["rounds"] == 300
-    assert config["federated"]["local_epochs"] == 1
+    assert config["training"]["epochs"] == 1
+    assert "local_epochs" not in config["federated"]
     assert config["adaptive_clipped_rdp"]["reference_clip_norm"] > 0
     assert config["adaptive_clipped_rdp"]["rdp_alpha"] > 1

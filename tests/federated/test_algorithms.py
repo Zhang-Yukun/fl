@@ -213,7 +213,7 @@ def _transport_test_config(tmp_path) -> dict:
             f"experiment.output_dir={tmp_path}",
             "federated.algorithm=fedavg",
             "federated.rounds=3",
-            "federated.local_epochs=1",
+            "training.epochs=1",
             "attack.enabled=false",
             "tracking.enabled=false",
             "runtime.device=cpu",
@@ -409,7 +409,7 @@ def test_sparse_fedavg_transport_semantics_match_expected_payloads(tmp_path, mon
             f"experiment.output_dir={tmp_path / 'fixed'}",
             "federated.algorithm=sparse_fedavg",
             "federated.rounds=3",
-            "federated.local_epochs=1",
+            "training.epochs=1",
             "federated.topk_fraction=0.15",
             "attack.enabled=false",
             "tracking.enabled=false",
@@ -539,7 +539,7 @@ def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp
             f"experiment.output_dir={tmp_path / 'fixed_quantized'}",
             "federated.algorithm=secure_quantized_fedavg",
             "federated.rounds=3",
-            "federated.local_epochs=1",
+            "training.epochs=1",
             "federated.quantization_dtype=float16",
             "privacy.clip_norm=0.0",
             "privacy.noise_multiplier=0.0",
@@ -1068,13 +1068,13 @@ def test_train_n_steps_cycles_loader_and_validates_steps():
     assert any(not torch.allclose(left, right.detach()) for left, right in zip(before, after))
 
 
-def test_client_prefers_local_steps_over_local_epochs(monkeypatch):
+def test_client_prefers_local_steps_over_training_epochs(monkeypatch):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
             "federated.algorithm=fedavg",
             "federated.local_steps=2",
-            "federated.local_epochs=7",
+            "training.epochs=7",
             "attack.enabled=false",
         ],
     )
@@ -1365,7 +1365,7 @@ def test_centralized_run_restores_best_validation_checkpoint(tmp_path, monkeypat
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            "centralized.rounds=2",
+            "training.epochs=2",
             "training.patience=10",
             "tracking.enabled=false",
             "runtime.device=cpu",
@@ -1698,7 +1698,7 @@ def test_ega_server_bootstraps_codec_once_via_round_context(tmp_path, monkeypatc
             f"experiment.output_dir={tmp_path / 'ega_bootstrap'}",
             "federated.algorithm=ega_fedavg",
             "federated.rounds=3",
-            "federated.local_epochs=1",
+            "training.epochs=1",
             "attack.enabled=false",
             "tracking.enabled=false",
             "runtime.device=cpu",
@@ -1733,7 +1733,7 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
             f"experiment.output_dir={tmp_path / 'ega_fixed'}",
             "federated.algorithm=ega_fedavg",
             "federated.rounds=3",
-            "federated.local_epochs=1",
+            "training.epochs=1",
             "attack.enabled=false",
             "tracking.enabled=false",
             "runtime.device=cpu",
@@ -1808,7 +1808,7 @@ def test_single_node_ega_transport_counts_round_context_bytes(tmp_path, monkeypa
             "experiment.output_dir=" + str(tmp_path / "ega_round_context"),
             "federated.algorithm=ega_fedavg",
             "federated.rounds=1",
-            "federated.local_epochs=1",
+            "training.epochs=1",
             "attack.enabled=false",
             "tracking.enabled=false",
             "runtime.device=cpu",
@@ -1884,7 +1884,7 @@ def _single_node_update_update_config(tmp_path, algorithm: str, extra_overrides:
         f"experiment.output_dir={tmp_path / algorithm}",
         f"federated.algorithm={algorithm}",
         "federated.rounds=3",
-        "federated.local_epochs=1",
+        "training.epochs=1",
         "attack.enabled=false",
         "tracking.enabled=false",
         "runtime.device=cpu",

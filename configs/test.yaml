@@ -10,9 +10,11 @@ data:
 model:
   hidden_size: 16
 
+training:
+  epochs: 1
+
 federated:
   rounds: 1
-  local_epochs: 1
   topk_fraction: 0.05
 
 attack:

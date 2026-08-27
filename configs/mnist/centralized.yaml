@@ -6,5 +6,5 @@ experiment:
   mode: centralized
   output_dir: outputs/mnist_centralized_classification
 
-centralized:
-  rounds: 5
+training:
+  epochs: 5

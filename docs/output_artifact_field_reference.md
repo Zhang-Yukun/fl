@@ -113,7 +113,6 @@ This block is interpreted by the concrete model implementation. Common fields in
 | --- | --- | --- |
 | `algorithm` | string | Federated method name. |
 | `rounds` | int | Communication rounds. |
-| `local_epochs` | int | Local epochs per communication round. |
 | `local_steps` | int, optional | Optional local-step override. |
 | `topk_fraction` | float, optional | Keep ratio for Top-k / Random-k / DP-Top-k style sparse methods. |
 | `randomk_seed` | int, optional | Random seed for Random-k style methods. |

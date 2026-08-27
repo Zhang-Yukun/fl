@@ -363,7 +363,7 @@ federated.algorithm=ega_fedavg
 centralized_round_args() {
   if [[ -n "${ROUNDS}" ]]; then
     printf -- '--override
-centralized.rounds=%s
+training.epochs=%s
 ' "${ROUNDS}"
   fi
   if [[ -n "${PATIENCE}" ]]; then

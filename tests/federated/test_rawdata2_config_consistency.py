@@ -20,10 +20,11 @@ def test_training_lengths_are_consistent():
         load_config(CONFIG_DIR / "ega.yaml"),
     ]
 
-    assert configs[0]["training"]["patience"] == 50
+    assert configs[0]["training"]["patience"] == 500
     for config in configs:
         assert config["federated"]["rounds"] == 300
-        assert config["federated"]["local_epochs"] == 1
+        assert config["training"]["epochs"] == 1
+        assert "local_epochs" not in config["federated"]
 
 
 def test_shared_configs_do_not_define_compression_only_parameters():
@@ -58,14 +59,14 @@ def test_all_algorithm_configs_default_to_protocol_evaluation():
         assert config.get("evaluation", {}).get("mode", "protocol") == "protocol"
 
 
-def test_centralized_rounds_do_not_override_federated_rounds():
+def test_centralized_epochs_do_not_override_federated_rounds():
     centralized = load_config(CONFIG_DIR / "centralized.yaml")
     fedavg = load_config(CONFIG_DIR / "fedavg.yaml")
 
-    assert centralized.get("centralized", {}).get("rounds") == 500
+    assert centralized.get("training", {}).get("epochs") == 300
     assert centralized.get("training", {}).get("patience") == 50
-    assert "epochs" not in centralized.get("training", {})
-    assert fedavg.get("centralized", {}).get("rounds") == 10
+    assert centralized.get("federated", {}).get("rounds") == 20
+    assert fedavg.get("training", {}).get("epochs") == 1
     assert fedavg["federated"]["rounds"] == 300
 
 

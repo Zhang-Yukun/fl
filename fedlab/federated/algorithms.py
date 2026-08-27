@@ -103,13 +103,10 @@ def configure_random_seed(config: dict[str, Any]) -> None:
     setup_seed(int(seed), deterministic=bool(runtime_cfg.get("deterministic", True)))
 
 
-def _resolve_centralized_rounds(config: dict[str, Any]) -> int:
-    """Resolve centralized training rounds from the dedicated config block."""
+def _resolve_training_epochs(config: dict[str, Any]) -> int:
+    """Resolve the shared epoch budget used by centralized and local training."""
 
-    centralized_cfg = config.get("centralized", {})
-    if centralized_cfg.get("rounds") is None:
-        return 10
-    return int(centralized_cfg.get("rounds"))
+    return int(config.get("training", {}).get("epochs", 1))
 
 
 def _log_mode_specific_schedule(config: dict[str, Any], mode: str) -> None:
@@ -118,12 +115,7 @@ def _log_mode_specific_schedule(config: dict[str, Any], mode: str) -> None:
     if mode == "centralized":
         rounds = config.get("federated", {}).get("rounds")
         if rounds is not None:
-            logger.info("Centralized mode ignores federated.rounds={} and uses centralized.rounds", rounds)
-    elif mode == "federated":
-        centralized_cfg = config.get("centralized", {})
-        central_rounds = centralized_cfg.get("rounds")
-        if central_rounds is not None:
-            logger.info("Federated mode ignores centralized.rounds={} and uses federated.rounds", central_rounds)
+            logger.info("Centralized mode ignores federated.rounds={} and uses training.epochs", rounds)
 
 
 def resolve_device(config: dict[str, Any]) -> torch.device:
@@ -1189,7 +1181,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     best_state = serialize_model(model)
     best_metrics: dict[str, float] | None = None
     best_round = -1
-    for round_index in range(_resolve_centralized_rounds(config)):
+    for round_index in range(_resolve_training_epochs(config)):
         round_start = time.perf_counter()
         loss = sum(train_one_epoch(model, loader, optimizer, device) for loader in train_loaders.values()) / len(train_loaders)
         metrics = evaluate(model, val_loader, device)

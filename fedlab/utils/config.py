@@ -20,6 +20,7 @@ _RUNTIME_DEFAULTS = {
         "type": "forecasting",
     },
     "training": {
+        "epochs": 1,
         "lr": 1e-3,
         "patience": 50,
         "min_delta": 0.0,
@@ -34,13 +35,10 @@ _RUNTIME_DEFAULTS = {
         "mode": "protocol",
         "metrics": ["mse", "mae", "mape"],
     },
-    "centralized": {
-        "rounds": 10,
-    },
+    "centralized": {},
     "federated": {
         "algorithm": "fedavg",
         "rounds": 20,
-        "local_epochs": 1,
     },
     "attack": {
         "enabled": True,
@@ -90,7 +88,7 @@ _RUNTIME_DEFAULTS = {
 }
 
 
-_COMMON_FEDERATED_KEYS = {"algorithm", "rounds", "local_epochs", "local_steps"}
+_COMMON_FEDERATED_KEYS = {"algorithm", "rounds", "local_steps"}
 
 import yaml
 from loguru import logger
@@ -174,15 +172,63 @@ def _materialize_runtime_defaults(config: dict[str, Any]) -> dict[str, Any]:
     return _deep_merge(_RUNTIME_DEFAULTS, config)
 
 
-def _validate_no_deprecated_schedule_keys(config: dict[str, Any]) -> None:
-    """Reject deprecated schedule keys that were intentionally removed."""
+def _normalize_epoch_schedule_config(config: dict[str, Any], overrides: Iterable[str] | None = None) -> dict[str, Any]:
+    """Normalize mode-specific legacy epoch keys onto ``training.epochs``."""
 
-    centralized_cfg = config.get("centralized", {})
+    result = copy.deepcopy(config)
+    experiment_cfg = result.get("experiment", {})
+    mode = str(experiment_cfg.get("mode", "federated")).lower() if isinstance(experiment_cfg, dict) else "federated"
+    training_cfg = result.setdefault("training", {})
+    if not isinstance(training_cfg, dict):
+        raise ValueError("Config block training must be a mapping")
+    centralized_cfg = result.get("centralized", {})
+    federated_cfg = result.get("federated", {})
     if isinstance(centralized_cfg, dict) and centralized_cfg.get("epochs") is not None:
-        raise ValueError("Deprecated config key centralized.epochs is no longer supported; use centralized.rounds")
-    training_cfg = config.get("training", {})
-    if isinstance(training_cfg, dict) and training_cfg.get("epochs") is not None:
-        raise ValueError("Deprecated config key training.epochs is no longer supported")
+        raise ValueError("Deprecated config key centralized.epochs is no longer supported; use training.epochs")
+
+    override_keys = {item.split("=", 1)[0] for item in (overrides or []) if "=" in item}
+    training_epoch_override = "training.epochs" in override_keys
+    centralized_round_override = "centralized.rounds" in override_keys
+    federated_local_epoch_override = "federated.local_epochs" in override_keys
+
+    training_value = None if training_cfg.get("epochs") is None else int(training_cfg["epochs"])
+    legacy_key = None
+    legacy_value = None
+    legacy_override = False
+    if mode == "centralized":
+        if isinstance(centralized_cfg, dict) and centralized_cfg.get("rounds") is not None:
+            legacy_key = "centralized.rounds"
+            legacy_value = int(centralized_cfg["rounds"])
+            legacy_override = centralized_round_override
+    else:
+        if isinstance(federated_cfg, dict) and federated_cfg.get("local_epochs") is not None:
+            legacy_key = "federated.local_epochs"
+            legacy_value = int(federated_cfg["local_epochs"])
+            legacy_override = federated_local_epoch_override
+
+    if training_epoch_override and legacy_override and training_value is not None and legacy_value is not None and training_value != legacy_value:
+        raise ValueError(
+            f"Conflicting epoch schedule keys: training.epochs={training_value}, {legacy_key}={legacy_value}; use one shared training.epochs value"
+        )
+
+    if legacy_value is not None and (legacy_override or training_value is None or not training_epoch_override):
+        training_cfg["epochs"] = legacy_value
+    elif training_value is not None:
+        training_cfg["epochs"] = training_value
+
+    if isinstance(centralized_cfg, dict):
+        centralized_cfg = copy.deepcopy(centralized_cfg)
+        centralized_cfg.pop("rounds", None)
+        if centralized_cfg:
+            result["centralized"] = centralized_cfg
+        else:
+            result.pop("centralized", None)
+    if isinstance(federated_cfg, dict):
+        federated_cfg = copy.deepcopy(federated_cfg)
+        federated_cfg.pop("local_epochs", None)
+        result["federated"] = federated_cfg
+    result["training"] = training_cfg
+    return result
 
 
 def _sanitize_transport_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -240,8 +286,8 @@ def load_config(path: str | Path, overrides: Iterable[str] | None = None) -> dic
     path = Path(path).expanduser().resolve()
     config = _resolve_includes(_load_one(path), path.parent)
     config = apply_overrides(config, overrides)
+    config = _normalize_epoch_schedule_config(config, overrides)
     config = _materialize_runtime_defaults(config)
-    _validate_no_deprecated_schedule_keys(config)
     config = _sanitize_transport_config(config)
     config = _sanitize_algorithm_config(config)
     logger.info("Loaded config from {}", path)

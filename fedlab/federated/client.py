@@ -214,7 +214,7 @@ class FederatedClient:
         if local_steps is not None:
             losses.append(train_n_steps(model, self.train_loader, optimizer, self.device, int(local_steps)))
         else:
-            for _ in range(int(self.config["federated"].get("local_epochs", 1))):
+            for _ in range(int(self.config.get("training", {}).get("epochs", 1))):
                 losses.append(train_one_epoch(model, self.train_loader, optimizer, self.device))
         local_state = serialize_model(model)
         dense_bytes = state_num_bytes(local_state)

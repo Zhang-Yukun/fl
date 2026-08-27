@@ -119,11 +119,11 @@ A:
 | --- | --- | --- | --- |
 | `evaluation.metrics` | forecasting 默认 `[mse, mae, mape]` | 由任务注册表支持；当前常用 `mse`, `mae`, `mape`, `accuracy`, `cross_entropy` | 评测指标列表。任务主指标会被自动补全。 |
 
-### 3.6 `centralized`
+### 3.6 `training` 中的 epoch 调度
 
 | 字段 | 默认值 | 可选值 | 作用 |
 | --- | --- | --- | --- |
-| `centralized.rounds` | `10` | 正整数 | 集中训练轮数。 |
+| `training.epochs` | `1` | 正整数 | 统一训练 epoch 上限。集中模式下表示总训练 epoch 数；联邦模式下表示每轮通信中的本地 epoch 数。 |
 
 ### 3.7 `federated`
 
@@ -131,8 +131,7 @@ A:
 | --- | --- | --- | --- |
 | `federated.algorithm` | `fedavg` | `fedavg`, `adaptive_clipped_rdp_fedavg`, `sparse_fedavg`, `randomk_fedavg`, `sign_fedavg`, `qsgd_fedavg`, `secure_quantized_fedavg`, `ega_fedavg` | 联邦算法名。 |
 | `federated.rounds` | `20` | 正整数 | 联邦通信轮数。 |
-| `federated.local_epochs` | `1` | 正整数 | 每轮本地训练 epoch 数。 |
-| `federated.local_steps` | 无 | 正整数 | 若配置则优先于 `local_epochs`。 |
+| `federated.local_steps` | 无 | 正整数 | 若配置则优先于 `training.epochs`。 |
 | `federated.topk_fraction` | 无 | `(0, 1]` 浮点数 | `sparse_fedavg` / `randomk_fedavg` 的保留比例。 |
 | `federated.randomk_seed` | 无 | 整数 | `randomk_fedavg` 稀疏采样种子。 |
 | `federated.qsgd_levels` | 无 | 正整数 | `qsgd_fedavg` 量化级数。 |

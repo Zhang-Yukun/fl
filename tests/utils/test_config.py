@@ -37,9 +37,10 @@ def test_nested_includes_deep_merge_dict_values(tmp_path):
     assert config["A"] == {"a": 1, "b": 2}
 
 
-def test_default_centralized_rounds_are_mode_specific():
-    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["centralized.rounds=3", "tracking.enabled=false"])
-    assert config["centralized"]["rounds"] == 3
+def test_centralized_rounds_alias_maps_to_training_epochs():
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["centralized.rounds=3", "tracking.enabled=false", "experiment.mode=centralized"])
+    assert config["training"]["epochs"] == 3
+    assert "centralized" not in config or "rounds" not in config.get("centralized", {})
     assert config["federated"]["rounds"] == 1
 
 
@@ -85,9 +86,20 @@ def test_deprecated_centralized_epochs_key_is_rejected():
         load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["centralized.epochs=3"])
 
 
-def test_deprecated_training_epochs_key_is_rejected():
-    with pytest.raises(ValueError, match=r"training\.epochs"):
-        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["training.epochs=3"])
+def test_training_epochs_key_is_supported():
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["training.epochs=3"])
+    assert config["training"]["epochs"] == 3
+
+
+def test_federated_local_epochs_alias_maps_to_training_epochs():
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["federated.local_epochs=4"])
+    assert config["training"]["epochs"] == 4
+    assert "local_epochs" not in config["federated"]
+
+
+def test_conflicting_epoch_schedule_keys_are_rejected():
+    with pytest.raises(ValueError, match=r"Conflicting epoch schedule keys"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["training.epochs=3", "federated.local_epochs=2"])
 
 
 def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
@@ -97,6 +109,7 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     )
     assert config["evaluation"]["mode"] == "protocol"
     assert config["evaluation"]["metrics"] == ["mse", "mae", "mape"]
+    assert config["training"]["epochs"] == 1
     assert config["training"]["optimizer"] == "sgd"
     assert config["attack"]["model_mode"] == "train"
     assert config["attack"]["optimizer"] == "adam"
