@@ -304,6 +304,42 @@ effective_tracking_name() {
   printf '%s-seed%s\n' "${base_name}" "${SUITE_SEED}"
 }
 
+algorithm_output_dir_name() {
+  local base_name="$1"
+  case "${base_name}" in
+    centralized*)
+      printf 'centralized\n'
+      ;;
+    fedavg_*)
+      printf 'fedavg\n'
+      ;;
+    topk_*)
+      printf 'topk\n'
+      ;;
+    ega_*)
+      printf 'ega\n'
+      ;;
+    qsgd_*)
+      printf 'qsgd\n'
+      ;;
+    randomk_*)
+      printf 'randomk\n'
+      ;;
+    sign_*)
+      printf 'sign\n'
+      ;;
+    adaptive_*)
+      printf 'adaptive\n'
+      ;;
+    qint8_*)
+      printf 'qint8\n'
+      ;;
+    *)
+      printf '%s\n' "${base_name%%_*}"
+      ;;
+  esac
+}
+
 ega_name_signature() {
   local encoded_dim="${EGA_ENCODED_DIM}"
   local hidden_dim="${EGA_HIDDEN_DIM}"
@@ -581,8 +617,10 @@ run_single() {
   local tracking_name="$3"
   local config="$4"
   shift 4
+  local output_name
+  output_name="$(algorithm_output_dir_name "${run_name}")"
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="$(task_output_dir "${task}")/${run_name}"
+  local outdir="$(task_output_dir "${task}")/${output_name}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.entrypoints.train
     --config "${config}"
@@ -613,8 +651,10 @@ run_grpc() {
   local config="$4"
   local port="$5"
   shift 5
+  local output_name
+  output_name="$(algorithm_output_dir_name "${run_name}")"
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="$(task_output_dir "${task}")/${run_name}"
+  local outdir="$(task_output_dir "${task}")/${output_name}"
   local address="127.0.0.1:${port}"
   local server_pid=""
   local client_pids=()
@@ -707,8 +747,10 @@ run_centralized() {
   local tracking_name="$3"
   local config="$4"
   shift 4
+  local output_name
+  output_name="$(algorithm_output_dir_name "${run_name}")"
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="$(task_output_dir "${task}")/${run_name}"
+  local outdir="$(task_output_dir "${task}")/${output_name}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.entrypoints.train
     --config "${config}"
