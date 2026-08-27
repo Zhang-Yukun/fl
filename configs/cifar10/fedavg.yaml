@@ -8,4 +8,3 @@ experiment:
 
 federated:
   algorithm: fedavg
-  rounds: 5

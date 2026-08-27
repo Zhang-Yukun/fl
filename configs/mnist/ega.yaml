@@ -8,7 +8,6 @@ experiment:
 
 federated:
   algorithm: ega_fedavg
-  rounds: 5
   quantization_seed: 2026
 
 ega:

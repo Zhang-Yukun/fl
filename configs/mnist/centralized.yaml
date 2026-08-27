@@ -5,6 +5,3 @@ experiment:
   name: mnist_centralized_classification
   mode: centralized
   output_dir: outputs/mnist_centralized_classification
-
-training:
-  epochs: 5

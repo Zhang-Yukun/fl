@@ -27,6 +27,7 @@ def test_image_classification_configs_match_expected_dataset_and_algorithm(confi
     assert config['data']['clients'] == client_ids
     assert config['federated']['algorithm'] == algorithm
     assert config['training']['loss'] == 'cross_entropy'
+    assert config['training']['epochs'] == 1
     assert config['evaluation']['metrics'] == ['accuracy']
 
 
@@ -45,6 +46,7 @@ def test_image_classification_centralized_configs_match_expected_dataset(config_
     assert config['data']['split_dir'] == dataset_dir
     assert config['data']['clients'] == client_ids
     assert config['training']['loss'] == 'cross_entropy'
+    assert config['training']['epochs'] == 300
     assert config['evaluation']['metrics'] == ['accuracy']
 
 
@@ -63,6 +65,7 @@ def test_image_classification_configs_load_data_from_dedicated_common_files(conf
     assert config['data']['batch_size'] == 128
     assert config['training']['epochs'] == 1
     assert config['training']['optimizer'] == 'adam'
+    assert config['federated']['rounds'] == 300
 
 
 def test_classification_algorithm_configs_only_define_relevant_blocks():

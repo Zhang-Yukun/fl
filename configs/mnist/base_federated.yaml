@@ -1,11 +1,5 @@
 includes:
-  - ../common/task_classification.yaml
-  - ../common/model_small_cnn.yaml
-  - ../common/training.yaml
-  - ../common/loss_classification.yaml
+  - ../common/classification_base.yaml
   - ../common/federated.yaml
-  - ../common/evaluation_accuracy.yaml
-  - ../common/tracking_disabled.yaml
-  - ../common/grpc_default.yaml
   - ../common/classification_federated_defaults.yaml
   - ../common/data_mnist.yaml

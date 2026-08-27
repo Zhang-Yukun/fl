@@ -8,5 +8,4 @@ experiment:
 
 federated:
   algorithm: sparse_fedavg
-  rounds: 5
   topk_fraction: 0.10

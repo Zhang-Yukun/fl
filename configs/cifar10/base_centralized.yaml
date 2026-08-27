@@ -1,5 +1,6 @@
 includes:
-  - base_federated.yaml
+  - ../common/classification_base.yaml
+  - ../common/data_cifar10.yaml
 
 experiment:
   mode: centralized
