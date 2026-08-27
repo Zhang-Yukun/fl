@@ -8,12 +8,14 @@ LOSS_NAME="${LOSS_NAME:-mse}"
 LOSS_TAG="${LOSS_TAG:-${LOSS_NAME}}"
 MODE_SET="${MODE_SET:-all}"
 TASK_SET="${TASK_SET:-rare}"
+TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"
+TASK_CLIENT_IDS="${TASK_CLIENT_IDS:-rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3}"
+TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS:-rare}"
 SUITE_SEED="${SUITE_SEED:-2026}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
 RUN_CENTRALIZED="${RUN_CENTRALIZED:-true}"
 ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-10}"
 TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-adam}"
-EVAL_MODE="${EVAL_MODE:-protocol}"
 SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-true}"
 MODEL_DROPOUT="${MODEL_DROPOUT:-0.1}"
 BASE_OUTPUT_ROOT="${BASE_OUTPUT_ROOT:-outputs/suite_${PROFILE}_${LOSS_NAME}_seed${SUITE_SEED}_$(date +%Y%m%d_%H%M%S)}"
@@ -22,12 +24,12 @@ PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-suite-${PROFILE}-${LOSS_NAME}}"
 usage() {
   cat <<'USAGE'
 Usage:
-  PROFILE=noattack|attack   LOSS_NAME=mse|mae   TASK_SET=rare|mnist|cifar10|all|comma,list   MODE_SET=all|single_sync|single_async|multi_sync|multi_async|centralized|comma,list   SUITE_SEED=2026   RUNTIME_DEVICE=cuda:0   BASE_OUTPUT_ROOT=outputs/my_suite   PROJECT_NAME=my-wandb-project   bash scripts/run_controlled_suite.sh
+  PROFILE=noattack|attack   LOSS_NAME=mse|mae   TASK_SET=task1,task2|all   TASK_CONFIG_DIRS="rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10"   TASK_CLIENT_IDS="rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3"   TASK_LOSS_OVERRIDE_TASKS=rare   MODE_SET=all|single_sync|single_async|multi_sync|multi_async|centralized|comma,list   SUITE_SEED=2026   RUNTIME_DEVICE=cuda:0   BASE_OUTPUT_ROOT=outputs/my_suite   PROJECT_NAME=my-wandb-project   bash scripts/run_controlled_suite.sh
 
 Notes:
   - PROFILE=noattack runs centralized + fedavg/topk/ega for the selected tasks.
   - PROFILE=attack runs centralized + fedavg/topk/ega with attack enabled for the selected tasks.
-  - TASK_SET uses user-facing names. all -> rare,mnist,cifar10.
+  - TASK_SET uses keys from TASK_CONFIG_DIRS. all expands to every mapped task.
   - MODE_SET uses user-facing names. multi_sync -> grpc_sync, multi_async -> grpc_async.
   - Set RUN_CENTRALIZED=false if you want to skip centralized.
 USAGE
@@ -159,9 +161,11 @@ env \
   LOSS_NAME="${LOSS_NAME}" \
   LOSS_TAG="${LOSS_TAG}" \
   TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER}" \
-  EVAL_MODE="${EVAL_MODE}" \
   SHUFFLE_TRAIN="${SHUFFLE_TRAIN}" \
   MODEL_DROPOUT="${MODEL_DROPOUT}" \
   TASK_SET="${TASK_SET}" \
+  TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS}" \
+  TASK_CLIENT_IDS="${TASK_CLIENT_IDS}" \
+  TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS}" \
   FEDERATED_ALGORITHMS="${BASE_ALGOS}" \
   bash scripts/run_suite.sh --modes "${SUITE_MODES}" --tasks "${TASK_SET}"

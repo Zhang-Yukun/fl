@@ -37,6 +37,9 @@ ATTACK_LR="${ATTACK_LR:-}"
 ATTACK_OPTIMIZER="${ATTACK_OPTIMIZER:-}"
 FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"
 TASK_SET="${TASK_SET:-rare}"
+TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"
+TASK_CLIENT_IDS="${TASK_CLIENT_IDS:-rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3}"
+TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS:-rare}"
 TOPK_FRACTION="${TOPK_FRACTION:-}"
 QSGD_LEVELS="${QSGD_LEVELS:-}"
 QSGD_SEED="${QSGD_SEED:-${SUITE_SEED}}"
@@ -77,7 +80,7 @@ SELECT_MODES="${SELECT_MODES:-}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash SCRIPT [--modes centralized,single_sync,single_async,grpc_sync,grpc_async] [--tasks rare|mnist|cifar10|all|comma,list] [--algorithms fedavg,topk,ega]
+Usage: bash SCRIPT [--modes centralized,single_sync,single_async,grpc_sync,grpc_async] [--tasks task1,task2|all] [--algorithms fedavg,topk,ega]
 
 Examples:
   bash SCRIPT --modes single_sync
@@ -85,6 +88,7 @@ Examples:
   SUITE_SEED=42 bash SCRIPT --modes single_sync
   SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync
   TASK_SET=rare,mnist,cifar10 bash SCRIPT --modes single_sync
+  TASK_CONFIG_DIRS="rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10" bash SCRIPT --modes single_sync
   FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync
   RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   RUN_NAME_PREFIX=debug_ RUN_NAME_SUFFIX=_trial1 bash SCRIPT --modes single_sync
@@ -173,87 +177,107 @@ algo_enabled() {
   return 1
 }
 
+parse_named_map_keys() {
+  local raw="$1"
+  local pair
+  IFS=';' read -r -a pairs <<< "${raw}"
+  for pair in "${pairs[@]}"; do
+    pair="${pair// /}"
+    [[ -z "${pair}" ]] && continue
+    if [[ "${pair}" != *=* ]]; then
+      echo "Invalid map entry: ${pair}" >&2
+      exit 1
+    fi
+    printf '%s\n' "${pair%%=*}"
+  done
+}
+
+lookup_named_map_value() {
+  local raw="$1"
+  local key="$2"
+  local pair
+  IFS=';' read -r -a pairs <<< "${raw}"
+  for pair in "${pairs[@]}"; do
+    pair="${pair// /}"
+    [[ -z "${pair}" ]] && continue
+    if [[ "${pair}" != *=* ]]; then
+      echo "Invalid map entry: ${pair}" >&2
+      exit 1
+    fi
+    if [[ "${pair%%=*}" == "${key}" ]]; then
+      printf '%s\n' "${pair#*=}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+list_named_values() {
+  local raw="$1"
+  raw="${raw//,/ }"
+  printf '%s\n' ${raw}
+}
+
 selected_tasks() {
   local raw="${1:-rare}"
-  local include_rare=false
-  local include_mnist=false
-  local include_cifar10=false
-  IFS=',' read -r -a parts <<< "${raw}"
+  local -a available_tasks=()
+  local -a selected=()
+  mapfile -t available_tasks < <(parse_named_map_keys "${TASK_CONFIG_DIRS}")
   local item
+  IFS=',' read -r -a parts <<< "${raw}"
   for item in "${parts[@]}"; do
     item="${item// /}"
     [[ -z "${item}" ]] && continue
-    case "${item}" in
-      all)
-        include_rare=true
-        include_mnist=true
-        include_cifar10=true
-        ;;
-      rare)
-        include_rare=true
-        ;;
-      mnist)
-        include_mnist=true
-        ;;
-      cifar10)
-        include_cifar10=true
-        ;;
-      *)
-        echo "Unsupported TASK_SET entry: ${item}" >&2
-        exit 1
-        ;;
-    esac
+    if [[ "${item}" == "all" ]]; then
+      printf '%s\n' "${available_tasks[@]}"
+      return
+    fi
+    if ! lookup_named_map_value "${TASK_CONFIG_DIRS}" "${item}" >/dev/null; then
+      echo "Unsupported TASK_SET entry: ${item}" >&2
+      exit 1
+    fi
+    selected+=("${item}")
   done
 
-  local tasks=()
-  [[ "${include_rare}" == true ]] && tasks+=(rare)
-  [[ "${include_mnist}" == true ]] && tasks+=(mnist)
-  [[ "${include_cifar10}" == true ]] && tasks+=(cifar10)
-
-  if [[ ${#tasks[@]} -eq 0 ]]; then
+  if [[ ${#selected[@]} -eq 0 ]]; then
     echo "TASK_SET must select at least one task." >&2
     exit 1
   fi
 
-  printf '%s\n' "${tasks[@]}"
+  printf '%s\n' "${selected[@]}"
 }
 
 task_config_path() {
   local task="$1"
   local config_name="$2"
-  case "${task}" in
-    rare|mnist|cifar10)
-      printf 'configs/%s/%s.yaml\n' "${task}" "${config_name}"
-      ;;
-    *)
-      echo "Unsupported task=${task}" >&2
-      exit 1
-      ;;
-  esac
+  local config_dir
+  config_dir="$(lookup_named_map_value "${TASK_CONFIG_DIRS}" "${task}")" || {
+    echo "Unsupported task=${task}" >&2
+    exit 1
+  }
+  printf '%s/%s.yaml\n' "${config_dir}" "${config_name}"
 }
 
 task_client_ids() {
   local task="$1"
-  case "${task}" in
-    rare)
-      printf 'Nd2O3\nCeO2\nLa2O3\n'
-      ;;
-    mnist)
-      printf 'm1\nm2\nm3\n'
-      ;;
-    cifar10)
-      printf 'c1\nc2\nc3\n'
-      ;;
-    *)
-      echo "Unsupported task=${task}" >&2
-      exit 1
-      ;;
-  esac
+  local clients_raw
+  clients_raw="$(lookup_named_map_value "${TASK_CLIENT_IDS}" "${task}")" || {
+    echo "Missing TASK_CLIENT_IDS entry for task=${task}" >&2
+    exit 1
+  }
+  list_named_values "${clients_raw}"
 }
 
 task_uses_loss_override() {
   local task="$1"
-  [[ "${task}" == "rare" ]]
+  local enabled_task
+  while IFS= read -r enabled_task; do
+    [[ -z "${enabled_task}" ]] && continue
+    if [[ "${enabled_task}" == "${task}" ]]; then
+      return 0
+    fi
+  done < <(list_named_values "${TASK_LOSS_OVERRIDE_TASKS}")
+  return 1
 }
 
 log() {

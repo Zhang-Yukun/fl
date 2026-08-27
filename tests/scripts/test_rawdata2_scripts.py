@@ -84,8 +84,14 @@ def test_run_suite_supports_task_matrix_and_default_four_algorithms():
     for marker in (
         'FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"',
         'TASK_SET="${TASK_SET:-rare}"',
-        '--tasks rare|mnist|cifar10|all|comma,list',
+        'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"',
+        'TASK_CLIENT_IDS="${TASK_CLIENT_IDS:-rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3}"',
+        'TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS:-rare}"',
+        '--tasks task1,task2|all',
         'TASK_SET=rare,mnist,cifar10 bash SCRIPT --modes single_sync',
+        'parse_named_map_keys() {',
+        'lookup_named_map_value() {',
+        'list_named_values() {',
         'selected_tasks() {',
         'task_config_path() {',
         'task_client_ids() {',
@@ -94,9 +100,8 @@ def test_run_suite_supports_task_matrix_and_default_four_algorithms():
         'for task in "${TASK_LIST[@]}"; do',
         'local outdir="${BASE_OUTPUT}/${task}/${run_name}"',
         'tracking_args "${task}-${tracking_name}"',
-        "printf 'Nd2O3\\nCeO2\\nLa2O3\\n'",
-        "printf 'm1\\nm2\\nm3\\n'",
-        "printf 'c1\\nc2\\nc3\\n'",
+        'clients_raw="$(lookup_named_map_value "${TASK_CLIENT_IDS}" "${task}")"',
+        'list_named_values "${clients_raw}"',
     ):
         assert marker in content
 
@@ -111,16 +116,23 @@ def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
     content = _assert_executable("run_controlled_suite.sh")
     for marker in (
         'TASK_SET="${TASK_SET:-rare}"',
-        'TASK_SET=rare|mnist|cifar10|all|comma,list',
+        'TASK_SET=task1,task2|all',
+        'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"',
+        'TASK_CLIENT_IDS="${TASK_CLIENT_IDS:-rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3}"',
+        'TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS:-rare}"',
         'PROFILE=noattack runs centralized + fedavg/topk/ega for the selected tasks.',
         'PROFILE=attack runs centralized + fedavg/topk/ega with attack enabled for the selected tasks.',
         'BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"',
         'TASK_SET="${TASK_SET}"',
+        'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS}"',
+        'TASK_CLIENT_IDS="${TASK_CLIENT_IDS}"',
+        'TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS}"',
         'FEDERATED_ALGORITHMS="${BASE_ALGOS}"',
         'bash scripts/run_suite.sh --modes "${SUITE_MODES}" --tasks "${TASK_SET}"',
     ):
         assert marker in content
     assert 'run_ega_matrix' not in content
+    assert 'EVAL_MODE=' not in content
     assert content.count('bash scripts/run_suite.sh --modes') == 1
 
 
