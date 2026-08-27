@@ -149,7 +149,7 @@ def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
         'STARTUP_WAIT_SECONDS=60',
         'EGA_ARTIFACT_PATH=artifacts/ega/ega_h240_v1.pt',
         'EGA_PRETRAIN_DEVICE=same',
-        'EGA_PRETRAIN_EPOCHS=100',
+        'EGA_PRETRAIN_EPOCHS=220',
         'BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"',
         'TASK_SET="${TASK_SET}"',
         'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS}"',

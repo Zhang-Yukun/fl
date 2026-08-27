@@ -20,19 +20,19 @@ PATIENCE="${PATIENCE:-}"
 BASE_PORT="${BASE_PORT:-58000}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-5}"
 ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-10}"
-TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-adam}"
+TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-}"
 EGA_ARTIFACT_PATH="${EGA_ARTIFACT_PATH:-}"
 EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-}"
 EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS:-}"
-SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-true}"
-MODEL_DROPOUT="${MODEL_DROPOUT:-0.1}"
+SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-}"
+MODEL_DROPOUT="${MODEL_DROPOUT:-}"
 BASE_OUTPUT_ROOT="${BASE_OUTPUT_ROOT:-outputs/suite_${PROFILE}_${LOSS_NAME}_seed${SUITE_SEED}_$(date +%Y%m%d_%H%M%S)}"
 PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-suite-${PROFILE}-${LOSS_NAME}}"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  PROFILE=noattack|attack   LOSS_NAME=mse|mae|cross_entropy   TASK_SET=task1,task2|all   TASK_CONFIG_DIRS="rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10"   TASK_CLIENT_IDS="rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3"   TASK_LOSS_OVERRIDE_TASKS=rare   TASK_IN_BASE_OUTPUT=true   MODE_SET=all|single_sync|single_async|multi_sync|multi_async|centralized|comma,list   SUITE_SEED=2026   RUNTIME_DEVICE=cuda:0   ROUNDS=10   PATIENCE=500   BASE_PORT=58000   STARTUP_WAIT_SECONDS=60   EGA_ARTIFACT_PATH=artifacts/ega/ega_h240_v1.pt   EGA_PRETRAIN_DEVICE=same   EGA_PRETRAIN_EPOCHS=100   BASE_OUTPUT_ROOT=outputs/my_suite   PROJECT_NAME=my-wandb-project   bash scripts/run_controlled_suite.sh
+  PROFILE=noattack|attack   LOSS_NAME=mse|mae|cross_entropy   TASK_SET=task1,task2|all   TASK_CONFIG_DIRS="rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10"   TASK_CLIENT_IDS="rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3"   TASK_LOSS_OVERRIDE_TASKS=rare   TASK_IN_BASE_OUTPUT=true   MODE_SET=all|single_sync|single_async|multi_sync|multi_async|centralized|comma,list   SUITE_SEED=2026   RUNTIME_DEVICE=cuda:0   ROUNDS=10   PATIENCE=500   BASE_PORT=58000   STARTUP_WAIT_SECONDS=60   EGA_ARTIFACT_PATH=artifacts/ega/ega_h240_v1.pt   EGA_PRETRAIN_DEVICE=same   EGA_PRETRAIN_EPOCHS=220   BASE_OUTPUT_ROOT=outputs/my_suite   PROJECT_NAME=my-wandb-project   bash scripts/run_controlled_suite.sh
 
 Notes:
   - PROFILE=noattack runs centralized + fedavg/topk/ega for the selected tasks.
