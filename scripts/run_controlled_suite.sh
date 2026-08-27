@@ -143,13 +143,13 @@ MAPPED_MODES="$(map_modes "${MODE_SET}")"
 SUITE_MODES="$(suite_modes "${MAPPED_MODES}")"
 
 if [[ "${PROFILE}" == "noattack" ]]; then
-  RUN_TAG="${RUN_TAG:-oracle_noattack}"
-  TRACKING_TAG="${TRACKING_TAG:-oracle-noattack}"
+  RUN_TAG="${RUN_TAG:-noattack}"
+  TRACKING_TAG="${TRACKING_TAG:-noattack}"
   ATTACK_ENABLED=false
   BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"
 else
-  RUN_TAG="${RUN_TAG:-oracle_attackfreq${ATTACK_FREQUENCY_ROUNDS}}"
-  TRACKING_TAG="${TRACKING_TAG:-oracle-attackfreq${ATTACK_FREQUENCY_ROUNDS}}"
+  RUN_TAG="${RUN_TAG:-attackfreq${ATTACK_FREQUENCY_ROUNDS}}"
+  TRACKING_TAG="${TRACKING_TAG:-attackfreq${ATTACK_FREQUENCY_ROUNDS}}"
   ATTACK_ENABLED=true
   BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"
 fi

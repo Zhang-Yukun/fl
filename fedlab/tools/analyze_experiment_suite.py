@@ -27,6 +27,10 @@ RUN_NAME_MARKERS = (
     '_single_async_uupdate_dmodel_',
     '_grpc_sync_uupdate_dmodel_',
     '_grpc_async_uupdate_dmodel_',
+    '_single_sync_',
+    '_single_async_',
+    '_grpc_sync_',
+    '_grpc_async_',
 )
 DEFAULT_ALGORITHMS = ('centralized', 'fedavg', 'topk', 'ega')
 BAR_COLORS = {

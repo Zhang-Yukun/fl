@@ -39,10 +39,10 @@ def _create_seed_suite(root: Path, seed_name: str, *, fedavg_test: float, topk_t
     suite_dir = root / seed_name / 'attack_mse'
     suite_dir.mkdir(parents=True)
 
-    centralized_dir = suite_dir / 'centralized_uupdate_dmodel_oracle_attackfreq5'
-    fedavg_dir = suite_dir / 'fedavg_single_sync_uupdate_dmodel_oracle_attackfreq5'
-    topk_dir = suite_dir / 'topk_single_sync_uupdate_dmodel_oracle_attackfreq5'
-    ega_dir = suite_dir / 'ega_ed160_hd1024_rb2_q159_ema095_pt150_single_sync_uupdate_dmodel_oracle_attackfreq5'
+    centralized_dir = suite_dir / 'centralized_attackfreq5'
+    fedavg_dir = suite_dir / 'fedavg_single_sync_attackfreq5'
+    topk_dir = suite_dir / 'topk_single_sync_attackfreq5'
+    ega_dir = suite_dir / 'ega_ed160_hd1024_rb2_q159_ema095_pt150_single_sync_attackfreq5'
     for run_dir in (centralized_dir, fedavg_dir, topk_dir, ega_dir):
         run_dir.mkdir()
 
@@ -76,12 +76,12 @@ def test_analyze_experiment_suite_discovers_rows_outputs_plots_and_supports_old(
     suite_dir = tmp_path / 'suite' / 'attack_mse'
     suite_dir.mkdir(parents=True)
 
-    centralized_dir = suite_dir / 'centralized_uupdate_dmodel_oracle_attackfreq5'
-    fedavg_dir = suite_dir / 'fedavg_single_sync_uupdate_dmodel_oracle_attackfreq5'
-    topk_dir = suite_dir / 'topk_single_sync_uupdate_dmodel_oracle_attackfreq5'
-    ega_dir = suite_dir / 'ega_ed160_hd1024_rb2_q159_ema095_pt150_single_sync_uupdate_dmodel_oracle_attackfreq5'
-    ega_old_dir = suite_dir / 'ega_ed160_hd1024_rb2_q159_ema095_pt150_single_sync_uupdate_dmodel_oracle_attackfreq5_old'
-    sign_dir = suite_dir / 'sign_single_sync_uupdate_dmodel_oracle_attackfreq5'
+    centralized_dir = suite_dir / 'centralized_attackfreq5'
+    fedavg_dir = suite_dir / 'fedavg_single_sync_attackfreq5'
+    topk_dir = suite_dir / 'topk_single_sync_attackfreq5'
+    ega_dir = suite_dir / 'ega_ed160_hd1024_rb2_q159_ema095_pt150_single_sync_attackfreq5'
+    ega_old_dir = suite_dir / 'ega_ed160_hd1024_rb2_q159_ema095_pt150_single_sync_attackfreq5_old'
+    sign_dir = suite_dir / 'sign_single_sync_attackfreq5'
     for run_dir in (centralized_dir, fedavg_dir, topk_dir, ega_dir, ega_old_dir, sign_dir):
         run_dir.mkdir()
 
@@ -115,7 +115,7 @@ def test_analyze_experiment_suite_discovers_rows_outputs_plots_and_supports_old(
     assert records[0].attack_present is False
 
     sign_only = module.discover_runs(suite_dir, 'mse', ('sign',), include_old=False)
-    assert [record.label for record in sign_only] == ['sign_single_sync_uupdate_dmodel_oracle_attackfreq5']
+    assert [record.label for record in sign_only] == ['sign_single_sync_attackfreq5']
 
     records_with_old = module.discover_runs(suite_dir, 'mse', module.normalize_algorithm_tokens(module.DEFAULT_ALGORITHMS), include_old=True)
     labels_with_old = [record.label for record in records_with_old]
