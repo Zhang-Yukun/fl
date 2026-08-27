@@ -61,15 +61,6 @@ EGA_NORMALIZATION_EMA="${EGA_NORMALIZATION_EMA:-0.9}"
 EGA_ENCODED_DTYPE="${EGA_ENCODED_DTYPE:-}"
 EGA_ENCODED_STOCHASTIC_ROUNDING="${EGA_ENCODED_STOCHASTIC_ROUNDING:-}"
 EGA_ENCODED_NOISE_STD="${EGA_ENCODED_NOISE_STD:-}"
-EGA_DOWNLOAD_METHOD="${EGA_DOWNLOAD_METHOD:-}"
-EGA_DOWNLOAD_DTYPE="${EGA_DOWNLOAD_DTYPE:-}"
-EGA_DOWNLOAD_ENCODED_DTYPE="${EGA_DOWNLOAD_ENCODED_DTYPE:-}"
-EGA_DOWNLOAD_ENCODED_STOCHASTIC_ROUNDING="${EGA_DOWNLOAD_ENCODED_STOCHASTIC_ROUNDING:-}"
-EGA_DOWNLOAD_TRAINABLE_ONLY="${EGA_DOWNLOAD_TRAINABLE_ONLY:-}"
-EGA_DOWNLOAD_QUANTIZATION_LEVEL="${EGA_DOWNLOAD_QUANTIZATION_LEVEL:-}"
-EGA_DOWNLOAD_MIN_NORMALIZATION="${EGA_DOWNLOAD_MIN_NORMALIZATION:-}"
-EGA_DOWNLOAD_PREDICTIVE_CODING="${EGA_DOWNLOAD_PREDICTIVE_CODING:-}"
-EGA_DOWNLOAD_STOCHASTIC_ROUNDING="${EGA_DOWNLOAD_STOCHASTIC_ROUNDING:-}"
 EGA_ERROR_FEEDBACK="${EGA_ERROR_FEEDBACK:-}"
 EGA_QUANTIZATION_SEED="${EGA_QUANTIZATION_SEED:-${SUITE_SEED}}"
 EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-}"
@@ -96,7 +87,7 @@ Examples:
   FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync
   RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   RUN_NAME_PREFIX=debug_ RUN_NAME_SUFFIX=_trial1 bash SCRIPT --modes single_sync
-  EGA_DOWNLOAD_METHOD=dense EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync
+  EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   SELECT_MODES=single_async,grpc_async bash SCRIPT
 USAGE
 }
@@ -358,15 +349,6 @@ federated.algorithm=ega_fedavg
   emit_optional_override 'ega.encoded_dtype' "${EGA_ENCODED_DTYPE}"
   emit_optional_override 'ega.encoded_stochastic_rounding' "${EGA_ENCODED_STOCHASTIC_ROUNDING}"
   emit_optional_override 'ega.encoded_noise_std' "${EGA_ENCODED_NOISE_STD}"
-  emit_optional_override 'ega.download_method' "${EGA_DOWNLOAD_METHOD}"
-  emit_optional_override 'ega.download_dtype' "${EGA_DOWNLOAD_DTYPE}"
-  emit_optional_override 'ega.download_encoded_dtype' "${EGA_DOWNLOAD_ENCODED_DTYPE}"
-  emit_optional_override 'ega.download_encoded_stochastic_rounding' "${EGA_DOWNLOAD_ENCODED_STOCHASTIC_ROUNDING}"
-  emit_optional_override 'ega.download_trainable_only' "${EGA_DOWNLOAD_TRAINABLE_ONLY}"
-  emit_optional_override 'ega.download_quantization_level' "${EGA_DOWNLOAD_QUANTIZATION_LEVEL}"
-  emit_optional_override 'ega.download_min_normalization' "${EGA_DOWNLOAD_MIN_NORMALIZATION}"
-  emit_optional_override 'ega.download_predictive_coding' "${EGA_DOWNLOAD_PREDICTIVE_CODING}"
-  emit_optional_override 'ega.download_stochastic_rounding' "${EGA_DOWNLOAD_STOCHASTIC_ROUNDING}"
   emit_optional_override 'ega.error_feedback' "${EGA_ERROR_FEEDBACK}"
   emit_optional_override 'ega.pretrain.device' "${EGA_PRETRAIN_DEVICE}"
   emit_optional_override 'ega.pretrain.epochs' "${EGA_PRETRAIN_EPOCHS}"

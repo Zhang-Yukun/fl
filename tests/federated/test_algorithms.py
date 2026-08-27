@@ -976,7 +976,6 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
         "min_normalization": 1e-6,
         "normalization_strategy": "reported_client_max_abs",
         "encoded_dtype": "int8",
-        "download_dtype": "int8",
         "error_feedback": True,
         "pretrain": {
             "device": "cpu",
@@ -998,55 +997,6 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
     assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
     assert all(client["parameter_download_bytes"] > 0 for client in clients)
-
-
-def test_ega_fedavg_supports_predictive_model_downloads(tmp_path):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "federated.algorithm=ega_fedavg",
-            "federated.rounds=1",
-            "federated.quantization_seed=2026",
-            "evaluation.mode=protocol",
-            "attack.enabled=false",
-        ],
-    )
-    config["experiment"]["output_dir"] = str(tmp_path)
-    config["ega"] = {
-        "artifact_path": str(tmp_path / "ega_codec.pt"),
-        "block_size": 8,
-        "encoded_dim": 4,
-        "hidden_dim": 16,
-        "residual_blocks": 1,
-        "quantization_level": 16,
-        "normalization": 2e-4,
-        "initial_normalization": 2e-4,
-        "min_normalization": 1e-6,
-        "normalization_strategy": "reported_client_max_abs",
-        "encoded_dtype": "int8",
-        "download_method": "ega",
-        "download_predictive_coding": True,
-        "download_dtype": "float32",
-        "download_encoded_dtype": "int8",
-        "download_trainable_only": True,
-        "error_feedback": True,
-        "pretrain": {
-            "device": "cpu",
-            "epochs": 2,
-            "batch_size": 16,
-            "lr": 1e-3,
-            "train_groups": 64,
-            "val_groups": 16,
-            "seed": 2026,
-        },
-    }
-    result = run_federated(config)
-    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    clients = metrics[0]["clients"]
-
-    assert result["best_val_mse"] == result["best_val_mse"]
-    assert all(client["parameter_download_bytes"] > 0 for client in clients)
-    assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
 
 
 def test_ega_protocol_aggregation_uses_client_visible_base(monkeypatch):
@@ -1079,115 +1029,6 @@ def test_ega_protocol_aggregation_uses_client_visible_base(monkeypatch):
     method.aggregate(server=server, results=results, round_base_state=OrderedDict([("weight", torch.tensor([10.0]))]), round_index=3)
 
     assert torch.allclose(server.global_state["weight"], torch.tensor([7.5]))
-
-
-def test_ega_model_download_uses_full_state_normalization_and_quantization(monkeypatch):
-    captured = {}
-
-    def _fake_encode(update, codec, **kwargs):
-        del codec
-        captured["normalization"] = kwargs["normalization"]
-        captured["quantization_level"] = kwargs["quantization_level"]
-        captured["update"] = OrderedDict((name, tensor.clone()) for name, tensor in update.items())
-        return SimpleNamespace(encoded_blocks=torch.zeros((1, 1), dtype=torch.float32), encoded_scale=None)
-
-    monkeypatch.setattr(encoded_methods, "encode_state_update", _fake_encode)
-    monkeypatch.setattr(
-        encoded_methods,
-        "decode_mean_encoded_payload",
-        lambda payloads, codec: OrderedDict((name, tensor.clone()) for name, tensor in captured["update"].items()),
-    )
-
-    global_state = OrderedDict([("weight", torch.tensor([101.0])), ("running_mean", torch.tensor([3.0]))])
-    base_state = OrderedDict([("weight", torch.tensor([100.0])), ("running_mean", torch.tensor([3.0]))])
-    download_state, received_state = encoded_methods._prepare_received_global_state(
-        config={
-            "ega": {
-                "download_method": "ega",
-                "download_trainable_only": True,
-                "download_quantization_level": 17,
-                "download_min_normalization": 1e-6,
-            },
-            "federated": {"quantization_seed": 2026},
-        },
-        global_state=global_state,
-        codec=object(),
-        trainable_keys=("weight",),
-        round_index=0,
-        client_id="c1",
-        base_state=base_state,
-    )
-
-    assert "__ega_blocks__" in download_state
-    assert captured["quantization_level"] == 17
-    assert captured["normalization"] == pytest.approx(101.0)
-    assert torch.allclose(received_state["weight"], torch.tensor([101.0]))
-    assert torch.allclose(received_state["running_mean"], torch.tensor([3.0]))
-
-
-def test_ega_model_download_predictive_coding_uses_previous_received_state(monkeypatch):
-    captured = {}
-
-    def _fake_encode(update, codec, **kwargs):
-        del codec
-        captured["normalization"] = kwargs["normalization"]
-        captured["quantization_level"] = kwargs["quantization_level"]
-        captured["update"] = OrderedDict((name, tensor.clone()) for name, tensor in update.items())
-        return SimpleNamespace(encoded_blocks=torch.zeros((1, 1), dtype=torch.float32), encoded_scale=None)
-
-    monkeypatch.setattr(encoded_methods, "encode_state_update", _fake_encode)
-    monkeypatch.setattr(
-        encoded_methods,
-        "decode_mean_encoded_payload",
-        lambda payloads, codec: OrderedDict((name, tensor.clone()) for name, tensor in captured["update"].items()),
-    )
-
-    global_state = OrderedDict([("weight", torch.tensor([101.0])), ("running_mean", torch.tensor([3.0]))])
-    base_state = OrderedDict([("weight", torch.tensor([100.0])), ("running_mean", torch.tensor([3.0]))])
-    download_state, received_state = encoded_methods._prepare_received_global_state(
-        config={
-            "ega": {
-                "download_method": "ega",
-                "download_trainable_only": True,
-                "download_predictive_coding": True,
-                "download_quantization_level": 17,
-                "download_min_normalization": 1e-6,
-            },
-            "federated": {"quantization_seed": 2026},
-        },
-        global_state=global_state,
-        codec=object(),
-        trainable_keys=("weight",),
-        round_index=0,
-        client_id="c1",
-        base_state=base_state,
-    )
-
-    assert "__ega_blocks__" in download_state
-    assert captured["quantization_level"] == 17
-    assert captured["normalization"] == pytest.approx(1.0)
-    assert torch.allclose(captured["update"]["weight"], torch.tensor([1.0]))
-    assert torch.allclose(received_state["weight"], torch.tensor([101.0]))
-    assert torch.allclose(received_state["running_mean"], torch.tensor([3.0]))
-
-
-def test_ega_sync_server_client_state_tracks_received_models():
-    method = EGAFedAvgMethod()
-    server = SimpleNamespace(ega_received_global_states={})
-    synced_state = OrderedDict([("weight", torch.tensor([2.0]))])
-    clients = [SimpleNamespace(client_id="c1", cached_received_global_state=synced_state)]
-
-    method.sync_server_client_state(server=server, clients=clients)
-
-    reconstructed = method.reconstruct_received_global_state(
-        server=server,
-        global_state=OrderedDict([("weight", torch.tensor([5.0]))]),
-        client_id="c1",
-        round_index=3,
-        round_context={},
-    )
-
-    assert reconstructed is synced_state
 
 
 def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
@@ -2049,8 +1890,6 @@ def test_ega_server_bootstraps_codec_once_via_round_context(tmp_path, monkeypatc
             "ega.residual_blocks=0",
             "ega.quantization_level=64",
             "ega.encoded_dtype=float32",
-            "ega.download_method=ega",
-            "ega.download_dtype=float32",
             "ega.error_feedback=false",
             "ega.min_normalization=1e-6",
         ],
@@ -2086,8 +1925,6 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
             "ega.residual_blocks=0",
             "ega.quantization_level=64",
             "ega.encoded_dtype=float32",
-            "ega.download_method=ega",
-            "ega.download_dtype=float32",
             "ega.error_feedback=false",
             "ega.min_normalization=1e-6",
         ],
@@ -2098,7 +1935,14 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
     for round_result in rounds:
         expected_received = float(round_result["round_index"])
         for _, download_state, received_state in round_result["prepared_states"]:
-            assert "__ega_blocks__" in download_state
+            _assert_selected_values(
+                download_state,
+                {
+                    "bn.weight": torch.tensor([expected_received, expected_received]),
+                    "bn.running_mean": torch.tensor([expected_received, expected_received]),
+                    "linear.weight": torch.full((2, 2), expected_received),
+                },
+            )
             _assert_selected_values(
                 received_state,
                 {
@@ -2156,8 +2000,6 @@ def test_single_node_ega_transport_counts_round_context_bytes(tmp_path, monkeypa
             "ega.residual_blocks=0",
             "ega.quantization_level=64",
             "ega.encoded_dtype=float32",
-            "ega.download_method=ega",
-            "ega.download_dtype=float32",
             "ega.error_feedback=false",
             "ega.min_normalization=1e-6",
         ],
@@ -2362,7 +2204,6 @@ def _run_single_node_update_update_rounds(config: dict, monkeypatch):
                 ("secure_quantized_fedavg", ["federated.quantization_dtype=float16", "privacy.clip_norm=0.0", "privacy.noise_multiplier=0.0"]),
         ("sign_fedavg", []),
         ("qsgd_fedavg", ["federated.qsgd_levels=127", "federated.quantization_seed=2026"]),
-        ("ega_fedavg", ["ega.block_size=7", "ega.encoded_dim=7", "ega.hidden_dim=7", "ega.residual_blocks=0", "ega.quantization_level=64", "ega.encoded_dtype=float32", "ega.download_method=ega", "ega.download_dtype=float32", "ega.error_feedback=false", "ega.min_normalization=1e-6"]),
     ],
 )
 def test_single_node_sync_update_update_simulation_matches_expected_state_progression(tmp_path, monkeypatch, algorithm, extra_overrides):

@@ -12,7 +12,7 @@ from fedlab.federated.methods.registry import federated_method
 from fedlab.federated.protocol import weighted_protocol_base_state
 from fedlab.modeling import build_model
 from fedlab.modeling.ega import decode_attack_view_from_mean_difference, decode_mean_encoded_payload, encode_state_update, export_ega_codec_payload, load_ega_codec, load_ega_codec_payload
-from fedlab.utils.serialization import add_update, average_states, dequantize_state_update, quantize_state_update, serialize_trainable_model, serialize_untrainable_model, state_num_bytes, state_num_parameters, subtract_state
+from fedlab.utils.serialization import add_update, average_states, serialize_trainable_model, serialize_untrainable_model, state_num_bytes, state_num_parameters, subtract_state
 
 
 def _drop_zero_state(state, tolerance: float = 0.0):
@@ -22,41 +22,12 @@ def _drop_zero_state(state, tolerance: float = 0.0):
     return type(state)((name, tensor) for name, tensor in state.items() if float(tensor.detach().abs().max().item()) > threshold)
 
 
-def _merge_state(base_state, override_state):
-    """Return a full state built from one base state and one partial override."""
-
-    merged = type(base_state)((name, tensor) for name, tensor in base_state.items())
-    for name, tensor in override_state.items():
-        merged[name] = tensor
-    return merged
 
 
-def _zero_state_like(state):
-    """Return a zero-valued state dict with the same structure."""
-
-    return type(state)((name, torch.zeros_like(tensor)) for name, tensor in state.items())
-
-
-def _max_abs_state(state) -> float:
-    """Return the maximum absolute value over one serialized state."""
-
-    if not state:
-        return 1.0
-    return max(float(tensor.detach().abs().max().item()) for tensor in state.values())
-
-
-def _payload_accounting_state(payload):
-    """Convert one encoded payload into a tensor dict used only for byte accounting."""
-
-    state = OrderedDict()
-    state["__ega_blocks__"] = payload.encoded_blocks.detach().cpu()
-    if payload.encoded_scale is not None:
-        state["__ega_scale__"] = torch.tensor([float(payload.encoded_scale)], dtype=torch.float32)
-    return state
 
 
 def _quantization_generator(config: dict[str, Any], round_index: int, client_id: str) -> torch.Generator | None:
-    """Return the deterministic quantization generator shared by upload and download paths."""
+    """Return the deterministic quantization generator used by EGA upload quantization."""
 
     seed = config.get("federated", {}).get("quantization_seed")
     if seed is None:
@@ -83,85 +54,12 @@ def _ensure_client_ega_codec(*, client: Any, round_context: dict[str, Any]) -> N
     )
 
 
-def _prepare_received_global_state(
-    *,
-    config: dict[str, Any],
-    global_state,
-    codec,
-    trainable_keys: tuple[str, ...],
-    round_index: int,
-    client_id: str,
-    base_state=None,
-):
-    """Return the transmitted download payload and the client-visible received global state."""
-
-    ega_cfg = config.get("ega", {})
-    download_dtype = str(ega_cfg.get("download_dtype", "float32")).lower()
-    if download_dtype in {"none", "disabled"}:
-        download_dtype = "float32"
-    trainable_only = bool(ega_cfg.get("download_trainable_only", False))
-    predictive_coding = bool(ega_cfg.get("download_predictive_coding", False))
-    payload_source = global_state
-    if trainable_only:
-        payload_source = type(global_state)((name, global_state[name]) for name in trainable_keys)
-    if predictive_coding:
-        reference_base_state = base_state if base_state is not None else _zero_state_like(global_state)
-    else:
-        reference_base_state = global_state
-    base_payload_source = reference_base_state
-    if trainable_only:
-        base_payload_source = type(reference_base_state)((name, reference_base_state[name]) for name in payload_source.keys())
-    use_delta_semantics = predictive_coding
-    semantic_source = subtract_state(payload_source, base_payload_source) if use_delta_semantics else payload_source
-    download_method = str(ega_cfg.get("download_method", "dense")).lower()
-    generator = _quantization_generator(config, round_index, client_id)
-    if download_method in {"ega", "encoded", "ega_encoded"}:
-        if codec is None:
-            raise RuntimeError("EGA codec is required for encoded download reconstruction")
-        payload = encode_state_update(
-            semantic_source,
-            codec,
-            quantization_level=int(ega_cfg.get("download_quantization_level", ega_cfg.get("quantization_level", 64))),
-            normalization=max(
-                float(ega_cfg.get("download_normalization", 0.0)),
-                _max_abs_state(semantic_source),
-                float(ega_cfg.get("download_min_normalization", ega_cfg.get("min_normalization", 1e-6))),
-            ),
-            block_size=int(ega_cfg.get("block_size", 256)),
-            contribution_scale=1.0,
-            generator=generator,
-            encoded_dtype=str(ega_cfg.get("download_encoded_dtype", ega_cfg.get("encoded_dtype", "float32"))),
-            encoded_stochastic_rounding=bool(ega_cfg.get("download_encoded_stochastic_rounding", False)),
-            encoded_noise_std=0.0,
-        )
-        reconstructed_payload = decode_mean_encoded_payload([payload], codec)
-        received_state = add_update(base_payload_source, reconstructed_payload) if use_delta_semantics else reconstructed_payload
-        if trainable_only:
-            received_state = _merge_state(global_state, received_state)
-        return _payload_accounting_state(payload), received_state
-    download_state = quantize_state_update(
-        semantic_source,
-        dtype=download_dtype,
-        stochastic_rounding=bool(ega_cfg.get("download_stochastic_rounding", False)),
-        generator=generator,
-    )
-    reconstructed_payload = dequantize_state_update(download_state)
-    received_state = add_update(base_payload_source, reconstructed_payload) if use_delta_semantics else reconstructed_payload
-    if trainable_only:
-        received_state = _merge_state(global_state, received_state)
-    return download_state, received_state
-
 
 @federated_method("ega_fedavg", compressed=False, description="Encoded gradient aggregation FedAvg variant")
 class EGAFedAvgMethod(FederatedMethod):
     """Concrete EGA FedAvg implementation on the method API."""
 
     name = "ega_fedavg"
-
-    def uses_custom_download_transport(self) -> bool:
-        """EGA manages its own encoded download payload."""
-
-        return True
 
     capabilities = MethodCapabilities(compressed=False, implemented=True, description="Encoded gradient aggregation FedAvg variant")
     config_spec = MethodConfigSpec(
@@ -173,7 +71,6 @@ class EGAFedAvgMethod(FederatedMethod):
         """Initialize client-side EGA bookkeeping; codec bootstrap comes from the server."""
 
         client.ega_codec = None
-        client.ega_codec_ready = False
         template = build_model(client.config)
         client.ega_trainable_keys = tuple(serialize_trainable_model(template).keys())
         client.ega_residual = None
@@ -196,10 +93,7 @@ class EGAFedAvgMethod(FederatedMethod):
             num_clients=total_clients,
         )
         server.ega_codec_bootstrap_pending = True
-        template = build_model(server.config)
-        server.ega_trainable_keys = tuple(serialize_trainable_model(template).keys())
         server.ega_normalization = float(ega_cfg.get("initial_normalization", ega_cfg.get("normalization", 1.0)))
-        server.ega_received_global_states = {}
 
     def build_round_context(self, server: Any) -> dict[str, Any]:
         """Broadcast the current EGA normalization and first-round codec bootstrap."""
@@ -210,55 +104,6 @@ class EGAFedAvgMethod(FederatedMethod):
         if getattr(server, "ega_codec_bootstrap_pending", False):
             payload["ega_codec_payload"] = server.ega_codec_bootstrap_payload
         return payload
-
-    def sync_server_client_state(self, *, server: Any, clients: list[Any]) -> None:
-        """Mirror the latest client-visible models onto the server for exact protocol reconstruction."""
-
-        server.ega_received_global_states = {
-            client.client_id: client.cached_received_global_state
-            for client in clients
-            if getattr(client, "cached_received_global_state", None) is not None
-        }
-
-    def prepare_client_state(self, *, global_state, client, round_index: int, round_context: dict[str, Any]):
-        """Compress the downloaded global state before local training."""
-
-        _ensure_client_ega_codec(client=client, round_context=round_context)
-        client.ega_codec_ready = True
-        download_base_state = client.cached_received_global_state
-        return _prepare_received_global_state(
-            config=client.config,
-            global_state=global_state,
-            codec=client.ega_codec,
-            trainable_keys=client.ega_trainable_keys,
-            round_index=round_index,
-            client_id=client.client_id,
-            base_state=download_base_state,
-        )
-
-    def reconstruct_received_global_state(
-        self,
-        *,
-        server: Any,
-        global_state,
-        client_id: str,
-        round_index: int,
-        round_context: dict[str, Any],
-    ):
-        """Return the client-visible EGA-compressed global state used as this round's base."""
-
-        cached_state = getattr(server, "ega_received_global_states", {}).get(client_id)
-        if cached_state is not None:
-            return cached_state
-        return _prepare_received_global_state(
-            config=server.config,
-            global_state=global_state,
-            codec=server.ega_codec,
-            trainable_keys=server.ega_trainable_keys,
-            round_index=round_index,
-            client_id=client_id,
-            base_state=None,
-        )[1]
 
     def client_update(
         self,
@@ -277,6 +122,7 @@ class EGAFedAvgMethod(FederatedMethod):
     ):
         """Return an encoded trainable update plus exact buffer payload."""
 
+        _ensure_client_ega_codec(client=client, round_context=round_context)
         if client.ega_codec is None:
             raise RuntimeError("EGA codec was not initialized on the client")
         ega_cfg = client.config.get("ega", {})

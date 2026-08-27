@@ -151,7 +151,6 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'QSGD_SEED="${QSGD_SEED:-${SUITE_SEED}}"',
         'RANDOMK_FRACTION="${RANDOMK_FRACTION:-}"',
         'QINT8_DTYPE="${QINT8_DTYPE:-}"',
-        'EGA_DOWNLOAD_METHOD="${EGA_DOWNLOAD_METHOD:-}"',
         'EGA_QUANTIZATION_SEED="${EGA_QUANTIZATION_SEED:-${SUITE_SEED}}"',
         'EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-}"',
         'EGA_ENCODED_DIM="${EGA_ENCODED_DIM:-240}"',
@@ -184,14 +183,12 @@ def test_oracle_suite_runs_ega_after_fedavg_and_uses_env_parameters():
         'federated.qsgd_levels',
         'federated.quantization_seed',
         'federated.quantization_dtype',
-        'ega.download_method',
         'TRAIN_OPTIMIZER=adam TRAIN_LR=0.001 bash SCRIPT --modes centralized,single_sync',
         'EVAL_MODE=protocol SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync',
         'FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync',
         'RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync',
         'SUITE_SEED=42 bash SCRIPT --modes single_sync',
         'RUN_NAME_PREFIX=debug_ RUN_NAME_SUFFIX=_trial1 bash SCRIPT --modes single_sync',
-        'EGA_DOWNLOAD_METHOD=dense EGA_PRETRAIN_DEVICE=cuda:1 bash SCRIPT --modes single_sync',
     ):
         assert marker in content
     assert 'ega.download_method=ega' not in content

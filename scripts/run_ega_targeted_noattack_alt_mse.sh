@@ -48,11 +48,7 @@ run_case() {
     --override "data.shuffle_train=true" \
     --override "model.dropout=0.1" \
     --override "ega.artifact_path=artifacts/ega/pretrained_codec.pt" \
-    --override "ega.download_method=dense" \
-    --override "ega.download_dtype=float32" \
-    --override "ega.download_predictive_coding=false" \
-    --override "ega.download_trainable_only=false" \
-    --override "ega.encoded_dtype=int8" \
+                    --override "ega.encoded_dtype=int8" \
     --override "ega.encoded_stochastic_rounding=false" \
     --override "ega.encoded_noise_std=0.0" \
     --override "ega.error_feedback=true" \

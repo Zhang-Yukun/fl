@@ -127,8 +127,6 @@ def _classification_config(
             'residual_blocks': 0,
             'quantization_level': 64,
             'encoded_dtype': 'float32',
-            'download_method': 'ega',
-            'download_dtype': 'float32',
             'error_feedback': False,
             'min_normalization': 1e-6,
         }

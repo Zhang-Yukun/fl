@@ -28,7 +28,7 @@
 
 ## 2. 本文采用的参考配置与流程前提
 
-下面这份配置画像就是本文和配套图唯一采用的 EGA profile。后文所有流程描述都按这组参数展开，不再单独讨论其他配置分支：
+下面这份配置画像就是本文和配套图采用的 EGA profile。后文所有流程描述都按这组参数展开：
 
 ```yaml
 ega:
@@ -47,12 +47,6 @@ ega:
   encoded_dtype: int8
   encoded_stochastic_rounding: false
   encoded_noise_std: 0.0
-  download_dtype: float32
-  download_method: dense
-  download_predictive_coding: false
-  download_stochastic_rounding: false
-  download_trainable_only: false
-  download_encoded_dtype: int8
   error_feedback: true
   pretrain:
     epochs: 100
@@ -68,8 +62,8 @@ ega:
 与框架层联动的运行语义是：
 
 - `federated.algorithm = ega_fedavg`
-- `transport.upload_mode = update`
-- `transport.download_mode = model`
+- 上传语义固定为 `update`
+- 下载语义固定为 `model`
 - `evaluation.mode = protocol`
 
 结合上面这组参数，本文中的整套流程固定为：
@@ -78,7 +72,7 @@ ega:
 2. 客户端上传的是 update 语义，而不是完整模型。
 3. 上传侧 EGA 编码使用 `block_size=256`、`encoded_dim=128`、`quantization_level=127`。
 4. trainable update 的传输侧 encoded dtype 为 `int8`。
-5. 下载侧不走 EGA 编码链路，而是 `download_method=dense`、`download_dtype=float32`。
+5. 下载侧使用框架公共的 `model` 下发逻辑，因此没有 EGA 专属下载配置。
 6. error feedback 开启。
 7. normalization 采用 `ema_reported_client_max_abs`，衰减系数 `0.9`。
 8. 评测看 protocol 模型，不展开 oracle 分支。
@@ -257,37 +251,23 @@ EGA codec 在 [fedlab/modeling/ega.py](../fedlab/modeling/ega.py) 里实现为 `
 
 ## 9. 下载路径：客户端如何得到 `C_{i,r}`
 
-EGA 下载逻辑都集中在 `_prepare_received_global_state(...)`。
+EGA 不定义专属下载链路。客户端拿到训练起点 `C_{i,r}` 的方式，与普通 FedAvg 一致：
 
-这个函数的目标是同时返回两样东西：
+1. 服务端直接按固定的 `model` 语义下发当前 `global_state`。
+2. 客户端在公共 `prepare_round_state(...)` 流程里把这个完整模型作为 `download_state`。
+3. 客户端加载该模型后开始本地训练，因此 `received_state = download_state = global_state`。
 
-1. 实际下载 payload `download_state`
-2. 客户端最终拿去训练的 `received_state`
+这里 `round_context` 里仍然可能出现两类 EGA 信息：
 
-### 9.1 本文采用的下载路径
+- `ega_codec_payload`：仅首轮下发，用于客户端初始化上传侧 codec。
+- `ega_normalization`：每轮下发，用于客户端上传编码时选择 normalization。
 
-在本文采用的配置下：
+也就是说，`round_context` 服务于 **上传侧 EGA 编码**，不参与“下载模型如何重建”的逻辑。
 
-- `transport.download_mode = model`
-- `ega.download_method = dense`
-- `ega.download_dtype = float32`
-- `ega.download_predictive_coding = false`
-- `ega.download_trainable_only = false`
-- `ega.download_encoded_dtype = int8`
+因此本文中的实现可以直接理解为：
 
-因此下载语义可以直接理解为：
-
-1. 服务器目标下发模型就是当前 `global_state`。
-2. 因为 `download_mode=model`，payload 语义本身就是完整模型。
-3. `download_method=dense`，因此不走 EGA 编码下载。
-4. `quantize_state_update(..., dtype=download_dtype)` 在下载链路上做数值类型处理。
-5. 客户端再通过 `dequantize_state_update(...)` 恢复出 `received_state`。
-
-由于 `download_dtype=float32`，这条下载路径在数值上接近无损。客户端收到的重点不是压缩下载，而是：
-
-- 收到完整 model 语义的 `download_state`
-- 结合 `round_context` 中的 `ega_normalization`
-- 在本地恢复出用于训练的 `received_state`
+- 下载路径：公共 model download
+- 上传路径：EGA encoded update + dense buffer update
 
 ## 10. 客户端本地训练后如何构造上传内容
 
@@ -533,17 +513,14 @@ EGA 下载阶段还要额外把 `round_context` 算进参数字节：
 
 本文采用的配置中：
 
-- `ega.download_method = dense`
-- `download_dtype = float32`
-- `download_predictive_coding = false`
-- `download_trainable_only = false`
+- 下载侧没有 EGA 专属配置，固定走公共 model download 路径。
 
-这意味着下载侧使用 dense model path。
+这意味着下载侧不存在 EGA 私有 path。
 
 这背后的工程含义是：
 
 1. 主目标是研究 **上传侧** 编码聚合。
-2. 下载侧先保持稳定、简单。
+2. 下载侧直接复用公共 model 下发实现。
 3. 因此图和正文都不展开下载编码分支。
 
 ## 19. EGA 在当前框架里的完整一轮流程总结
@@ -568,11 +545,11 @@ EGA 下载阶段还要额外把 `round_context` 算进参数字节：
 
 ### 20.1 EGA 不是“整个模型都编码上传”
 
-不是。当前实现只对 trainable update 做编码；buffer update 走 dense 旁路。
+不是。这里的实现只对 trainable update 做编码；buffer update 走 dense 旁路。
 
 ### 20.2 EGA 这里的下载不是 encoded download
 
-不是。本文采用的配置明确使用 `download_method=dense`。
+不是。这里的 EGA 没有独立下载配置，下载统一走公共 model 路径。
 
 ### 20.3 服务端不是 decode 每个客户端再求平均
 
