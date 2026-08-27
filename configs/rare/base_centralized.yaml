@@ -1,6 +1,6 @@
 includes:
   - ../common/base/forcasting.yaml
-  - ../common/evaluation/protocol.yaml
+  - ../common/evaluation/forecasting.yaml
 
 experiment:
   mode: centralized

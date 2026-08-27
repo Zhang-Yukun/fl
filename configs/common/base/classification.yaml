@@ -3,6 +3,6 @@ includes:
   - ../model/small_cnn.yaml
   - ../training/default.yaml
   - ../loss/classification.yaml
-  - ../evaluation/accuracy.yaml
+  - ../evaluation/classification.yaml
   - ../tracking/disabled.yaml
   - ../grpc/default.yaml

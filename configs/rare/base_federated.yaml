@@ -1,4 +1,4 @@
 includes:
   - ../common/base/forcasting.yaml
   - ../common/federated/default.yaml
-  - ../common/evaluation/protocol.yaml
+  - ../common/evaluation/forecasting.yaml
