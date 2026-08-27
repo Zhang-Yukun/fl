@@ -1,0 +1,10 @@
+includes:
+  - base_centralized.yaml
+
+experiment:
+  name: mnist_centralized_classification
+  mode: centralized
+  output_dir: outputs/mnist_centralized_classification
+
+centralized:
+  rounds: 5

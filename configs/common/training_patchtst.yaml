@@ -1,8 +1,11 @@
 training:
   lr: 0.001
+  # Early-stop patience for validation on the primary metric.
   patience: 500
   min_delta: 0.0
+  # Supported losses from the registry include mse, mae, smooth_l1, huber, cross_entropy.
   loss: mse
+  # Supported optimizers: adam, adamw, sgd.
   optimizer: adam
   optimizer_eps: 1.0e-8
   weight_decay: 0.0

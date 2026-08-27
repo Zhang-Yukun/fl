@@ -1,2 +1,3 @@
 centralized:
+  # Number of centralized training rounds/epochs.
   rounds: 300

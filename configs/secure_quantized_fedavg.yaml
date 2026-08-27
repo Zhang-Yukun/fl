@@ -1,19 +1,2 @@
 includes:
-  - common/forecasting_patchtst.yaml
-  - common/federated.yaml
-  - common/evaluation_protocol.yaml
-
-experiment:
-  name: secure_quantized_fedavg
-  mode: federated
-  output_dir: outputs/secure_quantized_fedavg
-
-federated:
-  algorithm: secure_quantized_fedavg
-  quantization_dtype: float16
-  quantization_stochastic_rounding: true
-  quantization_seed: 2026
-
-privacy:
-  clip_norm: 10.0
-  noise_multiplier: 0.0001
+  - rare/secure_quantized_fedavg.yaml

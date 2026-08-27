@@ -1,6 +1,9 @@
 data:
+  # Pre-split dataset directory. The framework reads from here directly and will not re-split on the fly.
   split_dir: ../data/rare_earth_rawdata2
+  # Client IDs must match the subdirectories under split_dir.
   clients: [Nd2O3, CeO2, La2O3]
+  # Forecasting input/output window sizes.
   seq_len: 21
   pred_len: 7
   batch_size: 128

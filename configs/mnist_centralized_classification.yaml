@@ -1,0 +1,2 @@
+includes:
+  - mnist/centralized.yaml

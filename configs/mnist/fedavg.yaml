@@ -1,0 +1,11 @@
+includes:
+  - base_federated.yaml
+
+experiment:
+  name: mnist_classification
+  mode: federated
+  output_dir: outputs/mnist_classification
+
+federated:
+  algorithm: fedavg
+  rounds: 5

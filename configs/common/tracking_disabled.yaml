@@ -1,0 +1,3 @@
+tracking:
+  # Classification smoke-test style configs default to disabled tracking.
+  enabled: false

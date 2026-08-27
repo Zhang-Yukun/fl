@@ -1,0 +1,5 @@
+model:
+  # Classification models currently support small_cnn/cnn/convnet and mlp/flatten aliases.
+  name: small_cnn
+  hidden_channels: 32
+  dropout: 0.1

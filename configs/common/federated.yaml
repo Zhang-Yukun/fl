@@ -1,3 +1,8 @@
+# Federated-loop defaults shared by most experiment configs.
 federated:
+  # Registered method name. Concrete configs usually override this.
+  algorithm: fedavg
+  # Number of communication rounds.
   rounds: 300
+  # Local epochs per round. If local_steps is also set, local_steps takes priority.
   local_epochs: 1

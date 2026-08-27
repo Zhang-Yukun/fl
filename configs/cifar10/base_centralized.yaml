@@ -1,0 +1,3 @@
+includes:
+  - base_federated.yaml
+  - ../common/centralized.yaml

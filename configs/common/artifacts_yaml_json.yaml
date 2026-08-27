@@ -1,3 +1,5 @@
 artifacts:
+  # Supported values: yaml, json, toml.
   config_formats: [yaml, json]
+  # Save intermediate snapshots every N rounds. 0 disables periodic snapshots.
   save_every_rounds: 0

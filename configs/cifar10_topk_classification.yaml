@@ -1,10 +1,2 @@
 includes:
-  - cifar10_classification.yaml
-
-experiment:
-  name: cifar10_topk_classification
-  output_dir: outputs/cifar10_topk_classification
-
-federated:
-  algorithm: sparse_fedavg
-  topk_fraction: 0.10
+  - cifar10/topk.yaml

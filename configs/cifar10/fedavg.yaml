@@ -1,0 +1,11 @@
+includes:
+  - base_federated.yaml
+
+experiment:
+  name: cifar10_classification
+  mode: federated
+  output_dir: outputs/cifar10_classification
+
+federated:
+  algorithm: fedavg
+  rounds: 5

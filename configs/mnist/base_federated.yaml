@@ -1,0 +1,31 @@
+includes:
+  - ../common/task_classification.yaml
+  - ../common/model_small_cnn.yaml
+  - ../common/training_classification.yaml
+  - ../common/federated.yaml
+  - ../common/evaluation_accuracy.yaml
+  - ../common/tracking_disabled.yaml
+  - ../common/artifacts_yaml.yaml
+  - ../common/grpc_default.yaml
+
+runtime:
+  # Canonical classification configs still default to cpu here; production runs should usually override to cuda:*.
+  device: cpu
+  log_level: INFO
+
+attack:
+  target_type: update_payload
+  enabled: false
+  steps: 20
+  async_enabled: false
+  device: same
+
+data:
+  dataset_name: mnist
+  split_dir: ../data/mnist
+  clients: [m1, m2, m3]
+  image_shape: [1, 28, 28]
+  num_classes: 10
+  batch_size: 64
+  shuffle_train: true
+  num_workers: 0

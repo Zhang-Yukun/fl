@@ -1,18 +1,2 @@
 includes:
-  - common/forecasting_patchtst.yaml
-  - common/federated.yaml
-  - common/evaluation_protocol.yaml
-
-experiment:
-  name: topk
-  mode: federated
-  output_dir: outputs/topk
-
-federated:
-  algorithm: sparse_fedavg
-  topk_fraction: 0.10
-
-attack:
-  reference_metric: nearest_client_train_mse
-  client_selection: round_robin
-  clients_per_round: 1
+  - rare/topk.yaml

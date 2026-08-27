@@ -1,0 +1,7 @@
+training:
+  lr: 0.001
+  # Classification tasks normally use cross_entropy.
+  loss: cross_entropy
+  optimizer: adam
+  patience: 5
+  min_delta: 0.0

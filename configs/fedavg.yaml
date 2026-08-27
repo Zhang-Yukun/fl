@@ -1,12 +1,2 @@
 includes:
-  - common/forecasting_patchtst.yaml
-  - common/federated.yaml
-  - common/evaluation_protocol.yaml
-
-experiment:
-  name: fedavg
-  mode: federated
-  output_dir: outputs/fedavg
-
-federated:
-  algorithm: fedavg
+  - rare/fedavg.yaml

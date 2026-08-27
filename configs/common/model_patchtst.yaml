@@ -1,4 +1,5 @@
 model:
+  # Forecasting models currently used by the framework include mlp, lstm, patchtst.
   name: patchtst
   channels: 1
   patch_len: 16

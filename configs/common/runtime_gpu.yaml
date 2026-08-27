@@ -1,6 +1,8 @@
 runtime:
+  # Main training device. Attack.device=same will inherit this.
   device: cuda:0
   log_level: INFO
+  # Deterministic mode is recommended for reproducible attack replay.
   deterministic: true
   num_threads: 1
   num_interop_threads: 1

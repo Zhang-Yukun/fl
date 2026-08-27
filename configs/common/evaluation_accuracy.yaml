@@ -1,0 +1,3 @@
+evaluation:
+  # Classification tasks generally only report accuracy.
+  metrics: [accuracy]

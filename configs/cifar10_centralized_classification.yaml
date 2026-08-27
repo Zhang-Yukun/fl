@@ -1,0 +1,2 @@
+includes:
+  - cifar10/centralized.yaml

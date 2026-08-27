@@ -1,0 +1,13 @@
+includes:
+  - base_federated.yaml
+
+experiment:
+  name: qsgd
+  mode: federated
+  output_dir: outputs/qsgd
+
+federated:
+  algorithm: qsgd_fedavg
+  # Number of QSGD quantization levels.
+  qsgd_levels: 63
+  quantization_seed: 2026

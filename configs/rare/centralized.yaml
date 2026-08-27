@@ -1,0 +1,10 @@
+includes:
+  - base_centralized.yaml
+
+experiment:
+  name: centralized
+  mode: centralized
+  output_dir: outputs/centralized
+
+training:
+  patience: 50

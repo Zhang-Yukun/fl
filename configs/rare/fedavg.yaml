@@ -1,0 +1,10 @@
+includes:
+  - base_federated.yaml
+
+experiment:
+  name: fedavg
+  mode: federated
+  output_dir: outputs/fedavg
+
+federated:
+  algorithm: fedavg

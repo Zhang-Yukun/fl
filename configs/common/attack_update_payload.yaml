@@ -1,18 +1,26 @@
 attack:
+  # The current framework only supports update_payload.
   target_type: update_payload
   enabled: true
+  # Legacy reference view for extra reporting; current main summary metric is set-recovery based.
   reference_metric: nearest_client_train_mse
   report_metrics: [nearest_client_train_mse]
+  # Set-recovery matching metric and direction.
   recovery_match_metric: mse
   recovery_match_objective: auto
+  # Success metric used after one-to-one matching.
   recovery_success_metric: mse
   recovery_success_objective: auto
+  # Attack trigger frequency in rounds.
   frequency_rounds: 10
+  # auto means one independent attack record per attacked client per round.
   sample_count: auto
+  # auto means recover up to the attacked client's training-set size, capped below.
   max_samples: auto
   max_samples_cap: 8
   steps: 300
   lr: 0.001
+  # Attack optimizer currently only supports adam.
   optimizer: adam
   restarts: 1
   client_selection: all
@@ -23,12 +31,15 @@ attack:
   success_ssim_threshold: 0.3
   success_rate_threshold: 0.03
   data_range: 1.0
+  # train or eval; eval is preferred for deterministic replay with rare-earth configs.
   model_mode: eval
+  # Local one-step update approximation used when matching intercepted update_payloads.
   local_optimizer: adam
   local_lr: 0.001
   local_optimizer_eps: 1.0e-8
   async_enabled: false
   async_workers: 1
   async_max_pending_rounds: 5
+  # same inherits runtime.device.
   device: same
   seed: 2026

@@ -1,0 +1,12 @@
+includes:
+  - base_federated.yaml
+
+experiment:
+  name: randomk
+  mode: federated
+  output_dir: outputs/randomk
+
+federated:
+  algorithm: randomk_fedavg
+  topk_fraction: 0.10
+  randomk_seed: 2026

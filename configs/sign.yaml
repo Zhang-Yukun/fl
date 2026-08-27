@@ -1,12 +1,2 @@
 includes:
-  - common/forecasting_patchtst.yaml
-  - common/federated.yaml
-  - common/evaluation_protocol.yaml
-
-experiment:
-  name: sign
-  mode: federated
-  output_dir: outputs/sign
-
-federated:
-  algorithm: sign_fedavg
+  - rare/sign.yaml

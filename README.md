@@ -13,7 +13,8 @@ conda run -n torch_env python -m pytest tests
 
 For a fuller Chinese usage guide covering configuration, algorithms, gRPC,
 artifacts, and extension points, see
-[`docs/框架使用手册.md`](docs/框架使用手册.md).
+[`docs/框架使用手册.md`](docs/框架使用手册.md). For a field-by-field
+configuration reference, see [`docs/config_reference.md`](docs/config_reference.md).
 
 ## Main Modules
 

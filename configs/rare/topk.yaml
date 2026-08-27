@@ -1,0 +1,17 @@
+includes:
+  - base_federated.yaml
+
+experiment:
+  name: topk
+  mode: federated
+  output_dir: outputs/topk
+
+federated:
+  algorithm: sparse_fedavg
+  # Fraction of trainable update coordinates kept during sparse upload.
+  topk_fraction: 0.10
+
+attack:
+  reference_metric: nearest_client_train_mse
+  client_selection: round_robin
+  clients_per_round: 1

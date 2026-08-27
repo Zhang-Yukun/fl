@@ -1,4 +1,5 @@
 tracking:
   enabled: true
+  # true means wandb offline mode.
   offline: true
   project: federated-rare-earth

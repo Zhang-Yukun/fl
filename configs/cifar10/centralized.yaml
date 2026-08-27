@@ -1,0 +1,10 @@
+includes:
+  - base_centralized.yaml
+
+experiment:
+  name: cifar10_centralized_classification
+  mode: centralized
+  output_dir: outputs/cifar10_centralized_classification
+
+centralized:
+  rounds: 5

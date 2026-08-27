@@ -1,0 +1,12 @@
+includes:
+  - base_federated.yaml
+
+experiment:
+  name: cifar10_topk_classification
+  mode: federated
+  output_dir: outputs/cifar10_topk_classification
+
+federated:
+  algorithm: sparse_fedavg
+  rounds: 5
+  topk_fraction: 0.10
