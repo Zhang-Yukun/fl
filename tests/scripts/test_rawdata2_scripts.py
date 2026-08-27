@@ -32,6 +32,7 @@ CURRENT_SCRIPTS = (
     "run_exp_seed8192_mse_part1.sh",
     "run_exp_seed8192_mse_part2.sh",
     "run_suite.sh",
+    "run_tmux_three_task_suite.sh",
 )
 
 REMOVED_SCRIPTS = (
@@ -122,11 +123,19 @@ def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
         'TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS:-rare}"',
         'PROFILE=noattack runs centralized + fedavg/topk/ega for the selected tasks.',
         'PROFILE=attack runs centralized + fedavg/topk/ega with attack enabled for the selected tasks.',
+        'STARTUP_WAIT_SECONDS=60',
+        'EGA_ARTIFACT_PATH=artifacts/ega/ega_h240_v1.pt',
+        'EGA_PRETRAIN_DEVICE=same',
+        'EGA_PRETRAIN_EPOCHS=100',
         'BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"',
         'TASK_SET="${TASK_SET}"',
         'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS}"',
         'TASK_CLIENT_IDS="${TASK_CLIENT_IDS}"',
         'TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS}"',
+        'STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS}"',
+        'EGA_ARTIFACT_PATH="${EGA_ARTIFACT_PATH}"',
+        'EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE}"',
+        'EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS}"',
         'FEDERATED_ALGORITHMS="${BASE_ALGOS}"',
         'bash scripts/run_suite.sh --modes "${SUITE_MODES}" --tasks "${TASK_SET}"',
     ):
@@ -173,5 +182,40 @@ def test_batch_analysis_wrapper_supports_single_seed_and_multiseed_outputs():
         'cmd+=("${INPUT_ROOT}/${MODE}/${seed}/${PROFILE}_${loss}")',
         'cmd+=("${ALGORITHM_LIST[@]}")',
         'PYTHONPATH=. "${cmd[@]}"',
+    ):
+        assert marker in content
+
+
+def test_tmux_suite_launcher_covers_three_tasks_two_gpus_and_port_split():
+    content = _assert_executable("run_tmux_three_task_suite.sh")
+    for marker in (
+        'TMUX_SESSION_PREFIX="${TMUX_SESSION_PREFIX:-ydxt_suite_2026}"',
+        'OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/tmux_three_task_suite_seed2026_r10}"',
+        'TASK_SET="${TASK_SET:-rare,mnist,cifar10}"',
+        'ROUNDS="${ROUNDS:-10}"',
+        'ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-10}"',
+        'GPU_SINGLE_NOATTACK="${GPU_SINGLE_NOATTACK:-0}"',
+        'GPU_SINGLE_ATTACK="${GPU_SINGLE_ATTACK:-1}"',
+        'GPU_MULTI_NOATTACK="${GPU_MULTI_NOATTACK:-0}"',
+        'GPU_MULTI_ATTACK="${GPU_MULTI_ATTACK:-1}"',
+        'BASE_PORT_MULTI_NOATTACK="${BASE_PORT_MULTI_NOATTACK:-58000}"',
+        'BASE_PORT_MULTI_ATTACK="${BASE_PORT_MULTI_ATTACK:-58100}"',
+        'STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-60}"',
+        'EGA_ARTIFACT_PATH="${EGA_ARTIFACT_PATH:-}"',
+        'EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-same}"',
+        'EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS:-100}"',
+        'tmux new-session -d -s',
+        'launch_session "${TMUX_SESSION_PREFIX}_single_noattack" noattack single_sync',
+        'launch_session "${TMUX_SESSION_PREFIX}_single_attack" attack single_sync',
+        'launch_session "${TMUX_SESSION_PREFIX}_multi_noattack" noattack multi_sync',
+        'launch_session "${TMUX_SESSION_PREFIX}_multi_attack" attack multi_sync',
+        '"cuda:${gpu_id}"',
+        '"${base_port}"',
+        '"${STARTUP_WAIT_SECONDS}"',
+        '"${EGA_ARTIFACT_PATH}"',
+        '"${EGA_PRETRAIN_DEVICE}"',
+        '"${EGA_PRETRAIN_EPOCHS}"',
+        'bash scripts/run_controlled_suite.sh',
+        'conda run -n torch_env bash -lc',
     ):
         assert marker in content
