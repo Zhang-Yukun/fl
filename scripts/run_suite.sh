@@ -608,7 +608,7 @@ main() {
     run_centralized \
       centralized_uupdate_dmodel_${RUN_TAG} \
       centralized-${TRACKING_TAG} \
-      configs/centralized.yaml
+      configs/rare/centralized.yaml
   fi
 
   local -a modes=(single_sync single_async grpc_sync grpc_async)
@@ -622,7 +622,7 @@ main() {
       if algo_enabled fedavg; then
         local -a fedavg_override_args=()
         mapfile -t fedavg_override_args < <(fedavg_args)
-        run_grpc "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/fedavg.yaml "${port}" "${fedavg_override_args[@]}"
+        run_grpc "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${fedavg_override_args[@]}"
         port=$((port + 1))
       fi
 
@@ -632,49 +632,49 @@ main() {
         local ega_tracking_label="${ega_label//_/-}"
         local -a ega_override_args=()
         mapfile -t ega_override_args < <(ega_args)
-        run_grpc "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/ega.yaml "${port}" "${ega_override_args[@]}"
+        run_grpc "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/ega.yaml "${port}" "${ega_override_args[@]}"
         port=$((port + 1))
       fi
 
       if algo_enabled topk; then
         local -a topk_override_args=()
         mapfile -t topk_override_args < <(topk_args)
-        run_grpc "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/topk.yaml "${port}" "${topk_override_args[@]}"
+        run_grpc "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/topk.yaml "${port}" "${topk_override_args[@]}"
         port=$((port + 1))
       fi
 
       if algo_enabled qsgd; then
         local -a qsgd_override_args=()
         mapfile -t qsgd_override_args < <(qsgd_args)
-        run_grpc "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/qsgd.yaml "${port}" "${qsgd_override_args[@]}"
+        run_grpc "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${qsgd_override_args[@]}"
         port=$((port + 1))
       fi
 
       if algo_enabled randomk; then
         local -a randomk_override_args=()
         mapfile -t randomk_override_args < <(randomk_args)
-        run_grpc "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/randomk.yaml "${port}" "${randomk_override_args[@]}"
+        run_grpc "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${randomk_override_args[@]}"
         port=$((port + 1))
       fi
 
       if algo_enabled sign; then
         local -a sign_override_args=()
         mapfile -t sign_override_args < <(sign_args)
-        run_grpc "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/sign.yaml "${port}" "${sign_override_args[@]}"
+        run_grpc "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${sign_override_args[@]}"
         port=$((port + 1))
       fi
 
       if algo_enabled adaptive; then
         local -a adaptive_override_args=()
         mapfile -t adaptive_override_args < <(adaptive_args)
-        run_grpc "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/adaptive_clipped_rdp_fedavg.yaml "${port}" "${adaptive_override_args[@]}"
+        run_grpc "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${adaptive_override_args[@]}"
         port=$((port + 1))
       fi
 
       if algo_enabled qint8; then
         local -a qint8_override_args=()
         mapfile -t qint8_override_args < <(qint8_args)
-        run_grpc "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/secure_quantized_fedavg.yaml "${port}" "${qint8_override_args[@]}"
+        run_grpc "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${qint8_override_args[@]}"
         port=$((port + 1))
       fi
     else
@@ -688,7 +688,7 @@ main() {
       if algo_enabled fedavg; then
         local -a fedavg_override_args=()
         mapfile -t fedavg_override_args < <(fedavg_args)
-        run_single "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/fedavg.yaml "${fedavg_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${fedavg_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled ega; then
@@ -697,43 +697,43 @@ main() {
         local ega_tracking_label="${ega_label//_/-}"
         local -a ega_override_args=()
         mapfile -t ega_override_args < <(ega_args)
-        run_single "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/ega.yaml "${ega_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/ega.yaml "${ega_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled topk; then
         local -a topk_override_args=()
         mapfile -t topk_override_args < <(topk_args)
-        run_single "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/topk.yaml "${topk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/topk.yaml "${topk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled qsgd; then
         local -a qsgd_override_args=()
         mapfile -t qsgd_override_args < <(qsgd_args)
-        run_single "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/qsgd.yaml "${qsgd_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${qsgd_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled randomk; then
         local -a randomk_override_args=()
         mapfile -t randomk_override_args < <(randomk_args)
-        run_single "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/randomk.yaml "${randomk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${randomk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled sign; then
         local -a sign_override_args=()
         mapfile -t sign_override_args < <(sign_args)
-        run_single "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/sign.yaml "${sign_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${sign_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled adaptive; then
         local -a adaptive_override_args=()
         mapfile -t adaptive_override_args < <(adaptive_args)
-        run_single "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/adaptive_clipped_rdp_fedavg.yaml "${adaptive_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${adaptive_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
 
       if algo_enabled qint8; then
         local -a qint8_override_args=()
         mapfile -t qint8_override_args < <(qint8_args)
-        run_single "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/secure_quantized_fedavg.yaml "${qint8_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        run_single "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${qint8_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
       fi
     fi
   done

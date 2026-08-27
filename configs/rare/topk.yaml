@@ -11,6 +11,3 @@ federated:
   # Fraction of trainable update coordinates kept during sparse upload.
   topk_fraction: 0.10
 
-attack:
-  client_selection: round_robin
-  clients_per_round: 1

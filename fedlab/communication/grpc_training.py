@@ -2,10 +2,10 @@
 
 Example:
     Server:
-        ``python -m fedlab.entrypoints.server --config configs/test.yaml``
+        ``python -m fedlab.entrypoints.server --config configs/rare/fedavg.yaml``
 
     Client:
-        ``python -m fedlab.entrypoints.client --client-id Nd2O3 --config configs/test.yaml``
+        ``python -m fedlab.entrypoints.client --client-id Nd2O3 --config configs/rare/fedavg.yaml``
 """
 
 from __future__ import annotations

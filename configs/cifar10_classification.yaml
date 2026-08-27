@@ -1,2 +1,0 @@
-includes:
-  - cifar10/fedavg.yaml

@@ -20,7 +20,7 @@ run_case() {
   local outdir="${BASE_OUTPUT}/${run_name}"
   echo "[$(date '+%F %T')] start ${run_name} loss=${LOSS_NAME} device=${RUNTIME_DEVICE}"
   PYTHONPATH=. ${PYTHON_BIN} -m fedlab.entrypoints.train \
-    --config configs/ega.yaml \
+    --config configs/rare/ega.yaml \
     --mode federated \
     --override "experiment.output_dir=${outdir}" \
     --override "experiment.name=${run_name}" \

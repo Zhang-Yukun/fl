@@ -6,81 +6,54 @@ from fedlab.utils.config import load_config
 CONFIG_DIR = Path(__file__).parents[2] / "configs"
 
 
-def test_training_lengths_are_consistent():
-    """Retained algorithm configs share the agreed training/round budgets."""
-
+def test_retained_rare_configs_share_expected_training_schedule():
     configs = [
-        load_config(CONFIG_DIR / "fedavg.yaml"),
-        load_config(CONFIG_DIR / "topk.yaml"),
-        load_config(CONFIG_DIR / "qsgd.yaml"),
-        load_config(CONFIG_DIR / "randomk.yaml"),
-        load_config(CONFIG_DIR / "sign.yaml"),
-        load_config(CONFIG_DIR / "adaptive_clipped_rdp_fedavg.yaml"),
-        load_config(CONFIG_DIR / "secure_quantized_fedavg.yaml"),
-        load_config(CONFIG_DIR / "ega.yaml"),
+        load_config(CONFIG_DIR / "rare/centralized.yaml"),
+        load_config(CONFIG_DIR / "rare/fedavg.yaml"),
+        load_config(CONFIG_DIR / "rare/topk.yaml"),
+        load_config(CONFIG_DIR / "rare/ega.yaml"),
     ]
 
     assert configs[0]["training"]["patience"] == 500
-    for config in configs:
+    assert configs[0]["training"]["epochs"] == 300
+    for config in configs[1:]:
         assert config["federated"]["rounds"] == 300
         assert config["training"]["epochs"] == 1
         assert "local_epochs" not in config["federated"]
 
 
-def test_shared_configs_do_not_define_compression_only_parameters():
-    """Shared base configs should not carry compression-specific federated knobs."""
+def test_retained_rare_configs_only_define_relevant_algorithm_blocks():
+    fedavg = load_config(CONFIG_DIR / "rare/fedavg.yaml")
+    topk = load_config(CONFIG_DIR / "rare/topk.yaml")
+    ega = load_config(CONFIG_DIR / "rare/ega.yaml")
 
-    base = load_config(CONFIG_DIR / "fedavg.yaml")
-    default = load_config(CONFIG_DIR / "default.yaml")
-    topk = load_config(CONFIG_DIR / "topk.yaml")
-    randomk = load_config(CONFIG_DIR / "randomk.yaml")
-
-    assert "topk_fraction" not in base["federated"]
-    assert "topk_fraction" not in default["federated"]
+    assert "topk_fraction" not in fedavg["federated"]
     assert topk["federated"]["topk_fraction"] == 0.10
-    assert randomk["federated"]["topk_fraction"] == 0.10
+    assert "ega" not in fedavg
+    assert "ega" not in topk
+    assert "topk_fraction" not in ega["federated"]
+    assert "ega" in ega
 
 
-def test_all_algorithm_configs_default_to_protocol_evaluation():
-    """All algorithm configs default to protocol evaluation unless explicitly overridden."""
-
+def test_retained_rare_configs_default_to_forecasting_protocol_evaluation():
     configs = [
-        load_config(CONFIG_DIR / "fedavg.yaml"),
-        load_config(CONFIG_DIR / "adaptive_clipped_rdp_fedavg.yaml"),
-        load_config(CONFIG_DIR / "ega.yaml"),
-        load_config(CONFIG_DIR / "topk.yaml"),
-        load_config(CONFIG_DIR / "qsgd.yaml"),
-        load_config(CONFIG_DIR / "randomk.yaml"),
-        load_config(CONFIG_DIR / "secure_quantized_fedavg.yaml"),
-        load_config(CONFIG_DIR / "sign.yaml"),
+        load_config(CONFIG_DIR / "rare/centralized.yaml"),
+        load_config(CONFIG_DIR / "rare/fedavg.yaml"),
+        load_config(CONFIG_DIR / "rare/topk.yaml"),
+        load_config(CONFIG_DIR / "rare/ega.yaml"),
     ]
 
     for config in configs:
+        assert config["task"]["type"] == "forecasting"
         assert config.get("evaluation", {}).get("mode", "protocol") == "protocol"
+        assert config["evaluation"]["metrics"] == ["mse", "mae", "mape"]
 
 
-def test_centralized_epochs_do_not_override_federated_rounds():
-    centralized = load_config(CONFIG_DIR / "centralized.yaml")
-    fedavg = load_config(CONFIG_DIR / "fedavg.yaml")
+def test_centralized_and_federated_rare_bases_keep_separate_epoch_defaults():
+    centralized = load_config(CONFIG_DIR / "rare/centralized.yaml")
+    fedavg = load_config(CONFIG_DIR / "rare/fedavg.yaml")
 
-    assert centralized.get("training", {}).get("epochs") == 300
-    assert centralized.get("training", {}).get("patience") == 50
-    assert centralized.get("federated", {}).get("rounds") == 20
-    assert fedavg.get("training", {}).get("epochs") == 1
+    assert centralized["training"]["epochs"] == 300
+    assert centralized["federated"]["rounds"] == 20
+    assert fedavg["training"]["epochs"] == 1
     assert fedavg["federated"]["rounds"] == 300
-
-
-def test_algorithm_configs_do_not_carry_unrelated_blocks():
-    fedavg = load_config(CONFIG_DIR / "fedavg.yaml")
-    secure_quantized = load_config(CONFIG_DIR / "secure_quantized_fedavg.yaml")
-    adaptive = load_config(CONFIG_DIR / "adaptive_clipped_rdp_fedavg.yaml")
-    ega = load_config(CONFIG_DIR / "ega.yaml")
-
-    assert "privacy" not in fedavg
-    assert "privacy" in secure_quantized
-    assert "adaptive_clipped_rdp" not in secure_quantized
-    assert "ega" not in secure_quantized
-    assert "privacy" not in adaptive
-    assert "adaptive_clipped_rdp" in adaptive
-    assert "privacy" not in ega
-    assert "ega" in ega

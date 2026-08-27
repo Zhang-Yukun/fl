@@ -12,7 +12,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Federated gRPC client")
     parser.add_argument("--client-id", required=True)
-    parser.add_argument("--config", default="configs/default.yaml")
+    parser.add_argument("--config", default="configs/rare/fedavg.yaml")
     parser.add_argument("--override", action="append", default=[])
     args = parser.parse_args()
     run_client(load_config(args.config, args.override), args.client_id)

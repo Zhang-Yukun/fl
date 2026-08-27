@@ -83,22 +83,3 @@ def test_classification_algorithm_configs_only_define_relevant_blocks():
     assert 'ega' in mnist_ega
     assert 'ega' in cifar_ega
 
-
-@pytest.mark.parametrize(
-    ('wrapper_name', 'canonical_name'),
-    [
-        ('mnist_classification.yaml', 'mnist/fedavg.yaml'),
-        ('mnist_topk_classification.yaml', 'mnist/topk.yaml'),
-        ('mnist_ega_classification.yaml', 'mnist/ega.yaml'),
-        ('mnist_centralized_classification.yaml', 'mnist/centralized.yaml'),
-        ('cifar10_classification.yaml', 'cifar10/fedavg.yaml'),
-        ('cifar10_topk_classification.yaml', 'cifar10/topk.yaml'),
-        ('cifar10_ega_classification.yaml', 'cifar10/ega.yaml'),
-        ('cifar10_centralized_classification.yaml', 'cifar10/centralized.yaml'),
-    ],
-)
-def test_legacy_classification_config_wrappers_match_canonical_configs(wrapper_name, canonical_name):
-    wrapper = load_config(CONFIG_DIR / wrapper_name)
-    canonical = load_config(CONFIG_DIR / canonical_name)
-
-    assert wrapper == canonical

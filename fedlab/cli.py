@@ -13,11 +13,11 @@ def main() -> None:
     """Parse command-line arguments and launch the requested training mode.
 
     Example:
-        ``python -m fedlab.entrypoints.train --config configs/test.yaml``.
+        ``python -m fedlab.entrypoints.train --config configs/rare/fedavg.yaml``.
     """
 
     parser = argparse.ArgumentParser(description="Federated rare-earth price forecasting")
-    parser.add_argument("--config", default="configs/default.yaml", help="Path to YAML config")
+    parser.add_argument("--config", default="configs/rare/fedavg.yaml", help="Path to YAML config")
     parser.add_argument("--mode", choices=["federated", "centralized"], default=None)
     parser.add_argument("--override", action="append", default=[], help="Override config value, e.g. federated.rounds=3")
     args = parser.parse_args()

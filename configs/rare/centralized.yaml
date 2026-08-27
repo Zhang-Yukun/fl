@@ -5,6 +5,3 @@ experiment:
   name: centralized
   mode: centralized
   output_dir: outputs/centralized
-
-training:
-  patience: 50
