@@ -37,11 +37,9 @@ def test_nested_includes_deep_merge_dict_values(tmp_path):
     assert config["A"] == {"a": 1, "b": 2}
 
 
-def test_centralized_rounds_alias_maps_to_training_epochs():
-    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["centralized.rounds=3", "tracking.enabled=false", "experiment.mode=centralized"])
-    assert config["training"]["epochs"] == 3
-    assert "centralized" not in config or "rounds" not in config.get("centralized", {})
-    assert config["federated"]["rounds"] == 1
+def test_deprecated_centralized_rounds_key_is_rejected():
+    with pytest.raises(ValueError, match=r"centralized\.rounds"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["centralized.rounds=3", "tracking.enabled=false", "experiment.mode=centralized"])
 
 
 def test_load_config_prunes_irrelevant_algorithm_specific_fields():
@@ -86,19 +84,25 @@ def test_deprecated_centralized_epochs_key_is_rejected():
         load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["centralized.epochs=3"])
 
 
+def test_deprecated_transport_mode_keys_are_rejected():
+    with pytest.raises(ValueError, match=r"transport\.upload_mode"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["transport.upload_mode=update"])
+    with pytest.raises(ValueError, match=r"transport\.download_mode"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["transport.download_mode=model"])
+
+
 def test_training_epochs_key_is_supported():
     config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["training.epochs=3"])
     assert config["training"]["epochs"] == 3
 
 
-def test_federated_local_epochs_alias_maps_to_training_epochs():
-    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["federated.local_epochs=4"])
-    assert config["training"]["epochs"] == 4
-    assert "local_epochs" not in config["federated"]
+def test_deprecated_federated_local_epochs_key_is_rejected():
+    with pytest.raises(ValueError, match=r"federated\.local_epochs"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["federated.local_epochs=4"])
 
 
-def test_conflicting_epoch_schedule_keys_are_rejected():
-    with pytest.raises(ValueError, match=r"Conflicting epoch schedule keys"):
+def test_training_epochs_with_removed_legacy_epoch_key_is_rejected():
+    with pytest.raises(ValueError, match=r"federated\.local_epochs"):
         load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["training.epochs=3", "federated.local_epochs=2"])
 
 

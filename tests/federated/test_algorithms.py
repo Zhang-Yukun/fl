@@ -1588,6 +1588,13 @@ def test_validate_transport_modes_accepts_fixed_semantics_for_all_local_algorith
     validate_transport_modes(config)
 
 
+def test_validate_transport_modes_rejects_legacy_transport_keys():
+    with pytest.raises(ValueError, match=r"transport\.upload_mode"):
+        validate_transport_modes({"transport": {"upload_mode": "update"}})
+    with pytest.raises(ValueError, match=r"transport\.download_mode"):
+        validate_transport_modes({"transport": {"download_mode": "model"}})
+
+
 class _IdentityEgaCodec(torch.nn.Module):
     """Minimal codec used to make EGA transport semantics deterministic in tests."""
 

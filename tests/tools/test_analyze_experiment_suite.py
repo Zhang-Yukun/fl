@@ -210,7 +210,6 @@ def test_analyze_experiment_suite_script_exists_and_is_executable():
     assert content.startswith('#!/usr/bin/env python3')
     assert '--include-old' in content
     assert '--algorithms' in content
-    assert '--prefixes' in content
     assert 'DEFAULT_ALGORITHMS' in content
     assert 'val_mse_vs_round.png' in content
     assert 'val_mse_vs_cumulative_upload.png' in content

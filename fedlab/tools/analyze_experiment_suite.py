@@ -768,7 +768,6 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument('--output-dir', type=Path, default=None, help='Directory used to save summary tables and plots; default is a sibling analysis directory')
     parser.add_argument('--include-old', action='store_true', help='Include *_old run directories in the summary and plots')
     parser.add_argument('--algorithms', nargs='*', default=list(DEFAULT_ALGORITHMS), help='Algorithm-name tokens used to select experiment directories by substring matching')
-    parser.add_argument('--prefixes', nargs='*', default=None, help='Deprecated alias for --algorithms')
     return parser
 
 
@@ -858,7 +857,7 @@ def main() -> None:
         if not root_dir.is_dir():
             raise NotADirectoryError(f'{root_dir} is not a directory')
 
-    raw_algorithms = args.algorithms if args.prefixes is None else args.prefixes
+    raw_algorithms = args.algorithms
     algorithms = normalize_algorithm_tokens(raw_algorithms)
     loss = args.loss
     if args.output_dir:

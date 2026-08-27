@@ -115,7 +115,7 @@ class GrpcFederatedCoordinator:
         logger.info('Saved startup config artifacts: {}', [str(path) for path in saved_configs])
         configure_torch_runtime(config)
         configure_random_seed(config)
-        validate_transport_modes(config, transport_backend='grpc')
+        validate_transport_modes(config)
         self.tracker = Tracker(config)
         self.device = resolve_device(config)
         train_loaders, val_loader, test_loader = build_federated_loaders(config)
@@ -544,7 +544,7 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
     setup_logging(Path(config['experiment']['output_dir']) / f'client_{client_id}', config.get('runtime', {}).get('log_level', 'INFO'))
     configure_torch_runtime(config)
     configure_random_seed(config)
-    validate_transport_modes(config, transport_backend='grpc')
+    validate_transport_modes(config)
     device = resolve_device(config)
     train_loaders, _, _ = build_federated_loaders(config)
     if client_id not in train_loaders:

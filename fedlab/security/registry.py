@@ -153,11 +153,9 @@ def configured_attack_names(config: dict[str, Any]) -> tuple[str, ...]:
 
     _ensure_builtin_attacks_registered()
     attack_cfg = config.get('attack', {})
+    if attack_cfg.get('method') is not None:
+        raise ValueError('Deprecated config key attack.method is no longer supported; use attack.methods')
     configured = attack_cfg.get('methods')
-    if configured is None:
-        legacy = attack_cfg.get('method')
-        if legacy is not None:
-            configured = [legacy]
     if configured is None:
         return ('dlg', 'idlg')
     if isinstance(configured, str):

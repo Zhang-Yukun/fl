@@ -38,7 +38,7 @@ run_case() {
     --override "attack.enabled=false" \
     --override "federated.algorithm=ega_fedavg" \
     --override "federated.rounds=${ROUNDS}" \
-    --override "federated.local_epochs=1" \
+    --override "training.epochs=1" \
     --override "training.optimizer=adam" \
     --override "training.lr=${TRAIN_LR}" \
     --override "training.loss=mae" \

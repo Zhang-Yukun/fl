@@ -7,15 +7,19 @@ from typing import Any
 from fedlab.utils.serialization import StateDict, average_states, subtract_state
 
 
-def validate_transport_modes(config: dict[str, Any], transport_backend: str = "local") -> None:
+def validate_transport_modes(config: dict[str, Any]) -> None:
     """Validate the fixed transport semantics.
 
     Uploads are always model updates and downloads are always full models.
-    The helper remains as a compatibility hook for local and gRPC startup
-    validation.
     """
 
-    del config, transport_backend
+    transport_cfg = config.get("transport")
+    if not isinstance(transport_cfg, dict):
+        return
+    if transport_cfg.get("upload_mode") is not None:
+        raise ValueError("Deprecated config key transport.upload_mode is no longer supported")
+    if transport_cfg.get("download_mode") is not None:
+        raise ValueError("Deprecated config key transport.download_mode is no longer supported")
 
 
 def build_upload_payload_state(local_state: StateDict, base_state: StateDict) -> StateDict:

@@ -54,6 +54,13 @@ def test_configured_attack_names_default_to_dlg_and_idlg():
     assert configured_attack_names({'attack': {}}) == ('dlg', 'idlg')
 
 
+def test_configured_attack_names_rejects_removed_method_key():
+    import pytest
+
+    with pytest.raises(ValueError, match=r"attack\.method"):
+        configured_attack_names({'attack': {'method': 'dlg'}})
+
+
 def test_configured_attack_names_supports_custom_selection(monkeypatch):
     import fedlab.security.registry as registry_module
 
