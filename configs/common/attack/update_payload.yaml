@@ -24,7 +24,8 @@ attack:
   clients_per_round: 3
   input_clip: 5.0
   target_clip: 5.0
-  success_rate_threshold: 0.03
+  success_rate_threshold: 0.05
+  overall_success_rate_threshold: 0.05
   data_range: 1.0
   # train or eval; eval is preferred for deterministic replay with rare-earth configs.
   model_mode: eval

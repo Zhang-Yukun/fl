@@ -34,7 +34,7 @@ def _tiny_patchtst_config():
             "restarts": 1,
             "input_clip": 5.0,
             "target_clip": 5.0,
-            "success_rate_threshold": 0.03,
+            "success_rate_threshold": 0.05,
             "data_range": 1.0,
             "model_mode": "eval",
             "local_optimizer": "adam",
@@ -59,7 +59,7 @@ def _tiny_classification_config():
             "restarts": 1,
             "input_clip": 5.0,
             "target_clip": 5.0,
-            "success_rate_threshold": 0.03,
+            "success_rate_threshold": 0.05,
             "data_range": 1.0,
             "model_mode": "eval",
             "local_optimizer": "adam",
@@ -102,7 +102,7 @@ def test_attack_summary_uses_registered_primary_metric_direction(monkeypatch):
     )
     result.custom_privacy = 0.8
 
-    summary = summarize_attack_results([result], success_rate_threshold=0.03)
+    summary = summarize_attack_results([result], success_rate_threshold=0.05)
 
     assert summary['primary_metric_direction'] == 'lower_is_more_private'
     assert summary['overall_avg_primary_metric_value'] == 0.8
@@ -143,8 +143,9 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     dlg.client_id = "Nd2O3"
     idlg.client_id = "Nd2O3"
     apply_set_recovery_metrics([dlg, idlg], reference_inputs=reference_inputs, reference_targets=torch.cat([y, y + 5.0], dim=0), config=config)
-    summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
+    summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.05)
     assert summary["target_type"] == "update_payload"
+    assert summary["overall_success_rate_threshold"] == 0.05
     assert summary["primary_metric_name"] == "budget_recovered_fraction"
     assert summary["methods"]["DLG"]["target_type"] == "update_payload"
     assert summary["overall_avg_budget_recovered_fraction"] is not None
@@ -294,6 +295,7 @@ def test_apply_set_recovery_metrics_supports_custom_registered_metric(monkeypatc
 
 def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and_classification():
     ts_config = _tiny_patchtst_config()
+    ts_config["attack"]["success_rate_threshold"] = 0.5
     ts_config["attack"]["recovery_success_threshold"] = 0.01
     ts_results = [
         AttackResult(
@@ -335,9 +337,11 @@ def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and
     assert ts_results[1].matched_reference_indices == [1]
     assert ts_results[0].reference_label == "matched_client_train"
     assert ts_results[0].success is True
-    assert ts_results[1].success is False
+    assert ts_results[1].success is True
+    assert ts_results[0].success_threshold == pytest.approx(0.5)
 
     cls_config = _tiny_classification_config()
+    cls_config["attack"]["success_rate_threshold"] = 0.5
     cls_config["attack"]["recovery_success_threshold"] = 0.01
     cls_results = [
         AttackResult(
@@ -360,6 +364,8 @@ def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and
     apply_set_recovery_metrics(cls_results, reference_inputs=cls_reference_inputs, reference_targets=cls_reference_targets, config=cls_config)
     assert cls_results[0].budget_recovered_fraction == pytest.approx(1.0)
     assert cls_results[0].coverage_recovered_fraction == pytest.approx(0.5)
+    assert cls_results[0].success is True
+    assert cls_results[0].success_threshold == pytest.approx(0.5)
     assert cls_results[0].reference_y is not None
     assert torch.equal(cls_results[0].reference_y, torch.tensor([1]))
 

@@ -146,7 +146,8 @@ Result artifacts no longer store `upload_mode` or `download_mode`, because the p
 | `recovery_success_metric` | string | Metric used to decide whether one matched sample is recovered. Supports `mse`, `psnr`, and `ssim`. |
 | `recovery_success_objective` | string | Success objective direction: `auto`, `min`, or `max`. |
 | `recovery_success_threshold` | float, optional | Explicit recovery-success threshold. When omitted, the default for the selected success metric is used. |
-| `success_rate_threshold` | float | Aggregate pass/fail threshold used in attack summaries. |
+| `success_rate_threshold` | float | Minimum recovery fraction required for one attack record to count as successful. |
+| `overall_success_rate_threshold` | float | Aggregate attack-success-rate pass threshold used by `summary`. |
 | `data_range` | float | Data range used by PSNR and SSIM. |
 | `client_selection` | string | Attacked-client selection strategy: `all`, `first`, or `round_robin`. |
 | `clients_per_round` | int | Number of attacked clients on each attacked round. |
@@ -391,7 +392,7 @@ Each element is one DLG or iDLG result.
 | `iterations` | int | Attack optimization steps. |
 | `time_seconds` | float | Attack runtime. |
 | `success` | bool | Whether this attack satisfied the configured recovery rule. |
-| `success_threshold` | float | Per-attack success threshold. |
+| `success_threshold` | float | Per-record success threshold, i.e. `attack.success_rate_threshold`. |
 | `objective_mse` | float | Optimization objective value. |
 | `target_type` | string | Currently `update_payload`. |
 | `nearest_client_train_mse` | float, optional | MSE against the nearest sample in the attacked client's training set. |
@@ -419,11 +420,12 @@ Each element is one DLG or iDLG result.
 | `target_type` | string | Attack target type. Currently `update_payload`. |
 | `primary_metric_name` | string | Primary metric name. |
 | `primary_metric_direction` | string | Privacy interpretation direction for the primary metric. Recovery-rate metrics are typically `lower_is_more_private`. |
-| `success_rate_threshold` | float | Aggregate pass/fail threshold. |
+| `success_rate_threshold` | float | Minimum recovery fraction required for one attack record to count as successful. |
+| `overall_success_rate_threshold` | float | Aggregate attack-success-rate pass threshold used by `summary`. |
 | `overall_avg_primary_metric_value` | float or null | Average primary metric across all attack results. |
 | `overall_best_primary_metric_value` | float or null | Best primary metric across all attack results. |
 | `overall_success_rate` | float | Aggregate attack success rate. |
-| `overall_passes` | bool | Whether the aggregate success rate is at most the threshold. |
+| `overall_passes` | bool | Whether the aggregate success rate is at most `overall_success_rate_threshold`. |
 | `overall_avg_budget_recovered_fraction` | float or null | Average budget recovery fraction across all attack results. |
 | `overall_avg_coverage_recovered_fraction` | float or null | Average coverage recovery fraction across all attack results. |
 | `overall_avg_objective_mse` | float or null | Average objective residual across all attack results. |

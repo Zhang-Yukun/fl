@@ -374,7 +374,8 @@ def _save_periodic_federated_snapshot(
     attack_records = [result.to_record() for result in attack_results]
     attack_summary = summarize_attack_results(
         attack_results,
-        float(config.get("attack", {}).get("success_rate_threshold", 0.03)),
+        float(config.get("attack", {}).get("success_rate_threshold", 0.05)),
+        float(config.get("attack", {}).get("overall_success_rate_threshold", config.get("attack", {}).get("success_rate_threshold", 0.05))),
     )
     summary = _build_federated_summary(
         server=server,
@@ -1478,7 +1479,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         json.dump(attack_records, handle, ensure_ascii=False, indent=2)
     attack_summary = summarize_attack_results(
         attack_manager.attack_results,
-        float(config.get("attack", {}).get("success_rate_threshold", 0.03)),
+        float(config.get("attack", {}).get("success_rate_threshold", 0.05)),
+        float(config.get("attack", {}).get("overall_success_rate_threshold", config.get("attack", {}).get("success_rate_threshold", 0.05))),
     )
     summary = _build_federated_summary(
         server=server,

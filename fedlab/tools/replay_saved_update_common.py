@@ -100,7 +100,8 @@ def replay_saved_update_attacks(
         json.dump(attack_records, handle, ensure_ascii=False, indent=2)
     attack_summary = summarize_attack_results(
         attack_results,
-        float(replay_config.get("attack", {}).get("success_rate_threshold", 0.03)),
+        float(replay_config.get("attack", {}).get("success_rate_threshold", 0.05)),
+        float(replay_config.get("attack", {}).get("overall_success_rate_threshold", replay_config.get("attack", {}).get("success_rate_threshold", 0.05))),
     )
     with (output_dir / "attack_summary.json").open('w', encoding='utf-8') as handle:
         json.dump(attack_summary, handle, ensure_ascii=False, indent=2)

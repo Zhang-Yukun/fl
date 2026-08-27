@@ -370,7 +370,8 @@ class GrpcFederatedCoordinator:
             json.dump(attack_records, handle, ensure_ascii=False, indent=2)
         attack_summary = summarize_attack_results(
             self.attack_results,
-            float(self.config.get('attack', {}).get('success_rate_threshold', 0.03)),
+            float(self.config.get('attack', {}).get('success_rate_threshold', 0.05)),
+            float(self.config.get('attack', {}).get('overall_success_rate_threshold', self.config.get('attack', {}).get('success_rate_threshold', 0.05))),
         )
         summary = _build_federated_summary(
             server=self.server,

@@ -675,7 +675,8 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
     assert result["attack_summary"]["primary_metric_name"] == "budget_recovered_fraction"
     assert result["attack_summary"]["target_type"] == "update_payload"
-    assert result["attack_summary"]["success_rate_threshold"] == 0.03
+    assert result["attack_summary"]["success_rate_threshold"] == 0.05
+    assert result["attack_summary"]["overall_success_rate_threshold"] == 0.05
     assert result["attack_summary"]["overall_avg_budget_recovered_fraction"] is not None
     assert "overall_avg_nearest_client_train_mse" not in result["attack_summary"]
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 3

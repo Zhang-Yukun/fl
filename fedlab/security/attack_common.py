@@ -318,7 +318,8 @@ def apply_set_recovery_metrics(
     success_metric = _normalize_recovery_metric(attack_cfg.get("recovery_success_metric"), default=match_metric)
     match_objective = _normalize_recovery_objective(attack_cfg.get("recovery_match_objective"), match_metric)
     success_objective = _normalize_recovery_objective(attack_cfg.get("recovery_success_objective"), success_metric)
-    success_threshold = _resolve_recovery_threshold(config, success_metric, data_range)
+    sample_success_threshold = _resolve_recovery_threshold(config, success_metric, data_range)
+    record_success_threshold = float(attack_cfg.get("success_rate_threshold", 0.05))
     reconstructed_batches: list[torch.Tensor] = []
     row_slices: list[tuple[int, int, int]] = []
     start = 0
@@ -350,7 +351,7 @@ def apply_set_recovery_metrics(
             continue
         metric_value = float(success_matrix[row_index, matched_col].item())
         row_metric_value[row_index] = metric_value
-        success = _metric_passes_threshold(metric_value, success_metric, success_objective, success_threshold)
+        success = _metric_passes_threshold(metric_value, success_metric, success_objective, sample_success_threshold)
         row_success[row_index] = success
         recovered += int(success)
     reconstructed_count = int(reconstructed.shape[0])
@@ -377,8 +378,8 @@ def apply_set_recovery_metrics(
         result.coverage_recovered_fraction = float(coverage_fraction)
         result.metric_name = "budget_recovered_fraction"
         result.mse = float(budget_fraction)
-        result.success = bool(all(row_success.get(row, False) for row in range(row_start, row_stop)))
-        result.success_threshold = float(success_threshold)
+        result.success = bool(budget_fraction >= record_success_threshold)
+        result.success_threshold = float(record_success_threshold)
 
 
 def _create_optimizer(name: str, variables: list[torch.Tensor], lr: float) -> torch.optim.Optimizer:
@@ -558,6 +559,7 @@ def _summarize_attack_subset(
     *,
     primary_metric_name: str,
     success_rate_threshold: float,
+    overall_success_rate_threshold: float,
 ) -> dict[str, Any]:
     methods: dict[str, dict[str, float | int | bool | None | str]] = {}
     for name in sorted({result.name for result in subset}):
@@ -574,7 +576,7 @@ def _summarize_attack_subset(
             "success_rate_percent": round((success_count / total if total else 0.0) * 100.0, 2),
             "avg_primary_metric_value": primary_stats["average"],
             "best_primary_metric_value": primary_stats["best"],
-            "passes": (success_count / total if total else 0.0) <= success_rate_threshold,
+            "passes": (success_count / total if total else 0.0) <= overall_success_rate_threshold,
         }
         _apply_registered_summary_metrics(method_record, method_subset, prefix="avg")
         methods[name] = method_record
@@ -585,23 +587,31 @@ def _summarize_attack_subset(
         "primary_metric_direction": attack_primary_metric_direction(primary_metric_name),
         "target_type": subset[0].target_type if subset else None,
         "success_rate_threshold": success_rate_threshold,
+        "overall_success_rate_threshold": overall_success_rate_threshold,
         "overall_avg_primary_metric_value": primary_stats["average"],
         "overall_best_primary_metric_value": primary_stats["best"],
         "overall_success_rate": overall_success_rate,
         "overall_success_rate_percent": round(overall_success_rate * 100.0, 2),
-        "overall_passes": overall_success_rate <= success_rate_threshold,
+        "overall_passes": overall_success_rate <= overall_success_rate_threshold,
         "methods": methods,
     }
     _apply_registered_summary_metrics(overall_record, subset, prefix="overall")
     return overall_record
 
 
-def summarize_attack_results(results: list[AttackResult], success_rate_threshold: float = 0.03) -> dict[str, Any]:
+def summarize_attack_results(
+    results: list[AttackResult],
+    success_rate_threshold: float = 0.05,
+    overall_success_rate_threshold: float | None = None,
+) -> dict[str, Any]:
     primary_metric_name = results[0].metric_name if results else "budget_recovered_fraction"
+    if overall_success_rate_threshold is None:
+        overall_success_rate_threshold = success_rate_threshold
     summary = _summarize_attack_subset(
         results,
         primary_metric_name=primary_metric_name,
         success_rate_threshold=success_rate_threshold,
+        overall_success_rate_threshold=overall_success_rate_threshold,
     )
     clients: dict[str, dict[str, Any]] = {}
     for client_id in sorted({str(result.client_id) for result in results if result.client_id is not None}):
@@ -610,6 +620,7 @@ def summarize_attack_results(results: list[AttackResult], success_rate_threshold
             client_subset,
             primary_metric_name=primary_metric_name,
             success_rate_threshold=success_rate_threshold,
+            overall_success_rate_threshold=overall_success_rate_threshold,
         )
     summary["clients"] = clients
     return summary
