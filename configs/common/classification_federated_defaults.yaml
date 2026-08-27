@@ -1,0 +1,16 @@
+runtime:
+  # Canonical classification configs still default to cpu here; production runs should usually override to cuda:*.
+  device: cpu
+  log_level: INFO
+
+attack:
+  target_type: update_payload
+  enabled: false
+  steps: 20
+  async_enabled: false
+  device: same
+
+data:
+  batch_size: 64
+  shuffle_train: true
+  num_workers: 0

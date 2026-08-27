@@ -14,7 +14,7 @@ attack:
   sample_count: auto
   # auto means recover up to the attacked client's training-set size, capped below.
   max_samples: auto
-  max_samples_cap: 8
+  max_samples_cap: 128
   steps: 300
   lr: 0.001
   # Attack optimizer currently only supports adam.

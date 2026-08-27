@@ -128,6 +128,34 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["artifacts"]["config_formats"] == ["yaml"]
 
 
+
+
+def test_config_tree_has_no_duplicate_yaml_keys_or_notebook_checkpoints():
+    import yaml
+
+    class _DupLoader(yaml.SafeLoader):
+        pass
+
+    def _construct_mapping(loader, node, deep=False):
+        mapping = {}
+        duplicates = []
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in mapping:
+                duplicates.append(key)
+            value = loader.construct_object(value_node, deep=deep)
+            mapping[key] = value
+        if duplicates:
+            raise ValueError(f"duplicate keys {duplicates} at line {node.start_mark.line + 1}")
+        return mapping
+
+    _DupLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping)
+
+    config_root = Path(__file__).parents[2] / "configs"
+    assert not any(path.name == ".ipynb_checkpoints" for path in config_root.rglob("*"))
+    for path in sorted(config_root.rglob("*.yaml")):
+        yaml.load(path.read_text(encoding="utf-8"), Loader=_DupLoader)
+
 def test_load_config_uses_registered_method_config_metadata(monkeypatch):
     from fedlab.federated.methods import registry as method_registry
 
