@@ -9,7 +9,7 @@ import torch
 
 from fedlab.federated.methods.base import FederatedMethod, MethodCapabilities, MethodConfigSpec
 from fedlab.federated.methods.registry import federated_method
-from fedlab.federated.protocol import resolve_download_mode, weighted_protocol_base_state
+from fedlab.federated.protocol import weighted_protocol_base_state
 from fedlab.modeling import build_model
 from fedlab.modeling.ega import decode_attack_view_from_mean_difference, decode_mean_encoded_payload, encode_state_update, export_ega_codec_payload, load_ega_codec, load_ega_codec_payload
 from fedlab.utils.serialization import add_update, average_states, dequantize_state_update, quantize_state_update, serialize_trainable_model, serialize_untrainable_model, state_num_bytes, state_num_parameters, subtract_state
@@ -91,7 +91,6 @@ def _prepare_received_global_state(
     trainable_keys: tuple[str, ...],
     round_index: int,
     client_id: str,
-    download_mode: str = "model",
     base_state=None,
 ):
     """Return the transmitted download payload and the client-visible received global state."""
@@ -105,16 +104,14 @@ def _prepare_received_global_state(
     payload_source = global_state
     if trainable_only:
         payload_source = type(global_state)((name, global_state[name]) for name in trainable_keys)
-    if download_mode == "update":
-        reference_base_state = base_state if base_state is not None else global_state
-    elif predictive_coding:
+    if predictive_coding:
         reference_base_state = base_state if base_state is not None else _zero_state_like(global_state)
     else:
         reference_base_state = global_state
     base_payload_source = reference_base_state
     if trainable_only:
         base_payload_source = type(reference_base_state)((name, reference_base_state[name]) for name in payload_source.keys())
-    use_delta_semantics = download_mode == "update" or predictive_coding
+    use_delta_semantics = predictive_coding
     semantic_source = subtract_state(payload_source, base_payload_source) if use_delta_semantics else payload_source
     download_method = str(ega_cfg.get("download_method", "dense")).lower()
     generator = _quantization_generator(config, round_index, client_id)
@@ -228,7 +225,6 @@ class EGAFedAvgMethod(FederatedMethod):
 
         _ensure_client_ega_codec(client=client, round_context=round_context)
         client.ega_codec_ready = True
-        download_mode = resolve_download_mode(client.config)
         download_base_state = client.cached_received_global_state
         return _prepare_received_global_state(
             config=client.config,
@@ -237,7 +233,6 @@ class EGAFedAvgMethod(FederatedMethod):
             trainable_keys=client.ega_trainable_keys,
             round_index=round_index,
             client_id=client.client_id,
-            download_mode=download_mode,
             base_state=download_base_state,
         )
 
@@ -262,7 +257,6 @@ class EGAFedAvgMethod(FederatedMethod):
             trainable_keys=server.ega_trainable_keys,
             round_index=round_index,
             client_id=client_id,
-            download_mode=resolve_download_mode(server.config),
             base_state=None,
         )[1]
 

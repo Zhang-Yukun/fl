@@ -283,7 +283,6 @@ class FederatedServer:
                     round_index=round_index,
                     round_context=round_context,
                 ),
-                result.upload_mode,
             )
             for result in results
         ]

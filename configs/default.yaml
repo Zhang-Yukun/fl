@@ -41,9 +41,6 @@ federated:
   rounds: 20
   local_epochs: 1
 
-transport:
-  upload_mode: update
-  download_mode: model
 
 attack:
   target_type: update_payload

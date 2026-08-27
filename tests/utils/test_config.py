@@ -15,6 +15,28 @@ def test_nested_yaml_and_override():
 
 
 
+
+def test_nested_includes_deep_merge_dict_values(tmp_path):
+    base_a = tmp_path / "a.yaml"
+    base_b = tmp_path / "b.yaml"
+    main = tmp_path / "main.yaml"
+
+    base_a.write_text("""A:
+  a: 1
+""", encoding='utf-8')
+    base_b.write_text("""A:
+  b: 2
+""", encoding='utf-8')
+    main.write_text("""includes:
+  - a.yaml
+  - b.yaml
+""", encoding='utf-8')
+
+    config = load_config(main)
+
+    assert config["A"] == {"a": 1, "b": 2}
+
+
 def test_default_centralized_rounds_are_mode_specific():
     config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["centralized.rounds=3", "tracking.enabled=false"])
     assert config["centralized"]["rounds"] == 3
@@ -75,9 +97,7 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     )
     assert config["evaluation"]["mode"] == "protocol"
     assert config["evaluation"]["metrics"] == ["mse", "mae", "mape"]
-    assert config["transport"]["upload_mode"] == "update"
     assert config["training"]["optimizer"] == "sgd"
-    assert config["transport"]["download_mode"] == "model"
     assert config["attack"]["model_mode"] == "train"
     assert config["attack"]["reference_metric"] == "nearest_client_train_mse"
     assert config["attack"]["report_metrics"] == ["nearest_client_train_mse"]

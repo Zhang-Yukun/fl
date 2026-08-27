@@ -130,10 +130,7 @@ Currently integrated and retained federated method names are `fedavg`, `adaptive
 
 #### `transport`
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `upload_mode` | string | Client upload semantic, usually `update`, also supports `model`. |
-| `download_mode` | string | Server download semantic, usually `model`, also supports `update`. |
+Result artifacts no longer store `upload_mode` or `download_mode`, because the protocol is fixed to upload `update` and download `model`.
 
 #### `attack`
 

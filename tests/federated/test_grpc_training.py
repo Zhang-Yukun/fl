@@ -170,7 +170,6 @@ def _classification_grpc_config(tmp_path: Path, *, algorithm: str) -> dict[str, 
         'training': {'lr': 0.001, 'optimizer': 'adam', 'loss': 'cross_entropy', 'patience': 1, 'min_delta': 0.0},
         'centralized': {'rounds': 1},
         'federated': {'algorithm': algorithm, 'rounds': 1, 'local_epochs': 1},
-        'transport': {'upload_mode': 'update', 'download_mode': 'model'},
         'attack': {'enabled': False, 'frequency_rounds': 1, 'sample_count': 1, 'max_samples': 1, 'async_enabled': False, 'device': 'cpu'},
         'tracking': {'enabled': False},
         'evaluation': {'metrics': ['accuracy']},
@@ -217,22 +216,6 @@ def test_apply_transport_metrics_tracks_overhead_bytes():
     assert updated.transport_download_overhead_bytes == 40
     assert updated.transport_upload_bytes >= updated.parameter_upload_bytes
     assert updated.transport_upload_overhead_bytes >= 0
-
-
-def test_grpc_transport_rejects_download_update_mode(tmp_path):
-    config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            f"experiment.output_dir={tmp_path}",
-            "federated.algorithm=fedavg",
-            "transport.download_mode=update",
-            "tracking.enabled=false",
-            "runtime.device=cpu",
-        ],
-    )
-
-    with pytest.raises(ValueError, match="gRPC transport does not yet support transport.download_mode=update"):
-        GrpcFederatedCoordinator(config)
 
 
 def test_grpc_coordinator_saves_config_on_startup(tmp_path):

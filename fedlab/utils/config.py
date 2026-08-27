@@ -42,10 +42,6 @@ _RUNTIME_DEFAULTS = {
         "rounds": 20,
         "local_epochs": 1,
     },
-    "transport": {
-        "upload_mode": "update",
-        "download_mode": "model",
-    },
     "attack": {
         "enabled": True,
         "target_type": "update_payload",
@@ -192,6 +188,22 @@ def _validate_no_deprecated_schedule_keys(config: dict[str, Any]) -> None:
         raise ValueError("Deprecated config key training.epochs is no longer supported")
 
 
+def _sanitize_transport_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop legacy transport-mode keys now that protocol semantics are fixed."""
+
+    result = copy.deepcopy(config)
+    transport_cfg = result.get("transport")
+    if not isinstance(transport_cfg, dict):
+        return result
+    transport_cfg.pop("upload_mode", None)
+    transport_cfg.pop("download_mode", None)
+    if not transport_cfg:
+        result.pop("transport", None)
+    else:
+        result["transport"] = transport_cfg
+    return result
+
+
 def _sanitize_algorithm_config(config: dict[str, Any]) -> dict[str, Any]:
     """Drop method-specific config blocks that do not apply to the active plugin."""
 
@@ -233,6 +245,7 @@ def load_config(path: str | Path, overrides: Iterable[str] | None = None) -> dic
     config = apply_overrides(config, overrides)
     config = _materialize_runtime_defaults(config)
     _validate_no_deprecated_schedule_keys(config)
+    config = _sanitize_transport_config(config)
     config = _sanitize_algorithm_config(config)
     logger.info("Loaded config from {}", path)
     return config

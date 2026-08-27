@@ -14,7 +14,6 @@ import fedlab.federated.methods.encoded as encoded_methods
 from fedlab.datasets.rare_earth import build_federated_loaders
 from fedlab.engine.training import train_n_steps
 from fedlab.federated.client import FederatedClient, ClientResult
-from fedlab.federated.methods import build_method
 from fedlab.federated.protocol import validate_transport_modes
 from fedlab.federated.methods.encoded import EGAFedAvgMethod
 from fedlab.modeling.forecasting import build_model
@@ -42,7 +41,7 @@ def test_one_round_federated_run(tmp_path):
     result = run_federated(config)
     assert result["rounds"] == 1
     assert result["last_parameter_download_compression_ratio"] == 1.0
-    assert result["last_parameter_upload_compression_ratio"] >= 6.0
+    assert result["last_parameter_upload_compression_ratio"] == 1.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     assert metrics[0]["total_upload_bytes"] > 0
     assert metrics[0]["total_download_bytes"] > 0
@@ -157,40 +156,6 @@ def test_fedavg_dense_update_bytes_remain_exact_after_first_round(tmp_path):
             assert client["parameter_upload_bytes"] == client["dense_upload_reference_bytes"]
 
 
-def test_fedavg_upload_model_mode_preserves_dense_aggregation_metrics(tmp_path):
-    base_overrides = [
-        "federated.algorithm=fedavg",
-        "federated.rounds=2",
-        "attack.enabled=false",
-        "tracking.enabled=false",
-        "runtime.device=cpu",
-        "runtime.seed=2026",
-        "data.shuffle_train=false",
-        "model.dropout=0.0",
-    ]
-    update_dir = tmp_path / "update_mode"
-    model_dir = tmp_path / "model_mode"
-    update_config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [*base_overrides, f"experiment.output_dir={update_dir}", "transport.upload_mode=update"],
-    )
-    model_config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [*base_overrides, f"experiment.output_dir={model_dir}", "transport.upload_mode=model"],
-    )
-
-    update_result = run_federated(update_config)
-    model_result = run_federated(model_config)
-
-    update_metrics = json.loads((update_dir / "metrics.json").read_text(encoding="utf-8"))
-    model_metrics = json.loads((model_dir / "metrics.json").read_text(encoding="utf-8"))
-
-    assert update_result["test"] == model_result["test"]
-    assert update_result["best_val_mse"] == model_result["best_val_mse"]
-    assert [round_["val_mse"] for round_ in update_metrics] == [round_["val_mse"] for round_ in model_metrics]
-    assert all(client["aggregation_payload_kind"] == "dense_model" for round_ in model_metrics for client in round_["clients"])
-
-
 class _TransportToyModel(torch.nn.Module):
     """Small deterministic model with parameters and floating buffers for transport tests."""
 
@@ -241,7 +206,7 @@ def _assert_full_state_equal(left, right):
 
 
 
-def _transport_test_config(tmp_path, upload_mode: str, download_mode: str) -> dict:
+def _transport_test_config(tmp_path) -> dict:
     return load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
@@ -258,8 +223,6 @@ def _transport_test_config(tmp_path, upload_mode: str, download_mode: str) -> di
             "training.optimizer=sgd",
             "training.lr=0.1",
             "training.patience=999",
-            f"transport.upload_mode={upload_mode}",
-            f"transport.download_mode={download_mode}",
         ],
     )
 
@@ -333,30 +296,19 @@ def _run_manual_transport_rounds(config: dict, monkeypatch):
     return rounds
 
 
-@pytest.mark.parametrize(
-    ("upload_mode", "download_mode"),
-    [
-        ("update", "model"),
-        ("model", "model"),
-        ("update", "update"),
-        ("model", "update"),
-    ],
-)
-def test_single_node_transport_modes_follow_expected_dense_payload_semantics(tmp_path, monkeypatch, upload_mode, download_mode):
-    config = _transport_test_config(tmp_path / f"{upload_mode}_{download_mode}", upload_mode, download_mode)
+def test_single_node_transport_payloads_follow_fixed_dense_update_model_semantics(tmp_path, monkeypatch):
+    config = _transport_test_config(tmp_path / "fixed_transport")
 
     rounds = _run_manual_transport_rounds(config, monkeypatch)
 
-    expected_download_values = [0.0, 1.0, 1.0] if download_mode == "update" else [0.0, 1.0, 2.0]
-    expected_upload_values = [1.0, 1.0, 1.0] if upload_mode == "update" else [1.0, 2.0, 3.0]
-    expected_payload_kind = "dense_update" if upload_mode == "update" else "dense_model"
+    expected_download_values = [0.0, 1.0, 2.0]
+    expected_upload_values = [1.0, 1.0, 1.0]
 
     for round_result, expected_download, expected_upload in zip(rounds, expected_download_values, expected_upload_values):
         for _, download_state in round_result["download_states"]:
             _assert_state_float_value(download_state, expected_download)
         for result in round_result["results"]:
-            assert result.upload_mode == upload_mode
-            assert result.aggregation_payload_kind == expected_payload_kind
+            assert result.aggregation_payload_kind == "dense_update"
             assert result.parameter_download_bytes == result.download_bytes
             assert result.parameter_upload_bytes == result.upload_bytes
             assert result.transport_download_bytes >= result.download_bytes
@@ -375,7 +327,6 @@ def test_single_node_transport_modes_follow_expected_dense_payload_semantics(tmp
     assert "linear.weight" in final_state
     assert "norm.weight" in final_state
     _assert_state_float_value(final_state, 3.0)
-
 
 
 def _assert_selected_values(state, expected: dict[str, torch.Tensor]) -> None:
@@ -451,12 +402,11 @@ def _run_manual_sparse_rounds(config: dict, monkeypatch):
     return rounds
 
 
-@pytest.mark.parametrize("download_mode", ["model", "update"])
-def test_sparse_fedavg_transport_semantics_match_expected_payloads(tmp_path, monkeypatch, download_mode):
+def test_sparse_fedavg_transport_semantics_match_expected_payloads(tmp_path, monkeypatch):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            f"experiment.output_dir={tmp_path / download_mode}",
+            f"experiment.output_dir={tmp_path / 'fixed'}",
             "federated.algorithm=sparse_fedavg",
             "federated.rounds=3",
             "federated.local_epochs=1",
@@ -468,14 +418,12 @@ def test_sparse_fedavg_transport_semantics_match_expected_payloads(tmp_path, mon
             "data.shuffle_train=false",
             "training.optimizer=sgd",
             "training.lr=0.1",
-            "transport.upload_mode=update",
-            f"transport.download_mode={download_mode}",
         ],
     )
 
     rounds = _run_manual_sparse_rounds(config, monkeypatch)
-    expected_download_bn_weight = [torch.tensor([0.0, 0.0]), torch.tensor([1.0, 2.0]), torch.tensor([1.0, 2.0]) if download_mode == "update" else torch.tensor([2.0, 4.0])]
-    expected_download_buffer = [torch.tensor([0.0, 0.0]), torch.tensor([1.0, 1.0]), torch.tensor([1.0, 1.0]) if download_mode == "update" else torch.tensor([2.0, 2.0])]
+    expected_download_bn_weight = [torch.tensor([0.0, 0.0]), torch.tensor([1.0, 2.0]), torch.tensor([2.0, 4.0])]
+    expected_download_buffer = [torch.tensor([0.0, 0.0]), torch.tensor([1.0, 1.0]), torch.tensor([2.0, 2.0])]
 
     for round_result, expected_bn, expected_buffer in zip(rounds, expected_download_bn_weight, expected_download_buffer):
         for _, download_state in round_result["download_states"]:
@@ -489,7 +437,6 @@ def test_sparse_fedavg_transport_semantics_match_expected_payloads(tmp_path, mon
             )
         for result in round_result["results"]:
             dense_sparse = decompress_topk(result.sparse_update)
-            assert result.upload_mode == "update"
             assert result.aggregation_payload_kind == "sparse_update"
             assert result.parameter_upload_bytes < result.dense_bytes
             assert torch.allclose(dense_sparse["bn.weight"], torch.tensor([1.0, 2.0]))
@@ -585,12 +532,11 @@ def _run_manual_quantized_rounds(config: dict, monkeypatch):
     return rounds
 
 
-@pytest.mark.parametrize("download_mode", ["model", "update"])
-def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp_path, monkeypatch, download_mode):
+def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp_path, monkeypatch):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            f"experiment.output_dir={tmp_path / download_mode}",
+            f"experiment.output_dir={tmp_path / 'fixed_quantized'}",
             "federated.algorithm=secure_quantized_fedavg",
             "federated.rounds=3",
             "federated.local_epochs=1",
@@ -604,13 +550,11 @@ def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp
             "data.shuffle_train=false",
             "training.optimizer=sgd",
             "training.lr=0.1",
-            "transport.upload_mode=update",
-            f"transport.download_mode={download_mode}",
         ],
     )
 
     rounds = _run_manual_quantized_rounds(config, monkeypatch)
-    expected_download_value = [0.0, 1.0, 1.0] if download_mode == "update" else [0.0, 1.0, 2.0]
+    expected_download_value = [0.0, 1.0, 2.0]
 
     for round_result, expected_value in zip(rounds, expected_download_value):
         for _, download_state in round_result["download_states"]:
@@ -624,7 +568,6 @@ def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp
                 },
             )
         for result in round_result["results"]:
-            assert result.upload_mode == "update"
             assert result.aggregation_payload_kind == "quantized_update"
             assert result.parameter_upload_bytes < result.dense_bytes
             assert result.parameter_download_bytes < result.dense_download_reference_bytes
@@ -650,31 +593,6 @@ def test_secure_quantized_fedavg_transport_semantics_match_expected_payloads(tmp
         assert round_result["aggregation_weights"] == [0.5, 0.5]
 
 
-def test_validate_transport_modes_rejects_only_remaining_unsupported_combinations(tmp_path):
-    sparse_model_upload = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            f"experiment.output_dir={tmp_path / 'sparse_invalid'}",
-            "federated.algorithm=sparse_fedavg",
-            "transport.upload_mode=model",
-        ],
-    )
-    grpc_update_download = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            f"experiment.output_dir={tmp_path / 'grpc_invalid'}",
-            "federated.algorithm=secure_quantized_fedavg",
-            "transport.download_mode=update",
-        ],
-    )
-
-    with pytest.raises(ValueError, match="does not support transport.upload_mode=model"):
-        validate_transport_modes(sparse_model_upload)
-    with pytest.raises(ValueError, match="gRPC transport does not yet support transport.download_mode=update"):
-        validate_transport_modes(grpc_update_download, transport_backend="grpc")
-
-
-
 def test_saved_config_contains_materialized_runtime_defaults(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
@@ -688,8 +606,6 @@ def test_saved_config_contains_materialized_runtime_defaults(tmp_path):
     run_federated(config)
     saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
     assert saved["evaluation"]["mode"] == "protocol"
-    assert saved["transport"]["upload_mode"] == "update"
-    assert saved["transport"]["download_mode"] == "model"
     assert saved["attack"]["model_mode"] == "train"
     assert saved["attack"]["reference_metric"] == "nearest_client_train_mse"
     assert saved["attack"]["report_metrics"] == ["nearest_client_train_mse"]
@@ -842,14 +758,21 @@ def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
         train_reference_inputs=lambda: torch.zeros(1, 2, 1),
     )
 
-    task = algorithms_module._build_attack_round_task(
+    records = algorithms_module._capture_round_update_records(
         config,
         [client],
         [result],
         round_index=0,
-        max_rounds=1,
         round_base_state=serialize_model(torch.nn.Linear(2, 1, bias=False)),
-        attack_target_type="update_payload",
+        server=None,
+        round_context={},
+        max_rounds=1,
+    )
+    task = algorithms_module.build_update_attack_round_task(
+        config,
+        records,
+        round_index=0,
+        max_rounds=1,
     )
 
     assert task is not None
@@ -859,31 +782,28 @@ def test_attack_task_uses_protocol_payload_not_oracle_evaluation_update():
     assert not torch.equal(target["weight"], oracle_update["weight"])
 
 
-def test_model_upload_attack_payload_is_derived_from_uploaded_model():
+def test_dense_attack_payload_uses_uploaded_update_directly():
     config = {"federated": {"algorithm": "fedavg"}}
-    round_base_state = OrderedDict([("weight", torch.tensor([[0.5, -1.0]]))])
-    uploaded_model_state = OrderedDict([("weight", torch.tensor([[1.5, 2.0]]))])
+    uploaded_update = OrderedDict([("weight", torch.tensor([[1.0, 3.0]]))])
     result = ClientResult(
         client_id="Nd2O3",
         num_samples=1,
         loss=0.0,
-        aggregation_state=uploaded_model_state,
-        aggregation_payload_kind="dense_model",
-        upload_mode="model",
+        aggregation_state=uploaded_update,
+        aggregation_payload_kind="dense_update",
     )
-    server = SimpleNamespace(method=build_method("fedavg"))
 
     payload = algorithms_module._extract_attack_payload(
         config,
         result,
         [result],
-        server=server,
-        round_base_state=round_base_state,
+        server=None,
+        round_base_state=None,
         round_index=0,
         round_context={},
     )
 
-    assert torch.equal(payload["weight"], torch.tensor([[1.0, 3.0]]))
+    assert torch.equal(payload["weight"], uploaded_update["weight"])
 
 
 def test_attack_payload_merges_sparse_and_dense_buffer_updates():
@@ -907,7 +827,7 @@ def test_attack_payload_merges_sparse_and_dense_buffer_updates():
 
 
 def test_sparse_aggregation_merges_dense_buffer_updates(tmp_path):
-    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml")
+    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["federated.algorithm=randomk_fedavg"])
     config["experiment"]["output_dir"] = str(tmp_path)
     _, val_loader, test_loader = build_federated_loaders(config)
     server = server_module.FederatedServer(config, val_loader, test_loader, torch.device("cpu"))
@@ -1006,7 +926,7 @@ def test_secure_quantized_fedavg_uses_quantized_dense_updates(tmp_path):
     assert all(client["aggregation_payload_kind"] == "quantized_update" for client in clients)
     assert all(client["compressor"] == "float16_quantized_dense" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
-    assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
+    assert all(client["parameter_download_bytes"] > 0 for client in clients)
     assert all(client["parameter_upload_bytes"] == client["upload_bytes"] for client in clients)
     assert all(client["parameter_download_bytes"] == client["download_bytes"] for client in clients)
 
@@ -1077,7 +997,7 @@ def test_ega_fedavg_uses_encoded_gradient_aggregation(tmp_path):
     assert result["best_val_mse"] == result["best_val_mse"]
     assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
-    assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
+    assert all(client["parameter_download_bytes"] > 0 for client in clients)
 
 
 def test_ega_fedavg_supports_predictive_model_downloads(tmp_path):
@@ -1087,8 +1007,6 @@ def test_ega_fedavg_supports_predictive_model_downloads(tmp_path):
             "federated.algorithm=ega_fedavg",
             "federated.rounds=1",
             "federated.quantization_seed=2026",
-            "transport.upload_mode=update",
-            "transport.download_mode=model",
             "evaluation.mode=protocol",
             "attack.enabled=false",
         ],
@@ -1127,7 +1045,7 @@ def test_ega_fedavg_supports_predictive_model_downloads(tmp_path):
     clients = metrics[0]["clients"]
 
     assert result["best_val_mse"] == result["best_val_mse"]
-    assert all(client["download_bytes"] <= client["dense_download_reference_bytes"] for client in clients)
+    assert all(client["parameter_download_bytes"] > 0 for client in clients)
     assert all(client["aggregation_payload_kind"] == "ega_encoded_update" for client in clients)
 
 
@@ -1163,7 +1081,7 @@ def test_ega_protocol_aggregation_uses_client_visible_base(monkeypatch):
     assert torch.allclose(server.global_state["weight"], torch.tensor([7.5]))
 
 
-def test_ega_update_download_uses_delta_normalization_and_quantization(monkeypatch):
+def test_ega_model_download_uses_full_state_normalization_and_quantization(monkeypatch):
     captured = {}
 
     def _fake_encode(update, codec, **kwargs):
@@ -1197,13 +1115,12 @@ def test_ega_update_download_uses_delta_normalization_and_quantization(monkeypat
         trainable_keys=("weight",),
         round_index=0,
         client_id="c1",
-        download_mode="update",
         base_state=base_state,
     )
 
     assert "__ega_blocks__" in download_state
     assert captured["quantization_level"] == 17
-    assert captured["normalization"] == pytest.approx(1.0)
+    assert captured["normalization"] == pytest.approx(101.0)
     assert torch.allclose(received_state["weight"], torch.tensor([101.0]))
     assert torch.allclose(received_state["running_mean"], torch.tensor([3.0]))
 
@@ -1243,7 +1160,6 @@ def test_ega_model_download_predictive_coding_uses_previous_received_state(monke
         trainable_keys=("weight",),
         round_index=0,
         client_id="c1",
-        download_mode="model",
         base_state=base_state,
     )
 
@@ -1297,7 +1213,7 @@ def test_secure_quantized_fedavg_supports_absmax_int8(tmp_path):
     assert result["last_parameter_total_communication_ratio"] > 3.0
     assert all(client["compressor"] == "int8_quantized_dense" for client in clients)
     assert all(client["upload_bytes"] < client["dense_upload_reference_bytes"] for client in clients)
-    assert all(client["download_bytes"] < client["dense_download_reference_bytes"] for client in clients)
+    assert all(client["parameter_download_bytes"] > 0 for client in clients)
     assert all(client["parameter_upload_bytes"] == client["upload_bytes"] for client in clients)
     assert all(client["parameter_download_bytes"] == client["download_bytes"] for client in clients)
 
@@ -1754,7 +1670,10 @@ def test_log_prediction_views_adds_client_specific_keys(monkeypatch):
 
 class _DummyLoader:
     def __init__(self, size: int = 1):
-        self.dataset = [0] * size
+        self.dataset = [(torch.zeros(1, 1), torch.zeros(1, 1)) for _ in range(size)]
+
+    def __iter__(self):
+        return iter(self.dataset)
 
 
 
@@ -1994,14 +1913,12 @@ def test_centralized_run_with_sgd_optimizer(tmp_path):
         "ega_fedavg",
     ],
 )
-def test_validate_transport_modes_accepts_update_update_for_all_local_algorithms(tmp_path, algorithm):
+def test_validate_transport_modes_accepts_fixed_semantics_for_all_local_algorithms(tmp_path, algorithm):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
             f"experiment.output_dir={tmp_path / algorithm}",
             f"federated.algorithm={algorithm}",
-            "transport.upload_mode=update",
-            "transport.download_mode=update",
         ],
     )
 
@@ -2126,8 +2043,6 @@ def test_ega_server_bootstraps_codec_once_via_round_context(tmp_path, monkeypatc
             "data.shuffle_train=false",
             "training.optimizer=sgd",
             "training.lr=0.1",
-            "transport.upload_mode=update",
-            "transport.download_mode=model",
             "ega.block_size=19",
             "ega.encoded_dim=19",
             "ega.hidden_dim=19",
@@ -2150,12 +2065,11 @@ def test_ega_server_bootstraps_codec_once_via_round_context(tmp_path, monkeypatc
     assert all("ega_codec_payload" not in round_result["round_context"] for round_result in rounds[1:])
 
 
-@pytest.mark.parametrize("download_mode", ["model", "update"])
-def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path, monkeypatch, download_mode):
+def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path, monkeypatch):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            f"experiment.output_dir={tmp_path / download_mode}",
+            f"experiment.output_dir={tmp_path / 'ega_fixed'}",
             "federated.algorithm=ega_fedavg",
             "federated.rounds=3",
             "federated.local_epochs=1",
@@ -2166,8 +2080,6 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
             "data.shuffle_train=false",
             "training.optimizer=sgd",
             "training.lr=0.1",
-            "transport.upload_mode=update",
-            f"transport.download_mode={download_mode}",
             "ega.block_size=19",
             "ega.encoded_dim=19",
             "ega.hidden_dim=19",
@@ -2196,7 +2108,6 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
                 },
             )
         for result in round_result["results"]:
-            assert result.upload_mode == "update"
             assert result.aggregation_payload_kind == "ega_encoded_update"
             assert result.ega_payload is not None
             assert result.parameter_upload_bytes > 0
@@ -2213,7 +2124,7 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
 
 
 def test_single_node_transport_envelope_bytes_exceed_parameter_payload_for_dense_rounds(tmp_path, monkeypatch):
-    config = _transport_test_config(tmp_path / "transport_dense", "update", "model")
+    config = _transport_test_config(tmp_path / "transport_dense")
     rounds = _run_manual_transport_rounds(config, monkeypatch)
 
     for round_result in rounds:
@@ -2239,8 +2150,6 @@ def test_single_node_ega_transport_counts_round_context_bytes(tmp_path, monkeypa
             "data.shuffle_train=false",
             "training.optimizer=sgd",
             "training.lr=0.1",
-            "transport.upload_mode=update",
-            "transport.download_mode=model",
             "ega.block_size=19",
             "ega.encoded_dim=19",
             "ega.hidden_dim=19",
@@ -2322,8 +2231,6 @@ def _single_node_update_update_config(tmp_path, algorithm: str, extra_overrides:
         "training.lr=0.1",
         "training.momentum=0.0",
         "training.weight_decay=0.0",
-        "transport.upload_mode=update",
-        "transport.download_mode=update",
     ]
     if extra_overrides:
         overrides.extend(extra_overrides)
@@ -2463,7 +2370,7 @@ def test_single_node_sync_update_update_simulation_matches_expected_state_progre
 
     rounds = _run_single_node_update_update_rounds(config, monkeypatch)
 
-    expected_download_payload_values = [0.0, 1.0, 1.0]
+    expected_download_payload_values = [0.0, 1.0, 2.0]
     expected_received_values = [0.0, 1.0, 2.0]
     expected_global_values = [1.0, 2.0, 3.0]
 
@@ -2614,6 +2521,7 @@ def test_single_node_sync_update_update_evaluation_states_match_for_exact_fedavg
 def test_single_node_sync_update_update_evaluation_states_split_protocol_from_oracle_for_sparse_compression(tmp_path, monkeypatch):
     config = _single_node_update_update_config(
         tmp_path,
+        "sparse_fedavg",
         [
             "federated.topk_fraction=0.5",
             "evaluation.mode=oracle_full_update",

@@ -110,7 +110,6 @@ def _classification_config(
         'training': {'lr': 0.001, 'optimizer': 'adam', 'loss': 'cross_entropy', 'patience': 1, 'min_delta': 0.0},
         'centralized': {'rounds': 1},
         'federated': {'algorithm': algorithm, 'rounds': 1, 'local_epochs': 1},
-        'transport': {'upload_mode': 'update', 'download_mode': 'model'},
         'attack': {'enabled': False, 'target_type': 'update_payload', 'frequency_rounds': 1, 'steps': 1, 'async_enabled': False, 'device': 'same'},
         'tracking': {'enabled': False},
         'evaluation': {'metrics': ['accuracy']},

@@ -10,7 +10,7 @@ import torch
 
 from fedlab.modeling.ega import EncodedStatePayload, encode_state_update
 from fedlab.federated.methods import build_method
-from fedlab.federated.protocol import build_download_payload_state, reconstruct_model_from_download_payload, resolve_download_mode
+from fedlab.federated.protocol import build_download_payload_state, reconstruct_model_from_download_payload
 from fedlab.modeling import build_model
 from fedlab.utils.serialization import (
     SparseUpdate,
@@ -70,7 +70,6 @@ class ClientResult:
     privacy_noise_multiplier: float = 0.0
     evaluation_state: StateDict | None = None
     evaluation_payload_kind: str = "none"
-    upload_mode: str = "update"
 
     @property
     def sent_bytes(self) -> int:
@@ -198,14 +197,13 @@ class FederatedClient:
             round_index=round_index,
             round_context=round_context or {},
         )
-        download_mode = resolve_download_mode(self.config)
         if self.method.uses_custom_download_transport():
             download_state = method_download_state
             received_global_state = target_received_global_state
         else:
             download_base_state = self.cached_received_global_state if self.cached_received_global_state is not None else global_state
-            download_state = build_download_payload_state(target_received_global_state, download_base_state, download_mode)
-            received_global_state = reconstruct_model_from_download_payload(download_state, download_base_state, download_mode)
+            download_state = build_download_payload_state(target_received_global_state, download_base_state)
+            received_global_state = reconstruct_model_from_download_payload(download_state, download_base_state)
         self.cached_received_global_state = received_global_state
         return PreparedClientState(download_state=download_state, received_global_state=received_global_state)
 

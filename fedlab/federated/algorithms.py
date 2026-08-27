@@ -703,7 +703,6 @@ def _capture_round_update_records(
                 "target_type": "update_payload",
                 "aggregation_payload_kind": getattr(result, "aggregation_payload_kind", "dense_update"),
                 "compressor": getattr(result, "compressor", "none"),
-                "upload_mode": getattr(result, "upload_mode", "update"),
                 "round_base_state": _clone_state(round_base_state),
                 "target_update": _clone_state(target_update),
                 "reference_inputs": None if reference_inputs is None else reference_inputs.detach().cpu().clone(),

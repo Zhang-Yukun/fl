@@ -404,9 +404,7 @@ federated_common_args() {
   printf -- '--override
 experiment.mode=federated
 --override
-transport.upload_mode=update
 --override
-transport.download_mode=model
 --override
 evaluation.mode=%s
 --override

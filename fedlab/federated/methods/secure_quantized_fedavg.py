@@ -5,7 +5,7 @@ from __future__ import annotations
 from fedlab.federated.methods._quantized_common import QuantizedDenseMethodBase
 from fedlab.federated.methods.base import MethodCapabilities, MethodConfigSpec
 from fedlab.federated.methods.registry import federated_method
-from fedlab.federated.protocol import build_download_payload_state, reconstruct_model_from_download_payload, resolve_download_mode, weighted_protocol_base_state
+from fedlab.federated.protocol import weighted_protocol_base_state
 from fedlab.utils.serialization import add_update, average_states, dequantize_state_update, privatize_state_update, quantize_state_update, state_num_bytes, state_num_parameters, subtract_state
 
 
@@ -24,13 +24,8 @@ class SecureQuantizedFedAvgMethod(QuantizedDenseMethodBase):
     def prepare_client_state(self, *, global_state, client, round_index: int, round_context: dict[str, object]):
         del round_index, round_context
         quantization_dtype = str(client.config.get('federated', {}).get('quantization_dtype', 'float16'))
-        download_mode = resolve_download_mode(client.config)
-        download_base_state = client.cached_received_global_state if client.cached_received_global_state is not None else global_state
-        target_received_state = dequantize_state_update(quantize_state_update(global_state, dtype=quantization_dtype))
-        semantic_payload = build_download_payload_state(target_received_state, download_base_state, download_mode)
-        download_state = quantize_state_update(semantic_payload, dtype=quantization_dtype)
-        reconstructed_payload = dequantize_state_update(download_state)
-        received_state = reconstruct_model_from_download_payload(reconstructed_payload, download_base_state, download_mode)
+        download_state = quantize_state_update(global_state, dtype=quantization_dtype)
+        received_state = dequantize_state_update(download_state)
         return download_state, received_state
 
     def reconstruct_received_global_state(self, *, server, global_state, client_id: str, round_index: int, round_context: dict[str, object]):

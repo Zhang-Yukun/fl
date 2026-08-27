@@ -39,8 +39,6 @@ run_case() {
     --override "federated.algorithm=ega_fedavg" \
     --override "federated.rounds=${ROUNDS}" \
     --override "federated.local_epochs=1" \
-    --override "transport.upload_mode=update" \
-    --override "transport.download_mode=model" \
     --override "training.optimizer=adam" \
     --override "training.lr=${TRAIN_LR}" \
     --override "training.loss=${LOSS_NAME}" \
