@@ -106,7 +106,7 @@
 
 异步攻击：当前轮只保存攻击任务快照，后台线程池执行攻击，训练结束前统一收尾。
 
-另外，服务器还会按攻击频率把截获到的更新保存到输出目录下的 `saved_updates/<client_id>/round_xxxx.pt`。`replay_saved_update_attacks.py` 会扫描这些保存结果并按当前攻击配置顺序重放 DLG / iDLG，产物格式与在线攻击保持一致。
+另外，服务器还会按攻击频率把截获到的更新保存到输出目录下的 `saved_updates/<client_id>/round_xxxx.pt`。`replay_saved_update_attacks.py` 会扫描这些保存结果并按当前攻击配置顺序重放全部已启用攻击，`replay_saved_update_dlg.py` 与 `replay_saved_update_idlg.py` 则分别只重放单一攻击，产物格式与在线攻击保持一致。
 
 ## 8. 一句话总结
 

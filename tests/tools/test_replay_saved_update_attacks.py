@@ -11,11 +11,24 @@ from fedlab.federated.algorithms import load_captured_update_records, run_federa
 from fedlab.utils.config import load_config
 
 
-SCRIPT_PATH = Path(__file__).parents[2] / "fedlab" / "tools" / "replay_saved_update_attacks.py"
-spec = importlib.util.spec_from_file_location("replay_saved_update_attacks", SCRIPT_PATH)
-module = importlib.util.module_from_spec(spec)
-assert spec.loader is not None
-spec.loader.exec_module(module)
+TOOLS_DIR = Path(__file__).parents[2] / "fedlab" / "tools"
+SCRIPT_PATH = TOOLS_DIR / "replay_saved_update_attacks.py"
+DLG_SCRIPT_PATH = TOOLS_DIR / "replay_saved_update_dlg.py"
+IDLG_SCRIPT_PATH = TOOLS_DIR / "replay_saved_update_idlg.py"
+COMMON_SCRIPT_PATH = TOOLS_DIR / "replay_saved_update_common.py"
+
+
+def _load_module(path: Path, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+module = _load_module(SCRIPT_PATH, "replay_saved_update_attacks")
+dlg_module = _load_module(DLG_SCRIPT_PATH, "replay_saved_update_dlg")
+idlg_module = _load_module(IDLG_SCRIPT_PATH, "replay_saved_update_idlg")
 
 
 def _deterministic_overrides(output_dir: Path, attack_enabled: bool) -> list[str]:
@@ -45,7 +58,20 @@ def _deterministic_overrides(output_dir: Path, attack_enabled: bool) -> list[str
     ]
 
 
-def test_replay_saved_update_attacks_matches_inline_results(tmp_path, monkeypatch):
+def _run_script(entry_module, script_name: str, source_dir: Path, replay_dir: Path) -> dict[str, object]:
+    argv = [script_name, str(source_dir), "--output-dir", str(replay_dir)]
+    stdout = io.StringIO()
+    old_argv = sys.argv
+    try:
+        sys.argv = argv
+        with redirect_stdout(stdout):
+            entry_module.main()
+    finally:
+        sys.argv = old_argv
+    return json.loads(stdout.getvalue())
+
+
+def test_replay_saved_update_attacks_matches_inline_results(tmp_path):
     base_config = Path(__file__).parents[2] / "configs" / "test.yaml"
     online_dir = tmp_path / "online"
     source_dir = tmp_path / "source"
@@ -62,15 +88,7 @@ def test_replay_saved_update_attacks_matches_inline_results(tmp_path, monkeypatc
     assert {record["client_id"] for record in captures} == {"Nd2O3", "CeO2", "La2O3"}
     assert (source_dir / "saved_updates" / "index.json").exists()
 
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["replay_saved_update_attacks", str(source_dir), "--output-dir", str(replay_dir)],
-    )
-    stdout = io.StringIO()
-    with redirect_stdout(stdout):
-        module.main()
-    payload = json.loads(stdout.getvalue())
+    payload = _run_script(module, "replay_saved_update_attacks", source_dir, replay_dir)
     assert payload["attack_count"] == 2
 
     online_results = json.loads((online_dir / "attack_results.json").read_text(encoding="utf-8"))
@@ -98,8 +116,34 @@ def test_replay_saved_update_attacks_matches_inline_results(tmp_path, monkeypatc
     assert sorted((replay_dir / "attack_artifacts").rglob("*.pt"))
 
 
-def test_replay_saved_update_attacks_script_exists():
-    assert SCRIPT_PATH.exists()
-    content = SCRIPT_PATH.read_text(encoding="utf-8")
-    assert "saved_updates" in content
-    assert "attack_summary.json" in content
+def test_dedicated_replay_scripts_filter_methods(tmp_path):
+    base_config = Path(__file__).parents[2] / "configs" / "test.yaml"
+    source_dir = tmp_path / "source"
+    dlg_dir = tmp_path / "dlg"
+    idlg_dir = tmp_path / "idlg"
+
+    source_config = load_config(base_config, _deterministic_overrides(source_dir, attack_enabled=False))
+    run_federated(source_config)
+
+    dlg_payload = _run_script(dlg_module, "replay_saved_update_dlg", source_dir, dlg_dir)
+    idlg_payload = _run_script(idlg_module, "replay_saved_update_idlg", source_dir, idlg_dir)
+
+    assert dlg_payload["attack_count"] == 1
+    assert idlg_payload["attack_count"] == 1
+
+    dlg_results = json.loads((dlg_dir / "attack_results.json").read_text(encoding="utf-8"))
+    idlg_results = json.loads((idlg_dir / "attack_results.json").read_text(encoding="utf-8"))
+
+    assert [record["name"] for record in dlg_results] == ["DLG"]
+    assert [record["name"] for record in idlg_results] == ["iDLG"]
+
+
+def test_replay_saved_update_scripts_exist():
+    for path in (SCRIPT_PATH, DLG_SCRIPT_PATH, IDLG_SCRIPT_PATH, COMMON_SCRIPT_PATH):
+        assert path.exists()
+
+    wrapper_content = SCRIPT_PATH.read_text(encoding="utf-8")
+    common_content = COMMON_SCRIPT_PATH.read_text(encoding="utf-8")
+    assert "run_replay_cli" in wrapper_content
+    assert "saved_updates" in common_content
+    assert "attack_summary.json" in common_content

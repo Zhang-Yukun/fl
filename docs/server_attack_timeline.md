@@ -198,4 +198,4 @@ flowchart TD
 
 ## 6. 独立回放脚本
 
-训练流程会按攻击频率把服务器截获的更新保存到 `saved_updates/`。独立脚本 `replay_saved_update_attacks.py` 会扫描这些保存结果，并按当前配置顺序重新执行 DLG / iDLG。只要种子、模型模式和攻击配置保持一致，回放结果应与在线攻击保持同口径。
+训练流程会按攻击频率把服务器截获的更新保存到 `saved_updates/`。`replay_saved_update_attacks.py` 会按当前配置顺序重放所有已启用攻击；`replay_saved_update_dlg.py` 与 `replay_saved_update_idlg.py` 则分别只执行单一攻击。只要种子、模型模式和攻击配置保持一致，回放结果应与在线攻击保持同口径。

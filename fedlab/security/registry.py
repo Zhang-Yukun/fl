@@ -128,14 +128,14 @@ def _ensure_builtin_attacks_registered() -> None:
     _BUILTIN_ATTACKS_LOADED = True
 
     def _dlg(*args, **kwargs):
-        from fedlab.security import attacks as attacks_module
+        from fedlab.security.dlg import dlg_attack
 
-        return attacks_module.dlg_attack(*args, **kwargs)
+        return dlg_attack(*args, **kwargs)
 
     def _idlg(*args, **kwargs):
-        from fedlab.security import attacks as attacks_module
+        from fedlab.security.idlg import idlg_attack
 
-        return attacks_module.idlg_attack(*args, **kwargs)
+        return idlg_attack(*args, **kwargs)
 
     register_attack('dlg', _dlg, 'deep_leakage_from_gradients')
     register_attack('idlg', _idlg, 'improved_deep_leakage_from_gradients')
