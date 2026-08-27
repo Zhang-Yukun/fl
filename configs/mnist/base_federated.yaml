@@ -1,5 +1,4 @@
 includes:
   - ../common/classification_base.yaml
   - ../common/federated.yaml
-  - ../common/classification_federated_defaults.yaml
   - ../common/data_mnist.yaml
