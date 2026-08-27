@@ -40,6 +40,7 @@ TASK_SET="${TASK_SET:-rare}"
 TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"
 TASK_CLIENT_IDS="${TASK_CLIENT_IDS:-rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3}"
 TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS:-rare}"
+TASK_IN_BASE_OUTPUT="${TASK_IN_BASE_OUTPUT:-false}"
 TOPK_FRACTION="${TOPK_FRACTION:-}"
 QSGD_LEVELS="${QSGD_LEVELS:-}"
 QSGD_SEED="${QSGD_SEED:-${SUITE_SEED}}"
@@ -266,6 +267,15 @@ task_client_ids() {
     exit 1
   }
   list_named_values "${clients_raw}"
+}
+
+task_output_dir() {
+  local task="$1"
+  if [[ "${TASK_IN_BASE_OUTPUT}" == "true" ]]; then
+    printf '%s\n' "${BASE_OUTPUT}"
+    return
+  fi
+  printf '%s/%s\n' "${BASE_OUTPUT}" "${task}"
 }
 
 task_uses_loss_override() {
@@ -574,7 +584,7 @@ run_single() {
   local config="$4"
   shift 4
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="${BASE_OUTPUT}/${task}/${run_name}"
+  local outdir="$(task_output_dir "${task}")/${run_name}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.entrypoints.train
     --config "${config}"
@@ -584,7 +594,7 @@ run_single() {
   )
   while IFS= read -r line; do
     cmd+=("${line}")
-  done < <(tracking_args "${task}-${tracking_name}")
+  done < <(tracking_args "${tracking_name}")
   while IFS= read -r line; do
     cmd+=("${line}")
   done < <(base_runtime_args)
@@ -606,7 +616,7 @@ run_grpc() {
   local port="$5"
   shift 5
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="${BASE_OUTPUT}/${task}/${run_name}"
+  local outdir="$(task_output_dir "${task}")/${run_name}"
   local address="127.0.0.1:${port}"
   local server_pid=""
   local client_pids=()
@@ -625,7 +635,7 @@ run_grpc() {
   )
   while IFS= read -r line; do
     server_cmd+=("${line}")
-  done < <(tracking_args "${task}-${tracking_name}")
+  done < <(tracking_args "${tracking_name}")
   while IFS= read -r line; do
     server_cmd+=("${line}")
   done < <(base_runtime_args)
@@ -700,7 +710,7 @@ run_centralized() {
   local config="$4"
   shift 4
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="${BASE_OUTPUT}/${task}/${run_name}"
+  local outdir="$(task_output_dir "${task}")/${run_name}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.entrypoints.train
     --config "${config}"
@@ -711,7 +721,7 @@ run_centralized() {
   )
   while IFS= read -r line; do
     cmd+=("${line}")
-  done < <(tracking_args "${task}-${tracking_name}")
+  done < <(tracking_args "${tracking_name}")
   while IFS= read -r line; do
     cmd+=("${line}")
   done < <(base_runtime_args)
