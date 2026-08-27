@@ -28,14 +28,12 @@ def _tiny_patchtst_config():
         },
         "attack": {
             "target_type": "update_payload",
-            "report_metrics": "auto",
             "steps": 1,
             "lr": 0.05,
             "optimizer": "adam",
             "restarts": 1,
             "input_clip": 5.0,
             "target_clip": 5.0,
-            "success_mse_threshold": 0.5,
             "success_rate_threshold": 0.03,
             "data_range": 1.0,
             "model_mode": "eval",
@@ -55,14 +53,12 @@ def _tiny_classification_config():
         "model": {"name": "small_cnn", "hidden_channels": 4, "dropout": 0.0},
         "attack": {
             "target_type": "update_payload",
-            "report_metrics": "auto",
             "steps": 2,
             "lr": 0.05,
             "optimizer": "adam",
             "restarts": 1,
             "input_clip": 5.0,
             "target_clip": 5.0,
-            "success_mse_threshold": 0.5,
             "success_rate_threshold": 0.03,
             "data_range": 1.0,
             "model_mode": "eval",
@@ -136,21 +132,22 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     assert idlg.target_type == "update_payload"
     assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
     assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
-    assert dlg.metric_name == "nearest_client_train_mse"
-    assert idlg.metric_name == "nearest_client_train_mse"
+    assert dlg.metric_name == "exact_target_mse"
+    assert idlg.metric_name == "exact_target_mse"
     assert dlg.nearest_client_train_mse is not None
-    assert idlg.exact_target_mse is None
+    assert idlg.exact_target_mse is not None
     assert dlg.reference_label == "nearest_client_train"
     assert torch.allclose(dlg.reference_x, x)
     assert torch.allclose(dlg.reference_y, y)
 
     dlg.client_id = "Nd2O3"
     idlg.client_id = "Nd2O3"
+    apply_set_recovery_metrics([dlg, idlg], reference_inputs=reference_inputs, reference_targets=torch.cat([y, y + 5.0], dim=0), config=config)
     summary = summarize_attack_results([dlg, idlg], success_rate_threshold=0.03)
     assert summary["target_type"] == "update_payload"
-    assert summary["primary_metric_name"] == "nearest_client_train_mse"
+    assert summary["primary_metric_name"] == "budget_recovered_fraction"
     assert summary["methods"]["DLG"]["target_type"] == "update_payload"
-    assert summary["overall_avg_nearest_client_train_mse"] is not None
+    assert summary["overall_avg_budget_recovered_fraction"] is not None
     assert summary["overall_avg_objective_mse"] is not None
     assert summary["clients"]["Nd2O3"]["methods"]["DLG"]["target_type"] == "update_payload"
 
@@ -474,7 +471,7 @@ def test_classification_update_payload_attacks_keep_reference_labels():
         reference_targets=reference_targets,
     )
 
-    assert dlg.metric_name == "nearest_client_train_mse"
+    assert dlg.metric_name == "exact_target_mse"
     assert dlg.reference_label == "nearest_client_train"
     assert dlg.reference_x.shape == x.shape
     assert dlg.nearest_client_train_indices is not None

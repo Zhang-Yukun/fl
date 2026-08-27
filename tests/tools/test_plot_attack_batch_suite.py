@@ -40,8 +40,8 @@ def _write_run(run_dir: Path, algorithm: str, count_per_attack: int = 3) -> None
                     "sample_index": index,
                     "artifact_path": rel.as_posix(),
                     "mse": float(index),
-                    "exact_target_mse": float(index),
-                    "primary_metric_name": "reconstruction_mse",
+                    "budget_recovered_fraction": float(index) / max(count_per_attack, 1),
+                    "primary_metric_name": "budget_recovered_fraction",
                 }
             )
     (run_dir / "attack_results.json").write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -60,7 +60,7 @@ class AttackResult:
     reference_count: int | None = None
     budget_recovered_fraction: float | None = None
     coverage_recovered_fraction: float | None = None
-    metric_name: str = "reconstruction_mse"
+    metric_name: str = "exact_target_mse"
     client_id: str | None = None
     round_index: int | None = None
     sample_index: int | None = None
@@ -91,32 +91,6 @@ def _normalize_target_type(target_type: str | None, config: dict[str, Any]) -> s
     if normalized != "update_payload":
         raise ValueError(f"Unsupported attack target type: {value}; only update_payload is supported")
     return normalized
-
-
-def _normalize_reference_metric(config: dict[str, Any], target_type: str) -> str:
-    del target_type
-    value = str(config.get("attack", {}).get("reference_metric", "auto")).lower()
-    if value == "auto":
-        return "nearest_client_train_mse"
-    if value not in {"reconstruction_mse", "nearest_client_train_mse"}:
-        raise ValueError(f"Unsupported attack reference metric: {value}")
-    return value
-
-
-def _normalize_report_metrics(config: dict[str, Any], target_type: str) -> set[str]:
-    del target_type
-    value = config.get("attack", {}).get("report_metrics", "auto")
-    if value == "auto" or value is None:
-        return {"nearest_client_train_mse"}
-    if isinstance(value, str):
-        items = [item.strip().lower() for item in value.split(",") if item.strip()]
-    else:
-        items = [str(item).strip().lower() for item in value if str(item).strip()]
-    allowed = {"exact_target_mse", "nearest_client_train_mse"}
-    unknown = [item for item in items if item not in allowed]
-    if unknown:
-        raise ValueError(f"Unsupported attack report_metrics entries: {unknown}")
-    return set(items)
 
 
 def _normalize_recovery_metric(value: Any, default: str = "mse") -> str:
@@ -194,15 +168,12 @@ def _attack_rng_context(device: torch.device):
     return torch.random.fork_rng(devices=[device_index])
 
 
-def _attack_threshold(config: dict[str, Any]) -> float:
-    return float(config.get("attack", {}).get("success_mse_threshold", 0.5))
+def _attack_threshold(_config: dict[str, Any]) -> float:
+    return 0.5
 
 
-def _attack_ssim_threshold(config: dict[str, Any]) -> float | None:
-    value = config.get("attack", {}).get("success_ssim_threshold")
-    if value is None:
-        return None
-    return float(value)
+def _attack_ssim_threshold(_config: dict[str, Any]) -> float | None:
+    return 0.3
 
 
 def _attack_data_range(config: dict[str, Any]) -> float:
@@ -282,8 +253,6 @@ def _evaluate_reconstruction(
     target_type: str,
     reference_inputs: torch.Tensor | None = None,
     reference_targets: torch.Tensor | None = None,
-    reference_metric: str = "reconstruction_mse",
-    report_metrics: set[str] | None = None,
 ) -> AttackResult:
     exact_target_value = torch.mean((reconstructed_x.detach().cpu() - real_x.detach().cpu()) ** 2).item()
     psnr = _compute_psnr(exact_target_value, data_range)
@@ -292,34 +261,25 @@ def _evaluate_reconstruction(
     nearest_client_train_indices = None
     if reference_inputs is not None:
         nearest_client_train_mse, nearest_client_train_indices = _nearest_reference_mse(reconstructed_x, reference_inputs)
-    metric_name = reference_metric
-    primary_mse = float(exact_target_value)
     reference_x = real_x.detach().cpu().clone()
     reference_y = real_y.detach().cpu().clone()
     reference_label = "exact_target"
-    if metric_name == "nearest_client_train_mse":
-        if nearest_client_train_mse is None:
-            metric_name = "reconstruction_mse"
-        else:
-            primary_mse = float(nearest_client_train_mse)
-            selected_reference_x, selected_reference_y, reference_label = _select_reference_targets(
-                reference_inputs,
-                reference_targets,
-                nearest_client_train_indices,
-            )
-            if selected_reference_x is not None:
-                reference_x = selected_reference_x
-            if selected_reference_y is not None:
-                reference_y = selected_reference_y
-    success = primary_mse <= threshold
-    if metric_name == "reconstruction_mse" and ssim_threshold is not None:
+    if nearest_client_train_mse is not None:
+        selected_reference_x, selected_reference_y, reference_label = _select_reference_targets(
+            reference_inputs,
+            reference_targets,
+            nearest_client_train_indices,
+        )
+        if selected_reference_x is not None:
+            reference_x = selected_reference_x
+        if selected_reference_y is not None:
+            reference_y = selected_reference_y
+    success = exact_target_value <= threshold
+    if ssim_threshold is not None:
         success = success or ssim >= ssim_threshold
-    report_metrics = set() if report_metrics is None else set(report_metrics)
-    expose_exact_target = metric_name == "reconstruction_mse" or "exact_target_mse" in report_metrics
-    expose_nearest = metric_name == "nearest_client_train_mse" or "nearest_client_train_mse" in report_metrics
     return AttackResult(
         name=name,
-        mse=primary_mse,
+        mse=float(exact_target_value),
         psnr=psnr,
         ssim=ssim,
         iterations=iterations,
@@ -328,10 +288,10 @@ def _evaluate_reconstruction(
         success_threshold=threshold,
         gradient_mse=float(objective_mse),
         target_type=target_type,
-        exact_target_mse=float(exact_target_value) if expose_exact_target else None,
-        nearest_client_train_mse=None if (nearest_client_train_mse is None or not expose_nearest) else float(nearest_client_train_mse),
+        exact_target_mse=float(exact_target_value),
+        nearest_client_train_mse=None if nearest_client_train_mse is None else float(nearest_client_train_mse),
         nearest_client_train_indices=nearest_client_train_indices,
-        metric_name=metric_name,
+        metric_name="exact_target_mse",
         real_x=real_x.detach().cpu().clone(),
         real_y=real_y.detach().cpu().clone(),
         reference_x=reference_x,
@@ -444,8 +404,6 @@ def run_attack_loop(
     reference_targets: torch.Tensor | None = None,
 ) -> AttackResult:
     resolved_target_type = _normalize_target_type(target_type, config)
-    resolved_reference_metric = _normalize_reference_metric(config, resolved_target_type)
-    report_metrics = _normalize_report_metrics(config, resolved_target_type)
     attack_cfg = config.get("attack", {})
     steps = int(attack_cfg.get("steps", 300))
     lr = float(attack_cfg.get("lr", 0.1))
@@ -538,8 +496,6 @@ def run_attack_loop(
         resolved_target_type,
         reference_inputs=reference_inputs,
         reference_targets=reference_targets,
-        reference_metric=resolved_reference_metric,
-        report_metrics=report_metrics,
     )
 
 
@@ -643,7 +599,7 @@ def _summarize_attack_subset(
 
 
 def summarize_attack_results(results: list[AttackResult], success_rate_threshold: float = 0.03) -> dict[str, Any]:
-    primary_metric_name = results[0].metric_name if results else "reconstruction_mse"
+    primary_metric_name = results[0].metric_name if results else "budget_recovered_fraction"
     summary = _summarize_attack_subset(
         results,
         primary_metric_name=primary_metric_name,

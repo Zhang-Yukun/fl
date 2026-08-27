@@ -26,7 +26,7 @@ This reference matches the current implementation and does not document removed 
 - `primary_metric_value`: the value of that main metric.
 - `objective_mse`: the optimization objective matching reconstructed gradients/updates to the intercepted target; it is not the same thing as input reconstruction MSE.
 - `nearest_client_train_mse`: MSE between the reconstruction and the nearest sample in the attacked client's full local training set.
-- `exact_target_mse`: MSE between the reconstruction and the exact attacked sample. For `update_payload`, this is opt-in and not emitted by default.
+- `exact_target_mse`: diagnostic MSE between the reconstruction and the exact attacked sample.
 
 ## 2. Configuration Fields
 
@@ -135,8 +135,6 @@ Result artifacts no longer store `upload_mode` or `download_mode`, because the p
 | --- | --- | --- |
 | `enabled` | bool | Enable or disable attacks. |
 | `target_type` | string | Attack target type. Currently only `update_payload` is supported. |
-| `reference_metric` | string | Legacy compatibility field controlling whether `reconstruction_mse` or `nearest_client_train_mse` style references are exposed. |
-| `report_metrics` | list[string] | Extra reference metrics to expose. Default `auto` only keeps `nearest_client_train_mse`. |
 | `steps` | int | Optimization steps per attack run. |
 | `lr` | float | Attack learning rate. |
 | `optimizer` | string | Attack optimizer. Currently only `adam` is supported. |
@@ -150,8 +148,6 @@ Result artifacts no longer store `upload_mode` or `download_mode`, because the p
 | `recovery_success_metric` | string | Metric used to decide whether one matched sample is recovered. Supports `mse`, `psnr`, and `ssim`. |
 | `recovery_success_objective` | string | Success objective direction: `auto`, `min`, or `max`. |
 | `recovery_success_threshold` | float, optional | Explicit recovery-success threshold. When omitted, the default for the selected success metric is used. |
-| `success_mse_threshold` | float | Default MSE threshold, also used when deriving recovery defaults. |
-| `success_ssim_threshold` | float, optional | Default SSIM threshold, also used when deriving recovery defaults. |
 | `success_rate_threshold` | float | Aggregate pass/fail threshold used in attack summaries. |
 | `data_range` | float | Data range used by PSNR and SSIM. |
 | `client_selection` | string | Attacked-client selection strategy: `all`, `first`, or `round_robin`. |
@@ -433,8 +429,6 @@ Each element is one DLG or iDLG result.
 | `overall_passes` | bool | Whether the aggregate success rate is at most the threshold. |
 | `overall_avg_budget_recovered_fraction` | float or null | Average budget recovery fraction across all attack results. |
 | `overall_avg_coverage_recovered_fraction` | float or null | Average coverage recovery fraction across all attack results. |
-| `overall_avg_nearest_client_train_mse` | float or null | Average nearest-client-train MSE across all attack results. |
-| `overall_avg_exact_target_mse` | float or null | Average exact-target MSE across all attack results. |
 | `overall_avg_objective_mse` | float or null | Average objective residual across all attack results. |
 | `methods` | object | Method-level attack summaries. |
 | `clients` | object | Client-level attack summaries. |
@@ -548,10 +542,6 @@ The prefix is `attack/<method>/`, for example `attack/DLG/` or `attack/iDLG/`:
 | `primary_metric_name` | Primary metric name for that method. |
 | `primary_metric_value` | Current-round average primary metric for that method. |
 | `cumulative_avg_primary_metric_value` | Running average primary metric for that method. |
-| `exact_target_mse` | Current-round average exact-target MSE. |
-| `cumulative_avg_exact_target_mse` | Running average exact-target MSE. |
-| `nearest_client_train_mse` | Current-round average nearest-train MSE. |
-| `cumulative_avg_nearest_client_train_mse` | Running average nearest-train MSE. |
 | `psnr` / `ssim` | Current-round average PSNR / SSIM. |
 | `iterations` | Attack optimization steps. |
 | `time_seconds` | Current-round average attack runtime. |
@@ -587,5 +577,4 @@ These plots are inverse-transformed back to the original data scale by default a
 Notes:
 
 - The reference curve in the figure follows the same semantics as the recorded primary attack metric.
-- When the primary metric is `nearest_client_train_mse`, the plotted reference is the nearest sample from the attacked client's training set, not the exact attacked batch.
-- When the primary metric is `reconstruction_mse`, the plotted reference is the exact attacked sample.
+- The plotted reference comes from the one-to-one recovery matching result; diagnostic fields still record `exact_target_mse` and `nearest_client_train_mse` separately.

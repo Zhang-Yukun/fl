@@ -45,8 +45,6 @@ federated:
 attack:
   target_type: update_payload
   enabled: true
-  reference_metric: nearest_client_train_mse
-  report_metrics: [nearest_client_train_mse]
   recovery_match_metric: mse
   recovery_match_objective: auto
   recovery_success_metric: mse
@@ -54,7 +52,6 @@ attack:
   steps: 20
   optimizer: adam
   lr: 0.001
-  success_mse_threshold: 0.5
   success_rate_threshold: 0.03
   data_range: 1.0
   client_selection: all

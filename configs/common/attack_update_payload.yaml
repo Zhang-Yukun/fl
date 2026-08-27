@@ -2,9 +2,6 @@ attack:
   # The current framework only supports update_payload.
   target_type: update_payload
   enabled: true
-  # Legacy reference view for extra reporting; current main summary metric is set-recovery based.
-  reference_metric: nearest_client_train_mse
-  report_metrics: [nearest_client_train_mse]
   # Set-recovery matching metric and direction.
   recovery_match_metric: mse
   recovery_match_objective: auto
@@ -27,8 +24,6 @@ attack:
   clients_per_round: 3
   input_clip: 5.0
   target_clip: 5.0
-  success_mse_threshold: 0.5
-  success_ssim_threshold: 0.3
   success_rate_threshold: 0.03
   data_range: 1.0
   # train or eval; eval is preferred for deterministic replay with rare-earth configs.

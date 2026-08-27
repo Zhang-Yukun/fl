@@ -150,8 +150,6 @@ A:
 | --- | --- | --- | --- |
 | `attack.enabled` | `true` | `true`, `false` | 是否启用攻击。 |
 | `attack.target_type` | `update_payload` | 当前仅支持 `update_payload` | 攻击目标类型。 |
-| `attack.reference_metric` | `nearest_client_train_mse` | `auto`, `reconstruction_mse`, `nearest_client_train_mse` | 兼容旧字段，用于补充输出参考口径。 |
-| `attack.report_metrics` | `[nearest_client_train_mse]` | `auto` 或包含 `exact_target_mse` / `nearest_client_train_mse` 的列表 | 额外输出哪些参考指标。 |
 | `attack.steps` | `300` | 正整数 | 每次 DLG / iDLG 优化步数。 |
 | `attack.lr` | `0.001` | 正浮点数 | 攻击优化学习率。 |
 | `attack.optimizer` | `adam` | 当前仅 `adam` | 攻击优化器。 |
@@ -164,9 +162,7 @@ A:
 | `attack.recovery_match_objective` | `auto` | `auto`, `min`, `max` | 匹配时越小越好还是越大越好。 |
 | `attack.recovery_success_metric` | `mse` | `mse`, `psnr`, `ssim` | 样本是否恢复成功的判定指标。 |
 | `attack.recovery_success_objective` | `auto` | `auto`, `min`, `max` | 成功判定时越小越好还是越大越好。 |
-| `attack.recovery_success_threshold` | `None` | 浮点数 | 显式恢复成功阈值；未设置时从默认阈值推导。 |
-| `attack.success_mse_threshold` | `0.5` | 非负浮点数 | MSE 口径默认阈值。 |
-| `attack.success_ssim_threshold` | 无 | 浮点数 | SSIM 口径默认阈值。 |
+| `attack.recovery_success_threshold` | `None` | 浮点数 | 显式恢复成功阈值；未设置时使用内置默认值推导。 |
 | `attack.success_rate_threshold` | `0.03` | `[0,1]` 浮点数 | 汇总层面的通过阈值。 |
 | `attack.data_range` | `1.0` | 正浮点数 | PSNR / SSIM 计算时使用的数据范围。 |
 | `attack.client_selection` | `all` | `all`, `first`, `round_robin` | 被攻击客户端选择策略。 |

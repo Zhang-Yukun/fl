@@ -21,15 +21,15 @@ def _write_json(path: Path, payload) -> None:
 def _attack_payload(avg_metric: float, success_rate: float, evaluations: int) -> dict:
     return {
         'attack_target_type': 'update_payload',
-        'attack_primary_metric_name': 'nearest_client_train_mse',
-        'attack_primary_metric_direction': 'higher_is_more_private',
+        'attack_primary_metric_name': 'budget_recovered_fraction',
+        'attack_primary_metric_direction': 'lower_is_more_private',
         'attack_overall_avg_primary_metric_value': avg_metric,
         'attack_success_rate': success_rate,
         'attack_evaluations': evaluations,
         'attack_summary': {
-            'primary_metric_name': 'nearest_client_train_mse',
-            'primary_metric_direction': 'higher_is_more_private',
-            'overall_avg_nearest_client_train_mse': avg_metric,
+            'primary_metric_name': 'budget_recovered_fraction',
+            'primary_metric_direction': 'lower_is_more_private',
+            'overall_avg_budget_recovered_fraction': avg_metric,
             'overall_success_rate': success_rate,
         },
     }
@@ -127,7 +127,7 @@ def test_analyze_experiment_suite_discovers_rows_outputs_plots_and_supports_old(
     assert rows[2]['fedavg_upload_compression_ratio'] == 220 / 70
     assert rows[3]['fedavg_upload_compression_ratio'] == 220 / 45
     assert rows[3]['mse_loss_ratio_percent'] == (0.74 - 0.75) / 0.75 * 100.0
-    assert rows[1]['attack_primary_metric_name'] == 'nearest_client_train_mse'
+    assert rows[1]['attack_primary_metric_name'] == 'budget_recovered_fraction'
     assert rows[1]['attack_overall_avg_primary_metric_value'] == 0.81
     assert rows[1]['attack_success_rate'] == 0.15
     assert rows[1]['attack_evaluations'] == 24
@@ -149,7 +149,7 @@ def test_analyze_experiment_suite_discovers_rows_outputs_plots_and_supports_old(
     assert bubble_plot.exists()
     csv_rows = list(csv.DictReader(csv_path.open('r', encoding='utf-8')))
     assert [row['label'] for row in csv_rows] == labels
-    assert csv_rows[1]['attack_primary_metric_name'] == 'nearest_client_train_mse'
+    assert csv_rows[1]['attack_primary_metric_name'] == 'budget_recovered_fraction'
     assert 'Attack Metric' in md_path.read_text(encoding='utf-8')
     assert module.default_output_dir(suite_dir, 'mse').name == 'attack_mse_analysis_mse'
 
@@ -169,7 +169,7 @@ def test_analyze_experiment_suite_aggregates_multiple_seeds_with_std_outputs(tmp
     assert fedavg_row['seed_count'] == 2
     assert fedavg_row['test_mse_mean'] == 0.76
     assert fedavg_row['test_mse_std'] is not None and fedavg_row['test_mse_std'] > 0.0
-    assert fedavg_row['attack_primary_metric_name'] == 'nearest_client_train_mse'
+    assert fedavg_row['attack_primary_metric_name'] == 'budget_recovered_fraction'
     assert fedavg_row['attack_seed_count'] == 2
     assert math.isclose(fedavg_row['attack_overall_avg_primary_metric_value_mean'], 0.86)
     assert fedavg_row['attack_overall_avg_primary_metric_value_std'] is not None and fedavg_row['attack_overall_avg_primary_metric_value_std'] > 0.0
@@ -198,7 +198,7 @@ def test_analyze_experiment_suite_aggregates_multiple_seeds_with_std_outputs(tmp
     csv_rows = list(csv.DictReader(csv_path.open('r', encoding='utf-8')))
     assert [row['label'] for row in csv_rows] == ['centralized', 'fedavg', 'topk', 'ega_ed160_hd1024_rb2_q159_ema095_pt150']
     assert csv_rows[1]['test_mse_mean'] == '0.76'
-    assert csv_rows[1]['attack_primary_metric_name'] == 'nearest_client_train_mse'
+    assert csv_rows[1]['attack_primary_metric_name'] == 'budget_recovered_fraction'
     assert 'Attack Metric' in md_path.read_text(encoding='utf-8')
     assert module.default_multi_output_dir([seed_a, seed_b], 'mse').name == 'multiseed_analysis_mse'
 

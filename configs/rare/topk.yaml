@@ -12,6 +12,5 @@ federated:
   topk_fraction: 0.10
 
 attack:
-  reference_metric: nearest_client_train_mse
   client_selection: round_robin
   clients_per_round: 1

@@ -45,13 +45,10 @@ _RUNTIME_DEFAULTS = {
     "attack": {
         "enabled": True,
         "target_type": "update_payload",
-        "reference_metric": "nearest_client_train_mse",
-        "report_metrics": ["nearest_client_train_mse"],
         "steps": 300,
         "lr": 0.001,
         "optimizer": "adam",
         "restarts": 1,
-        "success_mse_threshold": 0.5,
         "success_rate_threshold": 0.03,
         "data_range": 1.0,
         "client_selection": "all",

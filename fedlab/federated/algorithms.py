@@ -902,7 +902,7 @@ def _attack_payload_metrics(subset: list[Any], cumulative_subset: list[Any], pre
     if not subset:
         return {}
     payload: dict[str, float | str | None] = {}
-    payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "reconstruction_mse")
+    payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "budget_recovered_fraction")
     payload[f"{prefix}/primary_metric_value"] = sum(result.mse for result in subset) / len(subset)
     payload[f"{prefix}/cumulative_avg_primary_metric_value"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
     for spec in list_registered_attack_tracking_metrics():
@@ -922,7 +922,7 @@ def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: l
     """Build per-round and cumulative attack metrics for tracking/logging."""
 
     round_attacks = round_result.attacks
-    primary_metric_name = "reconstruction_mse" if not round_attacks else getattr(round_attacks[0], "metric_name", "reconstruction_mse")
+    primary_metric_name = "budget_recovered_fraction" if not round_attacks else getattr(round_attacks[0], "metric_name", "budget_recovered_fraction")
     overall_avg_primary_metric = 0.0 if not cumulative_results else sum(result.mse for result in cumulative_results) / len(cumulative_results)
     payload: dict[str, float | str | None] = {
         "attack/round_index": float(round_result.round_index),

@@ -36,8 +36,9 @@ def test_builtin_attacks_are_registered():
 def test_builtin_attack_summary_metrics_are_registered():
     registered = list_registered_attack_summary_metrics()
 
-    assert {'reconstruction_mse', 'nearest_client_train_mse', 'budget_recovered_fraction'} <= set(registered)
-    assert attack_primary_metric_direction('reconstruction_mse') == 'higher_is_more_private'
+    assert {'budget_recovered_fraction', 'coverage_recovered_fraction', 'objective_mse'} <= set(registered)
+    assert 'reconstruction_mse' not in registered
+    assert 'nearest_client_train_mse' not in registered
     assert attack_primary_metric_direction('budget_recovered_fraction') == 'lower_is_more_private'
 
 

@@ -607,8 +607,6 @@ def test_saved_config_contains_materialized_runtime_defaults(tmp_path):
     saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
     assert saved["evaluation"]["mode"] == "protocol"
     assert saved["attack"]["model_mode"] == "train"
-    assert saved["attack"]["reference_metric"] == "nearest_client_train_mse"
-    assert saved["attack"]["report_metrics"] == ["nearest_client_train_mse"]
 
 
 def test_config_artifact_formats_are_configurable(tmp_path):
@@ -666,8 +664,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "nearest_client_train_mse"} <= set(attack_results[0])
-    assert "exact_target_mse" not in attack_results[0]
+    assert {"primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "nearest_client_train_mse", "exact_target_mse", "budget_recovered_fraction"} <= set(attack_results[0])
     assert "mse" not in attack_results[0]
     assert "metric_name" not in attack_results[0]
     assert result["attack_evaluations"] == 6
@@ -679,8 +676,8 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert result["attack_summary"]["primary_metric_name"] == "budget_recovered_fraction"
     assert result["attack_summary"]["target_type"] == "update_payload"
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
-    assert result["attack_summary"]["overall_avg_nearest_client_train_mse"] is not None
     assert result["attack_summary"]["overall_avg_budget_recovered_fraction"] is not None
+    assert "overall_avg_nearest_client_train_mse" not in result["attack_summary"]
     assert "overall_avg_exact_target_mse" not in result["attack_summary"]
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 3
     assert set(result["attack_summary"]["clients"]) == {"Nd2O3", "CeO2", "La2O3"}
@@ -1197,7 +1194,7 @@ def _attack_result_stub(name: str, mse: float = 0.5, client_id: str = "Nd2O3"):
         gradient_mse=0.02,
         success=False,
         client_id=client_id,
-        metric_name="reconstruction_mse",
+        metric_name="budget_recovered_fraction",
     )
 
 
@@ -1324,7 +1321,7 @@ def test_round_attack_payload_includes_explicit_round_index():
     payload = _round_attack_payload(round_result, round_result.attacks)
 
     assert payload["attack/round_index"] == 3.0
-    assert payload["attack/client/Nd2O3/primary_metric_name"] == "reconstruction_mse"
+    assert payload["attack/client/Nd2O3/primary_metric_name"] == "budget_recovered_fraction"
     assert "attack/client/Nd2O3/primary_metric_value" in payload
     assert payload["attack/client/Nd2O3/DLG/primary_metric_value"] == 0.4
 

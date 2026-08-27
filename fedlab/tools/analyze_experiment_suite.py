@@ -198,8 +198,6 @@ def _resolve_attack_info(summary: dict[str, Any]) -> dict[str, Any]:
         avg_primary_value = summary.get('attack_overall_avg_primary_metric')
     if avg_primary_value is None and primary_metric_name:
         avg_primary_value = attack_summary.get(f'overall_avg_{primary_metric_name}')
-    if avg_primary_value is None and primary_metric_name == 'reconstruction_mse':
-        avg_primary_value = summary.get('attack_overall_avg_mse')
     success_rate = summary.get('attack_success_rate')
     if success_rate is None:
         success_rate = attack_summary.get('overall_success_rate')

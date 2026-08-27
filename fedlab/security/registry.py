@@ -287,24 +287,6 @@ def _ensure_builtin_attack_summary_metrics_registered() -> None:
         return
     _BUILTIN_ATTACK_SUMMARY_METRICS_LOADED = True
     register_attack_summary_metric(
-        'reconstruction_mse',
-        lambda result: getattr(result, 'mse', None) if getattr(result, 'metric_name', None) == 'reconstruction_mse' else getattr(result, 'exact_target_mse', None),
-        average_key='overall_avg_exact_target_mse',
-        privacy_direction='higher_is_more_private',
-    )
-    register_attack_summary_metric(
-        'exact_target_mse',
-        lambda result: getattr(result, 'exact_target_mse', None),
-        average_key='overall_avg_exact_target_mse',
-        privacy_direction=None,
-    )
-    register_attack_summary_metric(
-        'nearest_client_train_mse',
-        lambda result: getattr(result, 'nearest_client_train_mse', None),
-        average_key='overall_avg_nearest_client_train_mse',
-        privacy_direction='higher_is_more_private',
-    )
-    register_attack_summary_metric(
         'budget_recovered_fraction',
         lambda result: getattr(result, 'budget_recovered_fraction', None),
         average_key='overall_avg_budget_recovered_fraction',
@@ -571,8 +553,6 @@ def _ensure_builtin_attack_tracking_metrics_registered() -> None:
     if _BUILTIN_ATTACK_TRACKING_METRICS_LOADED:
         return
     _BUILTIN_ATTACK_TRACKING_METRICS_LOADED = True
-    register_attack_tracking_metric('exact_target_mse', lambda result: getattr(result, 'exact_target_mse', None), current_key='exact_target_mse', cumulative_key='cumulative_avg_exact_target_mse')
-    register_attack_tracking_metric('nearest_client_train_mse', lambda result: getattr(result, 'nearest_client_train_mse', None), current_key='nearest_client_train_mse', cumulative_key='cumulative_avg_nearest_client_train_mse')
     register_attack_tracking_metric('budget_recovered_fraction', lambda result: getattr(result, 'budget_recovered_fraction', None), current_key='budget_recovered_fraction', cumulative_key='cumulative_avg_budget_recovered_fraction')
     register_attack_tracking_metric('coverage_recovered_fraction', lambda result: getattr(result, 'coverage_recovered_fraction', None), current_key='coverage_recovered_fraction', cumulative_key='cumulative_avg_coverage_recovered_fraction')
     register_attack_tracking_metric('psnr', lambda result: getattr(result, 'psnr', None), current_key='psnr')
@@ -587,15 +567,12 @@ def list_registered_attack_tracking_metrics() -> tuple[AttackTrackingMetricSpec,
     return tuple(_ATTACK_TRACKING_METRICS[name] for name in _ATTACK_TRACKING_METRIC_ORDER)
 
 
-def _attack_threshold(config: dict[str, Any]) -> float:
-    return float(config.get('attack', {}).get('success_mse_threshold', 0.5))
+def _attack_threshold(_config: dict[str, Any]) -> float:
+    return 0.5
 
 
-def _attack_ssim_threshold(config: dict[str, Any]) -> float | None:
-    value = config.get('attack', {}).get('success_ssim_threshold')
-    if value is None:
-        return None
-    return float(value)
+def _attack_ssim_threshold(_config: dict[str, Any]) -> float | None:
+    return 0.3
 
 
 def _pairwise_mse_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Tensor, _data_range: float) -> torch.Tensor:
