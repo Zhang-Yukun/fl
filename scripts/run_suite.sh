@@ -36,6 +36,7 @@ MODEL_DROPOUT="${MODEL_DROPOUT:-0.1}"
 ATTACK_LR="${ATTACK_LR:-}"
 ATTACK_OPTIMIZER="${ATTACK_OPTIMIZER:-}"
 FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"
+TASK_SET="${TASK_SET:-rare}"
 TOPK_FRACTION="${TOPK_FRACTION:-}"
 QSGD_LEVELS="${QSGD_LEVELS:-}"
 QSGD_SEED="${QSGD_SEED:-${SUITE_SEED}}"
@@ -76,13 +77,14 @@ SELECT_MODES="${SELECT_MODES:-}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash SCRIPT [--modes centralized,single_sync,single_async,grpc_sync,grpc_async] [--algorithms fedavg,topk,ega]
+Usage: bash SCRIPT [--modes centralized,single_sync,single_async,grpc_sync,grpc_async] [--tasks rare|mnist|cifar10|all|comma,list] [--algorithms fedavg,topk,ega]
 
 Examples:
   bash SCRIPT --modes single_sync
   TRAIN_OPTIMIZER=adam TRAIN_LR=0.001 bash SCRIPT --modes centralized,single_sync
   SUITE_SEED=42 bash SCRIPT --modes single_sync
   SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync
+  TASK_SET=rare,mnist,cifar10 bash SCRIPT --modes single_sync
   FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync
   RUNTIME_DEVICE=cuda:1 bash SCRIPT --modes single_sync
   RUN_NAME_PREFIX=debug_ RUN_NAME_SUFFIX=_trial1 bash SCRIPT --modes single_sync
@@ -100,6 +102,14 @@ parse_args() {
           exit 1
         fi
         SELECT_MODES="$2"
+        shift 2
+        ;;
+      --tasks)
+        if [[ $# -lt 2 ]]; then
+          echo "--tasks requires a comma-separated value" >&2
+          exit 1
+        fi
+        TASK_SET="$2"
         shift 2
         ;;
       --algorithms)
@@ -161,6 +171,89 @@ algo_enabled() {
     fi
   done
   return 1
+}
+
+selected_tasks() {
+  local raw="${1:-rare}"
+  local include_rare=false
+  local include_mnist=false
+  local include_cifar10=false
+  IFS=',' read -r -a parts <<< "${raw}"
+  local item
+  for item in "${parts[@]}"; do
+    item="${item// /}"
+    [[ -z "${item}" ]] && continue
+    case "${item}" in
+      all)
+        include_rare=true
+        include_mnist=true
+        include_cifar10=true
+        ;;
+      rare)
+        include_rare=true
+        ;;
+      mnist)
+        include_mnist=true
+        ;;
+      cifar10)
+        include_cifar10=true
+        ;;
+      *)
+        echo "Unsupported TASK_SET entry: ${item}" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  local tasks=()
+  [[ "${include_rare}" == true ]] && tasks+=(rare)
+  [[ "${include_mnist}" == true ]] && tasks+=(mnist)
+  [[ "${include_cifar10}" == true ]] && tasks+=(cifar10)
+
+  if [[ ${#tasks[@]} -eq 0 ]]; then
+    echo "TASK_SET must select at least one task." >&2
+    exit 1
+  fi
+
+  printf '%s\n' "${tasks[@]}"
+}
+
+task_config_path() {
+  local task="$1"
+  local config_name="$2"
+  case "${task}" in
+    rare|mnist|cifar10)
+      printf 'configs/%s/%s.yaml\n' "${task}" "${config_name}"
+      ;;
+    *)
+      echo "Unsupported task=${task}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+task_client_ids() {
+  local task="$1"
+  case "${task}" in
+    rare)
+      printf 'Nd2O3\nCeO2\nLa2O3\n'
+      ;;
+    mnist)
+      printf 'm1\nm2\nm3\n'
+      ;;
+    cifar10)
+      printf 'c1\nc2\nc3\n'
+      ;;
+    *)
+      echo "Unsupported task=${task}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+task_uses_loss_override() {
+  local task="$1"
+  [[ "${task}" == "rare" ]]
 }
 
 log() {
@@ -361,6 +454,7 @@ federated.algorithm=ega_fedavg
 }
 
 centralized_round_args() {
+  local task="$1"
   if [[ -n "${ROUNDS}" ]]; then
     printf -- '--override
 training.epochs=%s
@@ -376,12 +470,15 @@ training.min_delta=0.0
   while IFS= read -r line; do
     printf '%s\n' "${line}"
   done < <(training_args)
-  printf -- '--override
+  if task_uses_loss_override "${task}"; then
+    printf -- '--override
 training.loss=%s
 ' "${LOSS_NAME}"
+  fi
 }
 
 federated_common_args() {
+  local task="$1"
   printf -- '--override
 experiment.mode=federated
 --override
@@ -441,18 +538,21 @@ training.min_delta=0.0
   while IFS= read -r line; do
     printf '%s\n' "${line}"
   done < <(training_args)
-  printf -- '--override
+  if task_uses_loss_override "${task}"; then
+    printf -- '--override
 training.loss=%s
 ' "${LOSS_NAME}"
+  fi
 }
 
 run_single() {
-  local run_name="$1"
-  local tracking_name="$2"
-  local config="$3"
-  shift 3
+  local task="$1"
+  local run_name="$2"
+  local tracking_name="$3"
+  local config="$4"
+  shift 4
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="${BASE_OUTPUT}/${run_name}"
+  local outdir="${BASE_OUTPUT}/${task}/${run_name}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.entrypoints.train
     --config "${config}"
@@ -462,13 +562,13 @@ run_single() {
   )
   while IFS= read -r line; do
     cmd+=("${line}")
-  done < <(tracking_args "${tracking_name}")
+  done < <(tracking_args "${task}-${tracking_name}")
   while IFS= read -r line; do
     cmd+=("${line}")
   done < <(base_runtime_args)
   while IFS= read -r line; do
     cmd+=("${line}")
-  done < <(federated_common_args)
+  done < <(federated_common_args "${task}")
   cmd+=("$@")
 
   log "starting ${run_name}"
@@ -477,13 +577,14 @@ run_single() {
 }
 
 run_grpc() {
-  local run_name="$1"
-  local tracking_name="$2"
-  local config="$3"
-  local port="$4"
-  shift 4
+  local task="$1"
+  local run_name="$2"
+  local tracking_name="$3"
+  local config="$4"
+  local port="$5"
+  shift 5
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="${BASE_OUTPUT}/${run_name}"
+  local outdir="${BASE_OUTPUT}/${task}/${run_name}"
   local address="127.0.0.1:${port}"
   local server_pid=""
   local client_pids=()
@@ -502,13 +603,13 @@ run_grpc() {
   )
   while IFS= read -r line; do
     server_cmd+=("${line}")
-  done < <(tracking_args "${tracking_name}")
+  done < <(tracking_args "${task}-${tracking_name}")
   while IFS= read -r line; do
     server_cmd+=("${line}")
   done < <(base_runtime_args)
   while IFS= read -r line; do
     server_cmd+=("${line}")
-  done < <(federated_common_args)
+  done < <(federated_common_args "${task}")
   server_cmd+=("$@")
 
   log "starting ${run_name} on ${address}"
@@ -516,7 +617,10 @@ run_grpc() {
   server_pid=$!
   sleep "${STARTUP_WAIT_SECONDS}"
 
-  for client_id in Nd2O3 CeO2 La2O3; do
+  local -a client_ids=()
+  mapfile -t client_ids < <(task_client_ids "${task}")
+  local client_id
+  for client_id in "${client_ids[@]}"; do
     local -a client_cmd=(
       "${PYTHON_BIN}" -m fedlab.entrypoints.client
       --client-id "${client_id}"
@@ -534,7 +638,7 @@ run_grpc() {
     done < <(base_runtime_args)
     while IFS= read -r line; do
       client_cmd+=("${line}")
-    done < <(federated_common_args)
+    done < <(federated_common_args "${task}")
     client_cmd+=("$@")
 
     PYTHONPATH=. "${client_cmd[@]}" > "${outdir}/client_${client_id}.log" 2>&1 &
@@ -568,12 +672,13 @@ run_grpc() {
 }
 
 run_centralized() {
-  local run_name="$1"
-  local tracking_name="$2"
-  local config="$3"
-  shift 3
+  local task="$1"
+  local run_name="$2"
+  local tracking_name="$3"
+  local config="$4"
+  shift 4
   run_name="$(effective_run_name "${run_name}")"
-  local outdir="${BASE_OUTPUT}/${run_name}"
+  local outdir="${BASE_OUTPUT}/${task}/${run_name}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.entrypoints.train
     --config "${config}"
@@ -584,13 +689,13 @@ run_centralized() {
   )
   while IFS= read -r line; do
     cmd+=("${line}")
-  done < <(tracking_args "${tracking_name}")
+  done < <(tracking_args "${task}-${tracking_name}")
   while IFS= read -r line; do
     cmd+=("${line}")
   done < <(base_runtime_args)
   while IFS= read -r line; do
     cmd+=("${line}")
-  done < <(centralized_round_args)
+  done < <(centralized_round_args "${task}")
   cmd+=("$@")
 
   log "starting ${run_name}"
@@ -598,144 +703,150 @@ run_centralized() {
   log "finished ${run_name}"
 }
 
+
 main() {
   mkdir -p "${BASE_OUTPUT}"
   log "output root: ${BASE_OUTPUT}"
   log "device=${RUNTIME_DEVICE} project=${PROJECT_NAME}"
-  log "federated_algorithms=${FEDERATED_ALGORITHMS}"
+  log "tasks=${TASK_SET} federated_algorithms=${FEDERATED_ALGORITHMS}"
 
-  if [[ "${RUN_CENTRALIZED}" == "true" ]] && mode_enabled centralized; then
-    run_centralized \
-      centralized_uupdate_dmodel_${RUN_TAG} \
-      centralized-${TRACKING_TAG} \
-      configs/rare/centralized.yaml
-  fi
+  local -a TASK_LIST=()
+  mapfile -t TASK_LIST < <(selected_tasks "${TASK_SET}")
 
-  local -a modes=(single_sync single_async grpc_sync grpc_async)
-  local port="${BASE_PORT}"
-  local mode
-  for mode in "${modes[@]}"; do
-    if ! mode_enabled "${mode}"; then
-      continue
+  local task
+  for task in "${TASK_LIST[@]}"; do
+    log "starting task=${task}"
+
+    if [[ "${RUN_CENTRALIZED}" == "true" ]] && mode_enabled centralized; then
+      run_centralized         "${task}"         centralized_uupdate_dmodel_${RUN_TAG}         centralized-${TRACKING_TAG}         "$(task_config_path "${task}" centralized)"
     fi
-    if [[ "${mode}" == grpc_* ]]; then
-      if algo_enabled fedavg; then
-        local -a fedavg_override_args=()
-        mapfile -t fedavg_override_args < <(fedavg_args)
-        run_grpc "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${fedavg_override_args[@]}"
-        port=$((port + 1))
-      fi
 
-      if algo_enabled ega; then
-        local ega_label="$(effective_ega_label)"
-        local ega_run_name="${ega_label}_${mode}_uupdate_dmodel_${RUN_TAG}"
-        local ega_tracking_label="${ega_label//_/-}"
-        local -a ega_override_args=()
-        mapfile -t ega_override_args < <(ega_args)
-        run_grpc "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/ega.yaml "${port}" "${ega_override_args[@]}"
-        port=$((port + 1))
+    local -a modes=(single_sync single_async grpc_sync grpc_async)
+    local port="${BASE_PORT}"
+    local mode
+    for mode in "${modes[@]}"; do
+      if ! mode_enabled "${mode}"; then
+        continue
       fi
+      if [[ "${mode}" == grpc_* ]]; then
+        if algo_enabled fedavg; then
+          local -a fedavg_override_args=()
+          mapfile -t fedavg_override_args < <(fedavg_args)
+          run_grpc "${task}" "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${port}" "${fedavg_override_args[@]}"
+          port=$((port + 1))
+        fi
 
-      if algo_enabled topk; then
-        local -a topk_override_args=()
-        mapfile -t topk_override_args < <(topk_args)
-        run_grpc "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/topk.yaml "${port}" "${topk_override_args[@]}"
-        port=$((port + 1))
-      fi
+        if algo_enabled ega; then
+          local ega_label="$(effective_ega_label)"
+          local ega_run_name="${ega_label}_${mode}_uupdate_dmodel_${RUN_TAG}"
+          local ega_tracking_label="${ega_label//_/-}"
+          local -a ega_override_args=()
+          mapfile -t ega_override_args < <(ega_args)
+          run_grpc "${task}" "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" ega)" "${port}" "${ega_override_args[@]}"
+          port=$((port + 1))
+        fi
 
-      if algo_enabled qsgd; then
-        local -a qsgd_override_args=()
-        mapfile -t qsgd_override_args < <(qsgd_args)
-        run_grpc "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${qsgd_override_args[@]}"
-        port=$((port + 1))
-      fi
+        if algo_enabled topk; then
+          local -a topk_override_args=()
+          mapfile -t topk_override_args < <(topk_args)
+          run_grpc "${task}" "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" topk)" "${port}" "${topk_override_args[@]}"
+          port=$((port + 1))
+        fi
 
-      if algo_enabled randomk; then
-        local -a randomk_override_args=()
-        mapfile -t randomk_override_args < <(randomk_args)
-        run_grpc "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${randomk_override_args[@]}"
-        port=$((port + 1))
-      fi
+        if algo_enabled qsgd; then
+          local -a qsgd_override_args=()
+          mapfile -t qsgd_override_args < <(qsgd_args)
+          run_grpc "${task}" "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${port}" "${qsgd_override_args[@]}"
+          port=$((port + 1))
+        fi
 
-      if algo_enabled sign; then
-        local -a sign_override_args=()
-        mapfile -t sign_override_args < <(sign_args)
-        run_grpc "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${sign_override_args[@]}"
-        port=$((port + 1))
-      fi
+        if algo_enabled randomk; then
+          local -a randomk_override_args=()
+          mapfile -t randomk_override_args < <(randomk_args)
+          run_grpc "${task}" "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${port}" "${randomk_override_args[@]}"
+          port=$((port + 1))
+        fi
 
-      if algo_enabled adaptive; then
-        local -a adaptive_override_args=()
-        mapfile -t adaptive_override_args < <(adaptive_args)
-        run_grpc "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${adaptive_override_args[@]}"
-        port=$((port + 1))
-      fi
+        if algo_enabled sign; then
+          local -a sign_override_args=()
+          mapfile -t sign_override_args < <(sign_args)
+          run_grpc "${task}" "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${port}" "${sign_override_args[@]}"
+          port=$((port + 1))
+        fi
 
-      if algo_enabled qint8; then
-        local -a qint8_override_args=()
-        mapfile -t qint8_override_args < <(qint8_args)
-        run_grpc "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${port}" "${qint8_override_args[@]}"
-        port=$((port + 1))
-      fi
-    else
-      local async_flag=false
-      local -a async_workers=()
-      if [[ "${mode}" == "single_async" ]]; then
-        async_flag=true
-        async_workers=(--override attack.async_workers=1)
-      fi
+        if algo_enabled adaptive; then
+          local -a adaptive_override_args=()
+          mapfile -t adaptive_override_args < <(adaptive_args)
+          run_grpc "${task}" "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${port}" "${adaptive_override_args[@]}"
+          port=$((port + 1))
+        fi
 
-      if algo_enabled fedavg; then
-        local -a fedavg_override_args=()
-        mapfile -t fedavg_override_args < <(fedavg_args)
-        run_single "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${fedavg_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
-      fi
+        if algo_enabled qint8; then
+          local -a qint8_override_args=()
+          mapfile -t qint8_override_args < <(qint8_args)
+          run_grpc "${task}" "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${port}" "${qint8_override_args[@]}"
+          port=$((port + 1))
+        fi
+      else
+        local async_flag=false
+        local -a async_workers=()
+        if [[ "${mode}" == "single_async" ]]; then
+          async_flag=true
+          async_workers=(--override attack.async_workers=1)
+        fi
 
-      if algo_enabled ega; then
-        local ega_label="$(effective_ega_label)"
-        local ega_run_name="${ega_label}_${mode}_uupdate_dmodel_${RUN_TAG}"
-        local ega_tracking_label="${ega_label//_/-}"
-        local -a ega_override_args=()
-        mapfile -t ega_override_args < <(ega_args)
-        run_single "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/ega.yaml "${ega_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
-      fi
+        if algo_enabled fedavg; then
+          local -a fedavg_override_args=()
+          mapfile -t fedavg_override_args < <(fedavg_args)
+          run_single "${task}" "fedavg_${mode}_uupdate_dmodel_${RUN_TAG}" "fedavg-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${fedavg_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        fi
 
-      if algo_enabled topk; then
-        local -a topk_override_args=()
-        mapfile -t topk_override_args < <(topk_args)
-        run_single "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/topk.yaml "${topk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
-      fi
+        if algo_enabled ega; then
+          local ega_label="$(effective_ega_label)"
+          local ega_run_name="${ega_label}_${mode}_uupdate_dmodel_${RUN_TAG}"
+          local ega_tracking_label="${ega_label//_/-}"
+          local -a ega_override_args=()
+          mapfile -t ega_override_args < <(ega_args)
+          run_single "${task}" "${ega_run_name}" "${ega_tracking_label}-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" ega)" "${ega_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        fi
 
-      if algo_enabled qsgd; then
-        local -a qsgd_override_args=()
-        mapfile -t qsgd_override_args < <(qsgd_args)
-        run_single "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${qsgd_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
-      fi
+        if algo_enabled topk; then
+          local -a topk_override_args=()
+          mapfile -t topk_override_args < <(topk_args)
+          run_single "${task}" "topk_${mode}_uupdate_dmodel_${RUN_TAG}" "topk-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" topk)" "${topk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        fi
 
-      if algo_enabled randomk; then
-        local -a randomk_override_args=()
-        mapfile -t randomk_override_args < <(randomk_args)
-        run_single "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${randomk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
-      fi
+        if algo_enabled qsgd; then
+          local -a qsgd_override_args=()
+          mapfile -t qsgd_override_args < <(qsgd_args)
+          run_single "${task}" "qsgd_${mode}_uupdate_dmodel_${RUN_TAG}" "qsgd-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${qsgd_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        fi
 
-      if algo_enabled sign; then
-        local -a sign_override_args=()
-        mapfile -t sign_override_args < <(sign_args)
-        run_single "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${sign_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
-      fi
+        if algo_enabled randomk; then
+          local -a randomk_override_args=()
+          mapfile -t randomk_override_args < <(randomk_args)
+          run_single "${task}" "randomk_${mode}_uupdate_dmodel_${RUN_TAG}" "randomk-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${randomk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        fi
 
-      if algo_enabled adaptive; then
-        local -a adaptive_override_args=()
-        mapfile -t adaptive_override_args < <(adaptive_args)
-        run_single "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${adaptive_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
-      fi
+        if algo_enabled sign; then
+          local -a sign_override_args=()
+          mapfile -t sign_override_args < <(sign_args)
+          run_single "${task}" "sign_${mode}_uupdate_dmodel_${RUN_TAG}" "sign-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${sign_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        fi
 
-      if algo_enabled qint8; then
-        local -a qint8_override_args=()
-        mapfile -t qint8_override_args < <(qint8_args)
-        run_single "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" configs/rare/fedavg.yaml "${qint8_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        if algo_enabled adaptive; then
+          local -a adaptive_override_args=()
+          mapfile -t adaptive_override_args < <(adaptive_args)
+          run_single "${task}" "adaptive_${mode}_uupdate_dmodel_${RUN_TAG}" "adaptive-rdp-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${adaptive_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        fi
+
+        if algo_enabled qint8; then
+          local -a qint8_override_args=()
+          mapfile -t qint8_override_args < <(qint8_args)
+          run_single "${task}" "qint8_${mode}_uupdate_dmodel_${RUN_TAG}" "secure-quantized-${mode}-uupdate-dmodel-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${qint8_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+        fi
       fi
-    fi
+    done
   done
 
   log "suite finished"

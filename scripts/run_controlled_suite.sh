@@ -7,6 +7,7 @@ PROFILE="${PROFILE:-noattack}"
 LOSS_NAME="${LOSS_NAME:-mse}"
 LOSS_TAG="${LOSS_TAG:-${LOSS_NAME}}"
 MODE_SET="${MODE_SET:-all}"
+TASK_SET="${TASK_SET:-rare}"
 SUITE_SEED="${SUITE_SEED:-2026}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
 RUN_CENTRALIZED="${RUN_CENTRALIZED:-true}"
@@ -21,13 +22,12 @@ PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-suite-${PROFILE}-${LOSS_NAME}}"
 usage() {
   cat <<'USAGE'
 Usage:
-  PROFILE=noattack|attack   LOSS_NAME=mse|mae   MODE_SET=all|single_sync|single_async|multi_sync|multi_async|centralized|comma,list   SUITE_SEED=2026   RUNTIME_DEVICE=cuda:0   BASE_OUTPUT_ROOT=outputs/my_suite   PROJECT_NAME=my-wandb-project   bash scripts/run_controlled_suite.sh
+  PROFILE=noattack|attack   LOSS_NAME=mse|mae   TASK_SET=rare|mnist|cifar10|all|comma,list   MODE_SET=all|single_sync|single_async|multi_sync|multi_async|centralized|comma,list   SUITE_SEED=2026   RUNTIME_DEVICE=cuda:0   BASE_OUTPUT_ROOT=outputs/my_suite   PROJECT_NAME=my-wandb-project   bash scripts/run_controlled_suite.sh
 
 Notes:
-  - PROFILE=noattack runs centralized + all federated algorithms in the base suite,
-    then appends the shortlisted EGA configs for the selected loss.
-  - PROFILE=attack runs centralized + fedavg/topk/ega in the base suite,
-    then appends the shortlisted EGA configs for the selected loss.
+  - PROFILE=noattack runs centralized + fedavg/topk/ega for the selected tasks.
+  - PROFILE=attack runs centralized + fedavg/topk/ega with attack enabled for the selected tasks.
+  - TASK_SET uses user-facing names. all -> rare,mnist,cifar10.
   - MODE_SET uses user-facing names. multi_sync -> grpc_sync, multi_async -> grpc_async.
   - Set RUN_CENTRALIZED=false if you want to skip centralized.
 USAGE
@@ -129,18 +129,14 @@ suite_modes() {
   printf 'centralized,%s\n' "${federated_modes}"
 }
 
-HAS_FEDERATED_MODES=true
 MAPPED_MODES="$(map_modes "${MODE_SET}")"
-if [[ "${MAPPED_MODES}" == "none" ]]; then
-  HAS_FEDERATED_MODES=false
-fi
 SUITE_MODES="$(suite_modes "${MAPPED_MODES}")"
 
 if [[ "${PROFILE}" == "noattack" ]]; then
   RUN_TAG="${RUN_TAG:-oracle_noattack}"
   TRACKING_TAG="${TRACKING_TAG:-oracle-noattack}"
   ATTACK_ENABLED=false
-  BASE_ALGOS="${BASE_ALGOS:-all}"
+  BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"
 else
   RUN_TAG="${RUN_TAG:-oracle_attackfreq${ATTACK_FREQUENCY_ROUNDS}}"
   TRACKING_TAG="${TRACKING_TAG:-oracle-attackfreq${ATTACK_FREQUENCY_ROUNDS}}"
@@ -150,7 +146,7 @@ fi
 
 COMMON_BASE_OUTPUT="${BASE_OUTPUT_ROOT}/${PROFILE}_${LOSS_NAME}"
 
-run_base_suite() {
+env \
   BASE_OUTPUT="${COMMON_BASE_OUTPUT}" \
   PROJECT_NAME="${PROJECT_NAME}" \
   SUITE_SEED="${SUITE_SEED}" \
@@ -166,72 +162,6 @@ run_base_suite() {
   EVAL_MODE="${EVAL_MODE}" \
   SHUFFLE_TRAIN="${SHUFFLE_TRAIN}" \
   MODEL_DROPOUT="${MODEL_DROPOUT}" \
+  TASK_SET="${TASK_SET}" \
   FEDERATED_ALGORITHMS="${BASE_ALGOS}" \
-  bash scripts/run_suite.sh --modes "${SUITE_MODES}"
-}
-
-run_ega_case() {
-  [[ "${HAS_FEDERATED_MODES}" == true ]] || return 0
-  env     BASE_OUTPUT="${COMMON_BASE_OUTPUT}"     PROJECT_NAME="${PROJECT_NAME}"     SUITE_SEED="${SUITE_SEED}"     RUNTIME_DEVICE="${RUNTIME_DEVICE}"     RUN_TAG="${RUN_TAG}"     TRACKING_TAG="${TRACKING_TAG}"     RUN_CENTRALIZED=false     ATTACK_ENABLED="${ATTACK_ENABLED}"     ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS}"     LOSS_NAME="${LOSS_NAME}"     LOSS_TAG="${LOSS_TAG}"     TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER}"     EVAL_MODE="${EVAL_MODE}"     SHUFFLE_TRAIN="${SHUFFLE_TRAIN}"     MODEL_DROPOUT="${MODEL_DROPOUT}"     FEDERATED_ALGORITHMS=ega     EGA_PRETRAIN_DEVICE="${RUNTIME_DEVICE}"     "$@"     bash scripts/run_suite.sh --modes "${MAPPED_MODES}"
-}
-
-run_ega_matrix() {
-  if [[ "${LOSS_NAME}" == "mse" ]]; then
-    run_ega_case \
-      EGA_ENCODED_DIM=160 \
-      EGA_HIDDEN_DIM=1024 \
-      EGA_RESIDUAL_BLOCKS=2 \
-      EGA_QUANTIZATION_LEVEL=159 \
-      EGA_NORMALIZATION_EMA=0.95 \
-      EGA_PRETRAIN_EPOCHS=150 \
-      EGA_PRETRAIN_PATIENCE=30 \
-      EGA_PRETRAIN_LR=0.0003
-
-    run_ega_case \
-      EGA_ENCODED_DIM=168 \
-      EGA_HIDDEN_DIM=2048 \
-      EGA_RESIDUAL_BLOCKS=4 \
-      EGA_QUANTIZATION_LEVEL=159 \
-      EGA_NORMALIZATION_EMA=0.98 \
-      EGA_PRETRAIN_EPOCHS=220 \
-      EGA_PRETRAIN_PATIENCE=44 \
-      EGA_PRETRAIN_LR=0.0002 \
-      EGA_PRETRAIN_TRAIN_GROUPS=50000 \
-      EGA_PRETRAIN_VAL_GROUPS=25000
-  else
-    run_ega_case \
-      EGA_ENCODED_DIM=160 \
-      EGA_HIDDEN_DIM=1536 \
-      EGA_RESIDUAL_BLOCKS=3 \
-      EGA_QUANTIZATION_LEVEL=127 \
-      EGA_NORMALIZATION_EMA=0.95 \
-      EGA_PRETRAIN_EPOCHS=150 \
-      EGA_PRETRAIN_PATIENCE=30 \
-      EGA_PRETRAIN_LR=0.0003
-
-    run_ega_case \
-      EGA_ENCODED_DIM=160 \
-      EGA_HIDDEN_DIM=2048 \
-      EGA_RESIDUAL_BLOCKS=3 \
-      EGA_QUANTIZATION_LEVEL=159 \
-      EGA_NORMALIZATION_EMA=0.95 \
-      EGA_PRETRAIN_EPOCHS=200 \
-      EGA_PRETRAIN_PATIENCE=40 \
-      EGA_PRETRAIN_LR=0.0002
-
-    run_ega_case \
-      EGA_ENCODED_DIM=168 \
-      EGA_HIDDEN_DIM=1536 \
-      EGA_RESIDUAL_BLOCKS=3 \
-      EGA_QUANTIZATION_LEVEL=127 \
-      EGA_NORMALIZATION_EMA=0.98 \
-      EGA_PRETRAIN_EPOCHS=180 \
-      EGA_PRETRAIN_PATIENCE=36 \
-      EGA_PRETRAIN_LR=0.00025 \
-      EGA_PRETRAIN_TRAIN_GROUPS=40000 \
-      EGA_PRETRAIN_VAL_GROUPS=20000
-  fi
-}
-
-run_base_suite
-run_ega_matrix
+  bash scripts/run_suite.sh --modes "${SUITE_MODES}" --tasks "${TASK_SET}"
