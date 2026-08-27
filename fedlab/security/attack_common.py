@@ -49,7 +49,6 @@ class AttackResult:
     success_threshold: float
     gradient_mse: float
     target_type: str = "update_payload"
-    exact_target_mse: float | None = None
     nearest_client_train_mse: float | None = None
     nearest_client_train_indices: list[int] | None = None
     matched_reference_indices: list[int] | None = None
@@ -60,7 +59,7 @@ class AttackResult:
     reference_count: int | None = None
     budget_recovered_fraction: float | None = None
     coverage_recovered_fraction: float | None = None
-    metric_name: str = "exact_target_mse"
+    metric_name: str = "nearest_client_train_mse"
     client_id: str | None = None
     round_index: int | None = None
     sample_index: int | None = None
@@ -288,10 +287,9 @@ def _evaluate_reconstruction(
         success_threshold=threshold,
         gradient_mse=float(objective_mse),
         target_type=target_type,
-        exact_target_mse=float(exact_target_value),
         nearest_client_train_mse=None if nearest_client_train_mse is None else float(nearest_client_train_mse),
         nearest_client_train_indices=nearest_client_train_indices,
-        metric_name="exact_target_mse",
+        metric_name="nearest_client_train_mse",
         real_x=real_x.detach().cpu().clone(),
         real_y=real_y.detach().cpu().clone(),
         reference_x=reference_x,

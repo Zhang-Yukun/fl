@@ -61,7 +61,6 @@ Important derived metrics include:
 - `budget_recovered_fraction`
 - `coverage_recovered_fraction`
 - `nearest_client_train_mse`
-- `exact_target_mse`
 - `objective_mse`
 
 ## 6. Practical takeaway

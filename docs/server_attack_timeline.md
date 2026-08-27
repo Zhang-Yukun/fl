@@ -179,7 +179,7 @@ sequenceDiagram
 5. 保存本次攻击批次 `real_x`、`real_y`
 6. 保存客户端训练参考集合 `reference_inputs`、`reference_targets`
 7. 分别运行 `DLG` 与 `iDLG`
-8. 计算 `exact_target_mse`、`nearest_client_train_mse`、`budget_recovered_fraction`、`coverage_recovered_fraction`、`PSNR`、`SSIM`、`objective_mse`
+8. 计算 `nearest_client_train_mse`、`budget_recovered_fraction`、`coverage_recovered_fraction`、`PSNR`、`SSIM`、`objective_mse`
 9. 写入 `attack_results.json`、`attack_artifacts/` 和 `summary.json`
 
 ```mermaid

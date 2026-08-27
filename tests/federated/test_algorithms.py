@@ -664,7 +664,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "nearest_client_train_mse", "exact_target_mse", "budget_recovered_fraction"} <= set(attack_results[0])
+    assert {"primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "nearest_client_train_mse", "budget_recovered_fraction"} <= set(attack_results[0])
     assert "mse" not in attack_results[0]
     assert "metric_name" not in attack_results[0]
     assert result["attack_evaluations"] == 6
@@ -678,7 +678,6 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     assert result["attack_summary"]["success_rate_threshold"] == 0.03
     assert result["attack_summary"]["overall_avg_budget_recovered_fraction"] is not None
     assert "overall_avg_nearest_client_train_mse" not in result["attack_summary"]
-    assert "overall_avg_exact_target_mse" not in result["attack_summary"]
     assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 3
     assert set(result["attack_summary"]["clients"]) == {"Nd2O3", "CeO2", "La2O3"}
     assert result["attack_summary"]["clients"]["Nd2O3"]["methods"]["DLG"]["total_count"] == 1

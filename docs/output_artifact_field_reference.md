@@ -26,7 +26,6 @@ This reference matches the current implementation and does not document removed 
 - `primary_metric_value`: the value of that main metric.
 - `objective_mse`: the optimization objective matching reconstructed gradients/updates to the intercepted target; it is not the same thing as input reconstruction MSE.
 - `nearest_client_train_mse`: MSE between the reconstruction and the nearest sample in the attacked client's full local training set.
-- `exact_target_mse`: diagnostic MSE between the reconstruction and the exact attacked sample.
 
 ## 2. Configuration Fields
 
@@ -396,7 +395,6 @@ Each element is one DLG or iDLG result.
 | `success_threshold` | float | Per-attack success threshold. |
 | `objective_mse` | float | Optimization objective value. |
 | `target_type` | string | Currently `update_payload`. |
-| `exact_target_mse` | float, optional | MSE against the exact selected attack batch. |
 | `nearest_client_train_mse` | float, optional | MSE against the nearest sample in the attacked client's training set. |
 | `nearest_client_train_indices` | list[int], optional | Indices of those nearest training samples. |
 | `matched_reference_indices` | list[int], optional | One-to-one matched reference indices after assignment. |
@@ -577,4 +575,4 @@ These plots are inverse-transformed back to the original data scale by default a
 Notes:
 
 - The reference curve in the figure follows the same semantics as the recorded primary attack metric.
-- The plotted reference comes from the one-to-one recovery matching result; diagnostic fields still record `exact_target_mse` and `nearest_client_train_mse` separately.
+- The plotted reference comes from the one-to-one recovery matching result; diagnostic fields still record `nearest_client_train_mse` separately.

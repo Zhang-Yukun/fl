@@ -435,7 +435,6 @@ def _ensure_builtin_attack_record_fields_registered() -> None:
     register_attack_record_field('success', lambda result: getattr(result, 'success', None))
     register_attack_record_field('success_threshold', lambda result: getattr(result, 'success_threshold', None))
     register_attack_record_field('target_type', lambda result: getattr(result, 'target_type', None))
-    register_attack_record_field('exact_target_mse', lambda result: getattr(result, 'exact_target_mse', None))
     register_attack_record_field('nearest_client_train_mse', lambda result: getattr(result, 'nearest_client_train_mse', None))
     register_attack_record_field('nearest_client_train_indices', lambda result: getattr(result, 'nearest_client_train_indices', None))
     register_attack_record_field('matched_reference_indices', lambda result: getattr(result, 'matched_reference_indices', None))
@@ -469,7 +468,6 @@ def _ensure_builtin_attack_artifact_fields_registered() -> None:
     for key in ('plot_real_x', 'plot_real_y', 'plot_reference_x', 'plot_reference_y', 'plot_reconstructed_x', 'plot_reconstructed_y'):
         register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None), tensor_to_cpu=True)
     for key in (
-        'exact_target_mse',
         'nearest_client_train_mse',
         'nearest_client_train_indices',
         'matched_reference_indices',

@@ -65,7 +65,6 @@
 
 单次攻击结果至少会记录：
 
-- `exact_target_mse`
 - `nearest_client_train_mse`
 - `matched_reference_indices`
 - `matched_reference_metric_name`

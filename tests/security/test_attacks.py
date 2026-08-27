@@ -132,10 +132,10 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     assert idlg.target_type == "update_payload"
     assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
     assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
-    assert dlg.metric_name == "exact_target_mse"
-    assert idlg.metric_name == "exact_target_mse"
+    assert dlg.metric_name == "nearest_client_train_mse"
+    assert idlg.metric_name == "nearest_client_train_mse"
     assert dlg.nearest_client_train_mse is not None
-    assert idlg.exact_target_mse is not None
+    assert idlg.nearest_client_train_mse is not None
     assert dlg.reference_label == "nearest_client_train"
     assert torch.allclose(dlg.reference_x, x)
     assert torch.allclose(dlg.reference_y, y)
@@ -471,7 +471,7 @@ def test_classification_update_payload_attacks_keep_reference_labels():
         reference_targets=reference_targets,
     )
 
-    assert dlg.metric_name == "exact_target_mse"
+    assert dlg.metric_name == "nearest_client_train_mse"
     assert dlg.reference_label == "nearest_client_train"
     assert dlg.reference_x.shape == x.shape
     assert dlg.nearest_client_train_indices is not None
