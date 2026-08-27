@@ -610,6 +610,24 @@ def pretrain_ega_codec(
     return output_path
 
 
+def _resolve_ega_pretrain_device(config: dict[str, Any], *, device: torch.device) -> torch.device:
+    """Resolve the device used for EGA synthetic pretraining."""
+
+    ega_cfg = _ega_config(config)
+    requested = str(
+        ega_cfg.get("pretrain", {}).get(
+            "device",
+            config.get("runtime", {}).get("device", str(device)),
+        )
+    ).lower()
+    if requested == "same":
+        requested = str(device)
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        logger.warning("Requested EGA pretrain device {} is unavailable; falling back to cpu", requested)
+        requested = "cpu"
+    return torch.device(requested)
+
+
 def load_ega_codec(
     config: dict[str, Any],
     *,
@@ -627,14 +645,7 @@ def load_ega_codec(
         if not allow_pretrain:
             raise FileNotFoundError(f"EGA codec artifact not found: {path}")
         logger.info("EGA codec artifact missing at {}; start synthetic pretraining", path)
-        requested_device = ega_cfg.get("pretrain", {}).get(
-            "device",
-            config.get("runtime", {}).get("device", str(device)),
-        )
-        pretrain_device = torch.device(str(requested_device))
-        if pretrain_device.type == "cuda" and not torch.cuda.is_available():
-            logger.warning("Requested EGA pretrain device {} is unavailable; falling back to cpu", pretrain_device)
-            pretrain_device = torch.device("cpu")
+        pretrain_device = _resolve_ega_pretrain_device(config, device=device)
         pretrain_ega_codec(config, num_clients=num_clients, device=pretrain_device, output_path=path)
     checkpoint = torch.load(path, map_location="cpu")
     checkpoint_spec = checkpoint.get("config", {})
@@ -642,14 +653,7 @@ def load_ega_codec(
         if not allow_pretrain:
             raise RuntimeError(f"EGA codec artifact at {path} does not match current config")
         logger.info("EGA codec artifact at {} does not match current config; retraining", path)
-        requested_device = ega_cfg.get("pretrain", {}).get(
-            "device",
-            config.get("runtime", {}).get("device", str(device)),
-        )
-        pretrain_device = torch.device(str(requested_device))
-        if pretrain_device.type == "cuda" and not torch.cuda.is_available():
-            logger.warning("Requested EGA pretrain device {} is unavailable; falling back to cpu", pretrain_device)
-            pretrain_device = torch.device("cpu")
+        pretrain_device = _resolve_ega_pretrain_device(config, device=device)
         pretrain_ega_codec(config, num_clients=num_clients, device=pretrain_device, output_path=path)
         checkpoint = torch.load(path, map_location="cpu")
     codec = build_ega_model(config)

@@ -59,14 +59,33 @@ def test_centralized_and_federated_rare_bases_keep_separate_epoch_defaults():
     assert fedavg["federated"]["rounds"] == 300
 
 
-def test_retained_rare_ega_config_uses_shared_common_defaults_without_stale_keys():
+def test_retained_rare_ega_config_uses_shared_common_preset_without_stale_keys():
     ega = load_config(CONFIG_DIR / "rare/ega.yaml")
 
-    assert ega["ega"]["encoded_dtype"] == "int8"
-    assert ega["ega"]["encoded_stochastic_rounding"] is False
-    assert ega["ega"]["encoded_noise_std"] == 0.0
-    assert ega["ega"]["error_feedback"] is True
+    assert ega["ega"]["artifact_path"] == "artifacts/ega/ega_h240_v1.pt"
+    assert ega["ega"]["block_size"] == 256
+    assert ega["ega"]["encoded_dim"] == 168
+    assert ega["ega"]["hidden_dim"] == 2048
+    assert ega["ega"]["residual_blocks"] == 4
+    assert ega["ega"]["quantization_level"] == 159
+    assert ega["ega"]["normalization_ema"] == 0.98
+    assert ega["ega"]["pretrain"]["epochs"] == 220
+    assert ega["ega"]["pretrain"]["patience"] == 44
+    assert ega["ega"]["pretrain"]["lr"] == 0.0002
+    assert ega["ega"]["pretrain"]["train_groups"] == 50000
+    assert ega["ega"]["pretrain"]["val_groups"] == 25000
     assert ega["ega"]["pretrain"]["batch_size"] == 128
-    assert ega["ega"]["pretrain"]["lr"] == 0.0005
     assert ega["ega"]["pretrain"]["seed"] == 2026
+    assert ega["ega"]["pretrain"]["device"] == "same"
+    assert "download_dtype" not in ega["ega"]
+    assert "download_method" not in ega["ega"]
+    assert "download_predictive_coding" not in ega["ega"]
+    assert "download_stochastic_rounding" not in ega["ega"]
+    assert "download_trainable_only" not in ega["ega"]
     assert "download_encoded_dtype" not in ega["ega"]
+
+
+def test_common_ega_directory_keeps_only_the_shared_default_config():
+    ega_files = {path.name for path in (CONFIG_DIR / "common" / "ega").glob("*.yaml")}
+
+    assert ega_files == {"default.yaml"}

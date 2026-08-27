@@ -6,6 +6,7 @@ import torch
 
 from fedlab.modeling.ega import (
     EgaAutoEncoder,
+    _resolve_ega_pretrain_device,
     decode_mean_encoded_payload,
     dequantize_block_vector,
     dequantize_encoded_blocks,
@@ -159,3 +160,14 @@ def test_resolve_ega_artifact_path_preserves_absolute_configured_path():
     path = resolve_ega_artifact_path(config, num_clients=3)
 
     assert path == Path("/tmp/shared_ega_codec.pt")
+
+
+def test_resolve_ega_pretrain_device_supports_same_keyword():
+    config = {
+        "runtime": {"device": "cuda:1"},
+        "ega": {"pretrain": {"device": "same"}},
+    }
+
+    resolved = _resolve_ega_pretrain_device(config, device=torch.device("cpu"))
+
+    assert resolved == torch.device("cpu")

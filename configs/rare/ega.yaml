@@ -10,18 +10,3 @@ experiment:
 federated:
   algorithm: ega_fedavg
   quantization_seed: 2026
-
-ega:
-  # Pretrained codec artifact used by EGA upload transforms.
-  artifact_path: artifacts/ega/ega_h240_v1.pt
-  block_size: 256
-  encoded_dim: 240
-  hidden_dim: 1024
-  residual_blocks: 2
-  quantization_level: 127
-  normalization_ema: 0.9
-  pretrain:
-    epochs: 100
-    patience: 20
-    train_groups: 30000
-    val_groups: 15000

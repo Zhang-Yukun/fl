@@ -85,14 +85,30 @@ def test_classification_algorithm_configs_only_define_relevant_blocks():
 
 
 
-def test_classification_ega_configs_use_shared_common_defaults_without_stale_keys():
-    for config_name in ('mnist/ega.yaml', 'cifar10/ega.yaml'):
-        config = load_config(CONFIG_DIR / config_name)
-        assert config['ega']['encoded_dtype'] == 'int8'
-        assert config['ega']['encoded_stochastic_rounding'] is False
-        assert config['ega']['encoded_noise_std'] == 0.0
-        assert config['ega']['error_feedback'] is True
-        assert config['ega']['pretrain']['batch_size'] == 128
-        assert config['ega']['pretrain']['lr'] == 0.0005
-        assert config['ega']['pretrain']['seed'] == 2026
-        assert 'download_encoded_dtype' not in config['ega']
+def test_all_task_ega_configs_share_the_same_common_preset_without_stale_keys():
+    rare = load_config(CONFIG_DIR / 'rare/ega.yaml')['ega']
+    mnist = load_config(CONFIG_DIR / 'mnist/ega.yaml')['ega']
+    cifar = load_config(CONFIG_DIR / 'cifar10/ega.yaml')['ega']
+
+    assert rare == mnist == cifar
+    assert rare['artifact_path'] == 'artifacts/ega/ega_h240_v1.pt'
+    assert rare['block_size'] == 256
+    assert rare['encoded_dim'] == 168
+    assert rare['hidden_dim'] == 2048
+    assert rare['residual_blocks'] == 4
+    assert rare['quantization_level'] == 159
+    assert rare['normalization_ema'] == 0.98
+    assert rare['pretrain']['epochs'] == 220
+    assert rare['pretrain']['patience'] == 44
+    assert rare['pretrain']['lr'] == 0.0002
+    assert rare['pretrain']['train_groups'] == 50000
+    assert rare['pretrain']['val_groups'] == 25000
+    assert rare['pretrain']['batch_size'] == 128
+    assert rare['pretrain']['seed'] == 2026
+    assert rare['pretrain']['device'] == 'same'
+    assert 'download_dtype' not in rare
+    assert 'download_method' not in rare
+    assert 'download_predictive_coding' not in rare
+    assert 'download_stochastic_rounding' not in rare
+    assert 'download_trainable_only' not in rare
+    assert 'download_encoded_dtype' not in rare

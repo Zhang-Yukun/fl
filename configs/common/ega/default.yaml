@@ -1,15 +1,27 @@
 ega:
+  artifact_path: artifacts/ega/ega_h240_v1.pt
+  block_size: 256
+  encoded_dim: 168
+  hidden_dim: 2048
+  residual_blocks: 4
+  quantization_level: 159
   encode_buffers: false
   normalization: 0.00025
   initial_normalization: 0.00025
   min_normalization: 0.000001
   normalization_strategy: ema_reported_client_max_abs
+  normalization_ema: 0.98
   encoded_dtype: int8
   encoded_stochastic_rounding: false
   encoded_noise_std: 0.0
   error_feedback: true
   pretrain:
+    epochs: 220
+    patience: 44
     min_delta: 0.0
     batch_size: 128
-    lr: 0.0005
+    lr: 0.0002
+    train_groups: 50000
+    val_groups: 25000
     seed: 2026
+    device: same

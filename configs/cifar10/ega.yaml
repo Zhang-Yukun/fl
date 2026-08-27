@@ -10,17 +10,3 @@ experiment:
 federated:
   algorithm: ega_fedavg
   quantization_seed: 2026
-
-ega:
-  artifact_path: artifacts/ega/cifar10_classification_codec.pt
-  block_size: 64
-  encoded_dim: 64
-  hidden_dim: 128
-  residual_blocks: 1
-  quantization_level: 127
-  normalization_ema: 0.9
-  pretrain:
-    epochs: 20
-    patience: 5
-    train_groups: 2000
-    val_groups: 500
