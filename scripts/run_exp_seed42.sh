@@ -24,7 +24,7 @@ for task in "${TASKS[@]}"; do
   for loss in "${LOSSES[@]}"; do
     for mode in "${MODES[@]}"; do
       for profile in "${PROFILES[@]}"; do
-        PROFILE="${profile}"         BASE_ALGOS=fedavg,topk,ega         LOSS_NAME="${loss}"         MODE_SET="${mode}"         TASK_SET="${task}"         TASK_IN_BASE_OUTPUT=true         SUITE_SEED="${SUITE_SEED}"         RUNTIME_DEVICE="${RUNTIME_DEVICE}"         BASE_PORT="${BASE_PORT}"         BASE_OUTPUT_ROOT="${OUTPUT_PREFIX}/${task}/${mode}/${SUITE_SEED}"         PROJECT_NAME="re_fl_${task}_${profile}_${mode}_${loss}_seed${SUITE_SEED}"         bash scripts/run_controlled_suite.sh
+        PROFILE="${profile}"         BASE_ALGOS=fedavg,topk,ega         LOSS_NAME="${loss}"         MODE_SET="${mode}"         TASK_SET="${task}"         TASK_IN_BASE_OUTPUT=true         SUITE_SEED="${SUITE_SEED}"         RUNTIME_DEVICE="${RUNTIME_DEVICE}"         BASE_PORT="${BASE_PORT}"         BASE_OUTPUT_ROOT="${OUTPUT_PREFIX}/${task}/${mode}/${SUITE_SEED}"         PROJECT_NAME="re_fl____"         bash scripts/run_controlled_suite.sh
       done
     done
   done

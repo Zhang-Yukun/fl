@@ -32,7 +32,7 @@ for task in "${TASKS[@]}"; do
     RUNTIME_DEVICE="${RUNTIME_DEVICE}" \
     BASE_PORT="${BASE_PORT}" \
     BASE_OUTPUT_ROOT="${OUTPUT_PREFIX}/${task}/${MODE}/${SUITE_SEED}" \
-    PROJECT_NAME="re_fl_${task}_${PROFILE}_${MODE}_${loss}_seed${SUITE_SEED}" \
+    PROJECT_NAME="re_fl____" \
     bash scripts/run_controlled_suite.sh
   done
 done
