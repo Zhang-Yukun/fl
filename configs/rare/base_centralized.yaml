@@ -1,6 +1,6 @@
 includes:
-  - ../common/forecasting_patchtst.yaml
-  - ../common/evaluation_protocol.yaml
+  - ../common/base/forecasting_patchtst.yaml
+  - ../common/evaluation/protocol.yaml
 
 experiment:
   mode: centralized

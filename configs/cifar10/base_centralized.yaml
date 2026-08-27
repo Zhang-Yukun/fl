@@ -1,6 +1,6 @@
 includes:
-  - ../common/classification_base.yaml
-  - ../common/data_cifar10.yaml
+  - ../common/base/classification.yaml
+  - ../common/data/cifar10.yaml
 
 experiment:
   mode: centralized

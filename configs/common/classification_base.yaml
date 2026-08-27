@@ -1,8 +1,0 @@
-includes:
-  - task_classification.yaml
-  - model_small_cnn.yaml
-  - training.yaml
-  - loss_classification.yaml
-  - evaluation_accuracy.yaml
-  - tracking_disabled.yaml
-  - grpc_default.yaml

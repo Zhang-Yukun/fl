@@ -1,0 +1,8 @@
+includes:
+  - ../task/classification.yaml
+  - ../model/small_cnn.yaml
+  - ../training/default.yaml
+  - ../loss/classification.yaml
+  - ../evaluation/accuracy.yaml
+  - ../tracking/disabled.yaml
+  - ../grpc/default.yaml

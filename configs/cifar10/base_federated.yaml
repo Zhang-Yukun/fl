@@ -1,4 +1,4 @@
 includes:
-  - ../common/classification_base.yaml
-  - ../common/federated.yaml
-  - ../common/data_cifar10.yaml
+  - ../common/base/classification.yaml
+  - ../common/federated/default.yaml
+  - ../common/data/cifar10.yaml
