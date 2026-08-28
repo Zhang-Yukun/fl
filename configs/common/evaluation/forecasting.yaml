@@ -1,3 +1,4 @@
 evaluation:
+  mode: protocol
   # Forecasting metrics currently support mse, mae, mape, cross_entropy; tasks also append the primary metric automatically.
   metrics: [mse, mae, mape]

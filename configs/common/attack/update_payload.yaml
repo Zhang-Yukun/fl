@@ -8,10 +8,12 @@ attack:
   # Success metric used after one-to-one matching.
   recovery_success_metric: mse
   recovery_success_objective: auto
+  recovery_success_threshold: null
   # Attack trigger frequency in rounds.
   frequency_rounds: 10
   # auto means one independent attack record per attacked client per round.
   sample_count: auto
+  sample_count_cap: 8
   # auto means recover up to the attacked client's training-set size, capped below.
   max_samples: auto
   max_samples_cap: 128

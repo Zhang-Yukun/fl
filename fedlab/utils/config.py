@@ -80,7 +80,7 @@ _RUNTIME_DEFAULTS = {
         "address": "0.0.0.0:50051",
         "server_address": "127.0.0.1:50051",
         "poll_seconds": 1.0,
-        "max_message_mb": 256.0,
+        "max_message_mb": 384.0,
     },
     "artifacts": {
         "config_formats": ["yaml"],

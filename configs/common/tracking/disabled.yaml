@@ -1,3 +1,5 @@
 tracking:
   # Classification smoke-test style configs default to disabled tracking.
   enabled: false
+  offline: true
+  project: federated-rare-earth

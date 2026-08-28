@@ -199,7 +199,7 @@ A:
 | `grpc.address` | `0.0.0.0:50051` | `host:port` | 服务器监听地址。 |
 | `grpc.server_address` | `127.0.0.1:50051` | `host:port` | 客户端连接地址。 |
 | `grpc.poll_seconds` | `1.0` | 正浮点数 | 客户端轮询间隔。 |
-| `grpc.max_message_mb` | `256.0` | 正浮点数 | gRPC 最大消息大小。 |
+| `grpc.max_message_mb` | `384.0` | 正浮点数 | gRPC 最大消息大小。 |
 
 ### 3.12 `artifacts`
 

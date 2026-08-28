@@ -124,7 +124,7 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["attack"]["max_samples_cap"] == 8
     assert config["attack"]["recovery_match_metric"] == "mse"
     assert config["attack"]["recovery_success_metric"] == "mse"
-    assert config["grpc"]["max_message_mb"] == 256.0
+    assert config["grpc"]["max_message_mb"] == 384.0
     assert config["artifacts"]["config_formats"] == ["yaml"]
 
 
