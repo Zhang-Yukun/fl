@@ -10,23 +10,15 @@ CURRENT_SCRIPTS = (
     "run_exp_seed42.sh",
     "run_exp_seed42_part1.sh",
     "run_exp_seed42_part2.sh",
-    "run_exp_seed42_part3.sh",
-    "run_exp_seed42_part4.sh",
     "run_exp_seed2026.sh",
     "run_exp_seed2026_part1.sh",
     "run_exp_seed2026_part2.sh",
-    "run_exp_seed2026_part3.sh",
-    "run_exp_seed2026_part4.sh",
     "run_exp_seed55.sh",
     "run_exp_seed55_part1.sh",
     "run_exp_seed55_part2.sh",
-    "run_exp_seed55_part3.sh",
-    "run_exp_seed55_part4.sh",
     "run_exp_seed8192.sh",
     "run_exp_seed8192_part1.sh",
     "run_exp_seed8192_part2.sh",
-    "run_exp_seed8192_part3.sh",
-    "run_exp_seed8192_part4.sh",
     "run_suite.sh",
 )
 
@@ -55,6 +47,14 @@ REMOVED_SCRIPTS = (
     "run_exp_seed8192_mse.sh",
     "run_exp_seed8192_mse_part1.sh",
     "run_exp_seed8192_mse_part2.sh",
+    "run_exp_seed42_part3.sh",
+    "run_exp_seed42_part4.sh",
+    "run_exp_seed2026_part3.sh",
+    "run_exp_seed2026_part4.sh",
+    "run_exp_seed55_part3.sh",
+    "run_exp_seed55_part4.sh",
+    "run_exp_seed8192_part3.sh",
+    "run_exp_seed8192_part4.sh",
     "run_tmux_three_task_suite.sh",
     "run_ega_noattack_adam_sweep_tmux.sh",
     "run_ega_noattack_adam_sweep_worker.sh",
@@ -172,10 +172,33 @@ def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
 
 
 def test_seed_wrappers_delegate_to_controlled_suite():
+    expected_devices = {
+        'run_exp_seed42.sh': 'cuda:0',
+        'run_exp_seed42_part1.sh': 'cuda:0',
+        'run_exp_seed42_part2.sh': 'cuda:0',
+        'run_exp_seed2026.sh': 'cuda:0',
+        'run_exp_seed2026_part1.sh': 'cuda:0',
+        'run_exp_seed2026_part2.sh': 'cuda:0',
+        'run_exp_seed55.sh': 'cuda:1',
+        'run_exp_seed55_part1.sh': 'cuda:1',
+        'run_exp_seed55_part2.sh': 'cuda:1',
+        'run_exp_seed8192.sh': 'cuda:1',
+        'run_exp_seed8192_part1.sh': 'cuda:1',
+        'run_exp_seed8192_part2.sh': 'cuda:1',
+    }
     for path in sorted(SCRIPT_DIR.glob('run_exp_seed*.sh')):
         content = _assert_executable(path.name)
         assert 'bash scripts/run_controlled_suite.sh' in content
         assert 'BASE_ALGOS=fedavg,topk,ega' in content
+        assert f'RUNTIME_DEVICE="${{RUNTIME_DEVICE:-{expected_devices[path.name]}}}"' in content
+        if '_part1.sh' in path.name:
+            assert 'PROFILE="noattack"' in content
+            assert 'MODES=(single_sync multi_sync)' in content
+            assert 'BASE_PORT="${mode_base_port}"' in content
+        if '_part2.sh' in path.name:
+            assert 'PROFILE="attack"' in content
+            assert 'MODES=(single_sync multi_sync)' in content
+            assert 'BASE_PORT="${mode_base_port}"' in content
 
 
 def test_removed_scripts_are_absent():
