@@ -152,7 +152,6 @@ Result artifacts no longer store `upload_mode` or `download_mode`, because the p
 | `client_selection` | string | Attacked-client selection strategy: `all`, `first`, or `round_robin`. |
 | `clients_per_round` | int | Number of attacked clients on each attacked round. |
 | `frequency_rounds` | int | Attack frequency in communication rounds. |
-| `sample_count` | string or int | Number of independent attack evaluations per attacked client. `auto` currently resolves to `1`. |
 | `max_samples` | string or int | Number of samples jointly reconstructed in one attack evaluation. `auto` uses the attacked client's training-sample count. |
 | `max_samples_cap` | int | Cap applied when `max_samples=auto`. |
 | `model_mode` | string | Attack model mode, `train` or `eval`. |
@@ -387,8 +386,6 @@ Each element is one DLG or iDLG result.
 | `name` | string | Attack name, usually `DLG` or `iDLG`. |
 | `primary_metric_name` | string | Primary attack metric name. The default is `budget_recovered_fraction`. |
 | `primary_metric_value` | float or null | Primary attack metric value. |
-| `psnr` | float or null | PSNR against the exact selected reference sample. |
-| `ssim` | float or null | SSIM against the exact selected reference sample. |
 | `iterations` | int | Attack optimization steps. |
 | `time_seconds` | float | Attack runtime. |
 | `success` | bool | Whether this attack satisfied the configured recovery rule. |
@@ -409,7 +406,7 @@ Each element is one DLG or iDLG result.
 | `round_index` | int | Communication round index. |
 | `sample_index` | int | Independent attack-evaluation index for that client and round. |
 | `artifact_path` | string | Relative path to the `.pt` tensor artifact. |
-| `reference_label` | string | Visualization reference source such as `exact_target`, `nearest_client_train`, or `matched_client_train`. |
+| `reference_label` | string | Visualization reference source such as `nearest_client_train` or `matched_client_train`. |
 
 ### 3.7 Nested `attack_summary`
 
@@ -541,7 +538,6 @@ The prefix is `attack/<method>/`, for example `attack/DLG/` or `attack/iDLG/`:
 | `primary_metric_name` | Primary metric name for that method. |
 | `primary_metric_value` | Current-round average primary metric for that method. |
 | `cumulative_avg_primary_metric_value` | Running average primary metric for that method. |
-| `psnr` / `ssim` | Current-round average PSNR / SSIM. |
 | `iterations` | Attack optimization steps. |
 | `time_seconds` | Current-round average attack runtime. |
 | `objective_mse` | Current-round average optimization objective. |

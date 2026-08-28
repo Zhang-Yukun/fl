@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - numpy is expected in the training env
 from loguru import logger
 
 from fedlab.utils.artifacts import save_experiment_config, save_federated_snapshot, should_save_periodic_artifacts
-from fedlab.security.attacks import (
+from fedlab.security.attack_common import (
     apply_set_recovery_metrics,
     attack_success_rate,
     attach_attack_metadata,
@@ -498,8 +498,10 @@ class AttackSampleTask:
     target_type: str
     round_base_state: StateDict
     target: list[torch.Tensor] | StateDict
-    real_x: torch.Tensor
-    real_y: torch.Tensor
+    sample_x_shape: tuple[int, ...]
+    sample_y_shape: tuple[int, ...]
+    sample_x_dtype: str
+    sample_y_dtype: str
     reference_inputs: torch.Tensor | None = None
     reference_targets: torch.Tensor | None = None
     scale_mean: list[float] | None = None
@@ -535,6 +537,27 @@ def _clone_attack_target(target: list[torch.Tensor] | StateDict) -> list[torch.T
     return _clone_state(target)
 
 
+def _torch_dtype_name(dtype: torch.dtype) -> str:
+    """Return one stable dtype name for saved attack templates."""
+
+    return str(dtype).replace("torch.", "")
+
+
+def _resolve_torch_dtype(name: str) -> torch.dtype:
+    """Resolve one saved dtype name back into a torch dtype."""
+
+    dtype = getattr(torch, str(name), None)
+    if not isinstance(dtype, torch.dtype):
+        raise ValueError(f"Unknown torch dtype name in saved attack template: {name}")
+    return dtype
+
+
+def _materialize_attack_template(shape: tuple[int, ...], dtype_name: str) -> torch.Tensor:
+    """Create one zero-valued template tensor used only for shape and dtype."""
+
+    return torch.zeros(shape, dtype=_resolve_torch_dtype(dtype_name))
+
+
 def _select_attack_client_ids(client_ids: list[str], config: dict[str, Any], round_index: int) -> list[str]:
     """Return the configured attack client subset while preserving client order."""
 
@@ -549,31 +572,6 @@ def _select_attack_client_ids(client_ids: list[str], config: dict[str, Any], rou
         return list(client_ids[:count])
     start = round_index % len(client_ids)
     return [client_ids[(start + offset) % len(client_ids)] for offset in range(min(count, len(client_ids)))]
-
-
-def _resolve_attack_sample_count(attack_cfg: dict[str, Any], available_batches: int | None) -> int:
-    """Resolve how many attack reconstructions to run for one client in one round."""
-
-    configured = attack_cfg.get("sample_count", "auto")
-    if configured is None or str(configured).strip().lower() == "auto":
-        count = 1
-    else:
-        count = max(1, int(configured))
-    if available_batches is not None:
-        count = min(count, max(1, int(available_batches)))
-    return count
-
-
-def _client_attack_available_batches(client: FederatedClient) -> int | None:
-    """Best-effort batch count used by attack sampling defaults."""
-
-    train_loader = getattr(client, "train_loader", None)
-    if train_loader is None:
-        return None
-    try:
-        return int(len(train_loader))
-    except Exception:
-        return None
 
 
 def _client_attack_available_samples(client: FederatedClient) -> int | None:
@@ -652,17 +650,17 @@ def _capture_round_update_records(
         reference_target_getter = getattr(client, "train_reference_targets", None)
         reference_targets = reference_target_getter() if callable(reference_target_getter) else None
         samples = []
-        sample_count = _resolve_attack_sample_count(attack_cfg, _client_attack_available_batches(client))
         max_samples = _resolve_attack_max_samples(attack_cfg, _client_attack_available_samples(client))
-        for sample_index in range(sample_count):
-            real_x, real_y = client.sample_batch(max_samples=max_samples, batch_index=sample_index)
-            samples.append(
-                {
-                    "sample_index": int(sample_index),
-                    "real_x": real_x.detach().cpu().clone(),
-                    "real_y": real_y.detach().cpu().clone(),
-                }
-            )
+        sample_x, sample_y = client.sample_batch(max_samples=max_samples, batch_index=0)
+        samples.append(
+            {
+                "sample_index": 0,
+                "sample_x_shape": list(sample_x.shape),
+                "sample_y_shape": list(sample_y.shape),
+                "sample_x_dtype": _torch_dtype_name(sample_x.dtype),
+                "sample_y_dtype": _torch_dtype_name(sample_y.dtype),
+            }
+        )
         records.append(
             {
                 "client_id": client.client_id,
@@ -767,8 +765,10 @@ def build_update_attack_round_task(
                     target_type="update_payload",
                     round_base_state=_clone_state(record["round_base_state"]),
                     target=_clone_state(record["target_update"]),
-                    real_x=sample["real_x"].detach().cpu().clone(),
-                    real_y=sample["real_y"].detach().cpu().clone(),
+                    sample_x_shape=tuple(int(value) for value in sample["sample_x_shape"]),
+                    sample_y_shape=tuple(int(value) for value in sample["sample_y_shape"]),
+                    sample_x_dtype=str(sample["sample_x_dtype"]),
+                    sample_y_dtype=str(sample["sample_y_dtype"]),
                     reference_inputs=None if record.get("reference_inputs") is None else record["reference_inputs"].detach().cpu().clone(),
                     reference_targets=None if record.get("reference_targets") is None else record["reference_targets"].detach().cpu().clone(),
                     scale_mean=None if record.get("scale_mean") is None else [float(value) for value in record["scale_mean"]],
@@ -822,12 +822,14 @@ def _execute_attack_round_task(
     attacks = []
     sample_lookup = {(sample.client_id, sample.round_index, sample.sample_index): sample for sample in task.samples}
     for sample in task.samples:
+        sample_x = _materialize_attack_template(sample.sample_x_shape, sample.sample_x_dtype)
+        sample_y = _materialize_attack_template(sample.sample_y_shape, sample.sample_y_dtype)
         for result in run_attacks(
             config,
             sample.round_base_state,
             sample.target,
-            sample.real_x,
-            sample.real_y,
+            sample_x,
+            sample_y,
             attack_device,
             target_type=sample.target_type,
             reference_inputs=sample.reference_inputs,
@@ -839,14 +841,12 @@ def _execute_attack_round_task(
                 round_index=sample.round_index,
                 sample_index=sample.sample_index,
             )
-            plot_reference_x = result.reference_x if getattr(result, "reference_x", None) is not None else result.real_x
-            plot_reference_y = result.reference_y if getattr(result, "reference_y", None) is not None else result.real_y
-            result.plot_reference_x = _inverse_plot_tensor(plot_reference_x, sample.scale_mean, sample.scale_std)
+            plot_reference_x = getattr(result, "reference_x", None)
+            plot_reference_y = getattr(result, "reference_y", None)
+            result.plot_reference_x = None if plot_reference_x is None else _inverse_plot_tensor(plot_reference_x, sample.scale_mean, sample.scale_std)
             result.plot_reconstructed_x = _inverse_plot_tensor(result.reconstructed_x, sample.scale_mean, sample.scale_std)
             result.plot_reference_y = None if plot_reference_y is None else _inverse_plot_tensor(plot_reference_y, sample.scale_mean, sample.scale_std)
             result.plot_reconstructed_y = None if result.reconstructed_y is None else _inverse_plot_tensor(result.reconstructed_y, sample.scale_mean, sample.scale_std)
-            result.plot_real_x = result.plot_reference_x
-            result.plot_real_y = result.plot_reference_y
             attacks.append(result)
     grouped: dict[tuple[str | None, int | None, str], list[Any]] = {}
     for result in attacks:
@@ -867,8 +867,6 @@ def _execute_attack_round_task(
                 result.plot_reference_x = _inverse_plot_tensor(result.reference_x, first.scale_mean, first.scale_std)
             if result.reference_y is not None:
                 result.plot_reference_y = _inverse_plot_tensor(result.reference_y, first.scale_mean, first.scale_std)
-            result.plot_real_x = result.plot_reference_x
-            result.plot_real_y = result.plot_reference_y
     return AttackRoundResult(
         round_index=task.round_index,
         time_seconds=time.perf_counter() - start,

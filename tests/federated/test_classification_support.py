@@ -201,7 +201,6 @@ def test_federated_run_supports_classification_attacks(tmp_path):
         'enabled': True,
         'target_type': 'update_payload',
         'frequency_rounds': 1,
-        'sample_count': 1,
         'max_samples': 1,
         'clients_per_round': 1,
         'client_selection': 'first',

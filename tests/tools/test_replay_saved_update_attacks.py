@@ -38,7 +38,6 @@ def _deterministic_overrides(output_dir: Path, attack_enabled: bool) -> list[str
         "attack.target_type=update_payload",
         "attack.frequency_rounds=1",
         "attack.max_samples=1",
-        "attack.sample_count=1",
         "attack.clients_per_round=1",
         "attack.client_selection=first",
         "attack.steps=1",
@@ -87,13 +86,21 @@ def test_replay_saved_update_attacks_matches_inline_results(tmp_path):
     assert len(captures) == 3
     assert {record["client_id"] for record in captures} == {"Nd2O3", "CeO2", "La2O3"}
     assert (source_dir / "saved_updates" / "index.json").exists()
+    sample = captures[0]["samples"][0]
+    assert "real_x" not in sample
+    assert "real_y" not in sample
+    assert sample["sample_x_shape"][0] == 1
+    assert sample["sample_x_dtype"] == "float32"
 
     payload = _run_script(module, "replay_saved_update_attacks", source_dir, replay_dir)
     assert payload["attack_count"] == 2
+    assert payload["summary_path"] == str(replay_dir / "summary.json")
 
+    source_summary = json.loads((source_dir / "summary.json").read_text(encoding="utf-8"))
     online_results = json.loads((online_dir / "attack_results.json").read_text(encoding="utf-8"))
     replay_results = json.loads((replay_dir / "attack_results.json").read_text(encoding="utf-8"))
     replay_summary = json.loads((replay_dir / "attack_summary.json").read_text(encoding="utf-8"))
+    replay_run_summary = json.loads((replay_dir / "summary.json").read_text(encoding="utf-8"))
 
     assert len(online_results) == len(replay_results) == 2
     for online, replay in zip(online_results, replay_results):
@@ -113,6 +120,19 @@ def test_replay_saved_update_attacks_matches_inline_results(tmp_path):
     assert replay_summary["overall_avg_primary_metric_value"] == pytest.approx(
         sum(record["primary_metric_value"] for record in online_results) / len(online_results)
     )
+    assert replay_run_summary["test"] == source_summary["test"]
+    assert replay_run_summary["rounds"] == source_summary["rounds"]
+    assert replay_run_summary["attack_primary_metric_name"] == replay_summary["primary_metric_name"]
+    assert replay_run_summary["attack_primary_metric_direction"] == replay_summary["primary_metric_direction"]
+    assert replay_run_summary["attack_overall_avg_primary_metric_value"] == pytest.approx(
+        replay_summary["overall_avg_primary_metric_value"]
+    )
+    assert replay_run_summary["attack_overall_best_primary_metric_value"] == pytest.approx(
+        replay_summary["overall_best_primary_metric_value"]
+    )
+    assert replay_run_summary["attack_success_rate"] == pytest.approx(replay_summary["overall_success_rate"])
+    assert replay_run_summary["attack_evaluations"] == len(replay_results)
+    assert replay_run_summary["attack_summary"] == replay_summary
     assert sorted((replay_dir / "attack_artifacts").rglob("*.pt"))
 
 

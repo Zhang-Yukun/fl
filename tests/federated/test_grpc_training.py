@@ -11,7 +11,6 @@ import torch
 import fedlab.federated.server as server_module
 import fedlab.federated.client as client_module
 import fedlab.communication.grpc_training as grpc_training_module
-import fedlab.security.attacks as attacks_module
 from fedlab.communication.grpc_training import GrpcFederatedCoordinator, _apply_transport_metrics, run_client, serve
 from fedlab.datasets import build_federated_loaders
 import fedlab.federated.algorithms as algorithms_module
@@ -170,7 +169,7 @@ def _classification_grpc_config(tmp_path: Path, *, algorithm: str) -> dict[str, 
         'training': {'epochs': 1, 'lr': 0.001, 'optimizer': 'adam', 'loss': 'cross_entropy', 'patience': 1, 'min_delta': 0.0},
         'centralized': {},
         'federated': {'algorithm': algorithm, 'rounds': 1},
-        'attack': {'enabled': False, 'frequency_rounds': 1, 'sample_count': 1, 'max_samples': 1, 'async_enabled': False, 'device': 'cpu'},
+        'attack': {'enabled': False, 'frequency_rounds': 1, 'max_samples': 1, 'async_enabled': False, 'device': 'cpu'},
         'tracking': {'enabled': False},
         'evaluation': {'metrics': ['accuracy']},
         'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},
@@ -341,7 +340,6 @@ def test_grpc_coordinator_saves_attack_results(tmp_path):
             "attack.target_type=update_payload",
             "attack.frequency_rounds=1",
             "attack.max_samples=1",
-            "attack.sample_count=1",
             "attack.clients_per_round=1",
             "attack.steps=1",
             "attack.optimizer=adam",
@@ -382,7 +380,6 @@ def test_grpc_coordinator_saves_update_captures_when_attacks_disabled(tmp_path):
             "federated.rounds=1",
             "attack.enabled=false",
             "attack.frequency_rounds=1",
-            "attack.sample_count=1",
             "attack.max_samples=1",
             "tracking.enabled=false",
             "runtime.device=cpu",
@@ -495,7 +492,6 @@ def test_grpc_matches_single_process_fedavg_when_randomness_disabled(tmp_path):
         "attack.target_type=update_payload",
         "attack.frequency_rounds=1",
         "attack.max_samples=1",
-        "attack.sample_count=1",
         "attack.clients_per_round=1",
         "attack.client_selection=first",
         "attack.steps=1",
@@ -565,7 +561,6 @@ def test_real_grpc_sync_and_async_match_when_randomness_disabled(tmp_path):
         "attack.target_type=update_payload",
         "attack.frequency_rounds=1",
         "attack.max_samples=1",
-        "attack.sample_count=1",
         "attack.clients_per_round=1",
         "attack.client_selection=first",
         "attack.steps=1",

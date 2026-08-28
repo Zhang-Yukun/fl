@@ -3,7 +3,9 @@ import torch
 
 from fedlab.modeling import build_model
 from fedlab.engine.training import first_batch_sample
-from fedlab.security.attacks import AttackResult, apply_set_recovery_metrics, dlg_attack, idlg_attack, save_attack_artifacts, summarize_attack_results
+from fedlab.security.attack_common import AttackResult, apply_set_recovery_metrics, save_attack_artifacts, summarize_attack_results
+from fedlab.security.dlg import dlg_attack
+from fedlab.security.idlg import idlg_attack
 from fedlab.security.registry import register_attack_artifact_field, register_attack_record_field, register_attack_summary_metric, register_recovery_metric
 from fedlab.utils.serialization import serialize_model, subtract_state
 
@@ -90,8 +92,6 @@ def test_attack_summary_uses_registered_primary_metric_direction(monkeypatch):
     result = AttackResult(
         name='DLG',
         mse=0.0,
-        psnr=0.0,
-        ssim=0.0,
         iterations=1,
         time_seconds=0.0,
         success=False,
@@ -130,15 +130,15 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
 
     assert dlg.target_type == "update_payload"
     assert idlg.target_type == "update_payload"
-    assert torch.isfinite(torch.tensor(dlg.reconstruction_mse))
-    assert torch.isfinite(torch.tensor(idlg.reconstruction_mse))
-    assert dlg.metric_name == "nearest_client_train_mse"
-    assert idlg.metric_name == "nearest_client_train_mse"
+    assert torch.isfinite(torch.tensor(dlg.mse))
+    assert torch.isfinite(torch.tensor(idlg.mse))
+    assert dlg.metric_name == "objective_mse"
+    assert idlg.metric_name == "objective_mse"
     assert dlg.nearest_client_train_mse is not None
     assert idlg.nearest_client_train_mse is not None
     assert dlg.reference_label == "nearest_client_train"
     assert torch.allclose(dlg.reference_x, x)
-    assert torch.allclose(dlg.reference_y, y)
+    assert dlg.reference_y is None
 
     dlg.client_id = "Nd2O3"
     idlg.client_id = "Nd2O3"
@@ -192,8 +192,6 @@ def test_attack_serialization_supports_custom_registered_fields(tmp_path, monkey
     result = AttackResult(
         name='DLG',
         mse=0.1,
-        psnr=1.0,
-        ssim=0.1,
         iterations=1,
         time_seconds=0.0,
         success=False,
@@ -224,7 +222,7 @@ def test_attack_artifacts_persist_reconstructions(tmp_path):
     optimizer.step()
     target_update = subtract_state(serialize_model(model), state)
 
-    result = dlg_attack(config, state, target_update, x, y, device, target_type="update_payload")
+    result = dlg_attack(config, state, target_update, x, y, device, target_type="update_payload", reference_inputs=x, reference_targets=y)
     result.client_id = "Nd2O3"
     result.round_index = 2
     result.sample_index = 0
@@ -235,8 +233,8 @@ def test_attack_artifacts_persist_reconstructions(tmp_path):
     assert records[0]["artifact_path"] is not None
     artifact_path = tmp_path / records[0]["artifact_path"]
     payload = torch.load(artifact_path, map_location="cpu", weights_only=False)
-    assert torch.allclose(payload["real_x"], x)
-    assert torch.allclose(payload["real_y"], y)
+    assert "real_x" not in payload
+    assert "real_y" not in payload
     assert payload["reference_x"] is not None
     assert payload["reference_label"] is not None
     assert payload["reconstructed_x"].shape == x.shape
@@ -269,8 +267,6 @@ def test_apply_set_recovery_metrics_supports_custom_registered_metric(monkeypatc
         AttackResult(
             name='DLG',
             mse=0.0,
-            psnr=0.0,
-            ssim=0.0,
             iterations=1,
             time_seconds=0.0,
             success=False,
@@ -301,8 +297,6 @@ def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and
         AttackResult(
             name="DLG",
             mse=0.0,
-            psnr=0.0,
-            ssim=0.0,
             iterations=1,
             time_seconds=0.0,
             success=False,
@@ -315,8 +309,6 @@ def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and
         AttackResult(
             name="DLG",
             mse=0.0,
-            psnr=0.0,
-            ssim=0.0,
             iterations=1,
             time_seconds=0.0,
             success=False,
@@ -347,8 +339,6 @@ def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and
         AttackResult(
             name="iDLG",
             mse=0.0,
-            psnr=0.0,
-            ssim=0.0,
             iterations=1,
             time_seconds=0.0,
             success=False,
@@ -477,7 +467,7 @@ def test_classification_update_payload_attacks_keep_reference_labels():
         reference_targets=reference_targets,
     )
 
-    assert dlg.metric_name == "nearest_client_train_mse"
+    assert dlg.metric_name == "objective_mse"
     assert dlg.reference_label == "nearest_client_train"
     assert dlg.reference_x.shape == x.shape
     assert dlg.nearest_client_train_indices is not None

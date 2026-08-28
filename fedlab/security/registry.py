@@ -299,22 +299,6 @@ def _ensure_builtin_attack_summary_metrics_registered() -> None:
         best_objective='max',
     )
     register_attack_summary_metric(
-        'psnr',
-        lambda result: getattr(result, 'psnr', None),
-        average_key='overall_avg_psnr',
-        best_key='overall_best_psnr',
-        best_objective='max',
-        privacy_direction=None,
-    )
-    register_attack_summary_metric(
-        'ssim',
-        lambda result: getattr(result, 'ssim', None),
-        average_key='overall_avg_ssim',
-        best_key='overall_best_ssim',
-        best_objective='max',
-        privacy_direction=None,
-    )
-    register_attack_summary_metric(
         'objective_mse',
         lambda result: getattr(result, 'gradient_mse', None),
         average_key='overall_avg_objective_mse',
@@ -426,8 +410,6 @@ def _ensure_builtin_attack_record_fields_registered() -> None:
         return
     _BUILTIN_ATTACK_RECORD_FIELDS_LOADED = True
     register_attack_record_field('name', lambda result: getattr(result, 'name', None))
-    register_attack_record_field('psnr', lambda result: getattr(result, 'psnr', None), omit_if_none=False)
-    register_attack_record_field('ssim', lambda result: getattr(result, 'ssim', None), omit_if_none=False)
     register_attack_record_field('iterations', lambda result: getattr(result, 'iterations', None))
     register_attack_record_field('time_seconds', lambda result: getattr(result, 'time_seconds', None))
     register_attack_record_field('success', lambda result: getattr(result, 'success', None))
@@ -461,9 +443,9 @@ def _ensure_builtin_attack_artifact_fields_registered() -> None:
         register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None))
     register_attack_artifact_field('primary_metric_name', lambda result: getattr(result, 'metric_name', None))
     register_attack_artifact_field('primary_metric_value', lambda result: getattr(result, 'mse', None))
-    for key in ('real_x', 'real_y', 'reference_x', 'reference_y', 'reconstructed_x', 'reconstructed_y'):
+    for key in ('reference_x', 'reference_y', 'reconstructed_x', 'reconstructed_y'):
         register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None), tensor_to_cpu=True)
-    for key in ('plot_real_x', 'plot_real_y', 'plot_reference_x', 'plot_reference_y', 'plot_reconstructed_x', 'plot_reconstructed_y'):
+    for key in ('plot_reference_x', 'plot_reference_y', 'plot_reconstructed_x', 'plot_reconstructed_y'):
         register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None), tensor_to_cpu=True)
     for key in (
         'nearest_client_train_mse',
@@ -551,8 +533,6 @@ def _ensure_builtin_attack_tracking_metrics_registered() -> None:
     _BUILTIN_ATTACK_TRACKING_METRICS_LOADED = True
     register_attack_tracking_metric('budget_recovered_fraction', lambda result: getattr(result, 'budget_recovered_fraction', None), current_key='budget_recovered_fraction', cumulative_key='cumulative_avg_budget_recovered_fraction')
     register_attack_tracking_metric('coverage_recovered_fraction', lambda result: getattr(result, 'coverage_recovered_fraction', None), current_key='coverage_recovered_fraction', cumulative_key='cumulative_avg_coverage_recovered_fraction')
-    register_attack_tracking_metric('psnr', lambda result: getattr(result, 'psnr', None), current_key='psnr')
-    register_attack_tracking_metric('ssim', lambda result: getattr(result, 'ssim', None), current_key='ssim')
     register_attack_tracking_metric('iterations', lambda result: getattr(result, 'iterations', None), current_key='iterations')
     register_attack_tracking_metric('time_seconds', lambda result: getattr(result, 'time_seconds', None), current_key='time_seconds')
     register_attack_tracking_metric('objective_mse', lambda result: getattr(result, 'gradient_mse', None), current_key='objective_mse', cumulative_key='cumulative_avg_objective_mse')

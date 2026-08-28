@@ -27,8 +27,6 @@ def test_plot_attack_reconstructions_plots_saved_artifacts(tmp_path):
             "sample_index": 0,
             "target_type": "update_payload",
             "primary_metric_name": "budget_recovered_fraction",
-            "real_x": torch.tensor([[[9.0], [9.0], [9.0]]]),
-            "real_y": torch.tensor([[[8.0], [8.0]]]),
             "reference_x": torch.tensor([[[1.0], [2.0], [3.0]]]),
             "reference_y": torch.tensor([[[4.0], [5.0]]]),
             "reference_label": "nearest_client_train",

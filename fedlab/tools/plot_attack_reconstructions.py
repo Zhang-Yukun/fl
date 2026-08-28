@@ -88,9 +88,9 @@ def plot_one_artifact(
         raise ValueError("Attack record does not include artifact_path")
     artifact = torch.load(run_dir / artifact_rel, map_location="cpu", weights_only=False)
 
-    real_x = _artifact_tensor(artifact, "plot_reference_x", "plot_real_x", "reference_x", "real_x")
+    real_x = _artifact_tensor(artifact, "plot_reference_x", "reference_x")
     recon_x = _artifact_tensor(artifact, "plot_reconstructed_x", "reconstructed_x")
-    real_y = _artifact_tensor(artifact, "plot_reference_y", "plot_real_y", "reference_y", "real_y")
+    real_y = _artifact_tensor(artifact, "plot_reference_y", "reference_y")
     recon_y = _artifact_tensor(artifact, "plot_reconstructed_y", "reconstructed_y")
 
     if real_x is None or recon_x is None:

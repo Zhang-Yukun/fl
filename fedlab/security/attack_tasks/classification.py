@@ -10,13 +10,15 @@ from torch import nn
 from fedlab.utils.serialization import StateDict
 
 
-def is_classification_attack(config: dict[str, Any], real_y: torch.Tensor) -> bool:
+def is_classification_attack(config: dict[str, Any], target_template: torch.Tensor | None = None) -> bool:
     """Return whether the current attack target is a classification batch."""
 
     task_type = str(config.get("task", {}).get("type", "")).lower()
     if task_type == "classification":
         return True
-    return real_y.ndim == 1 and not torch.is_floating_point(real_y)
+    if target_template is None:
+        return False
+    return target_template.ndim == 1 and not torch.is_floating_point(target_template)
 
 
 def _classification_num_classes(

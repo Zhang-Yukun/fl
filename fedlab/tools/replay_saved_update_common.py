@@ -18,7 +18,7 @@ from fedlab.federated.algorithms import (
     configure_torch_runtime,
     load_captured_update_records,
 )
-from fedlab.security.attacks import save_attack_artifacts, summarize_attack_results
+from fedlab.security.attack_common import save_attack_artifacts, summarize_attack_results
 from fedlab.utils.artifacts import save_experiment_config
 from fedlab.utils.config import load_config
 from fedlab.utils.logging import setup_logging
@@ -55,6 +55,31 @@ def build_replay_config(config_path: Path, overrides: list[str], forced_methods:
             f"received {target_type!r}"
         )
     return replay_config
+
+
+def build_replay_summary(
+    run_dir: Path,
+    attack_records: list[dict[str, object]],
+    attack_summary: dict[str, object],
+) -> dict[str, object]:
+    """Copy the source run summary and refresh the attack-related fields for replay."""
+
+    summary_path = run_dir / "summary.json"
+    summary: dict[str, object] = {}
+    if summary_path.exists():
+        summary = copy.deepcopy(json.loads(summary_path.read_text(encoding="utf-8")))
+    summary["attack_target_type"] = attack_summary.get(
+        "target_type",
+        summary.get("attack_target_type", "update_payload"),
+    )
+    summary["attack_primary_metric_name"] = attack_summary["primary_metric_name"]
+    summary["attack_primary_metric_direction"] = attack_summary["primary_metric_direction"]
+    summary["attack_overall_avg_primary_metric_value"] = attack_summary["overall_avg_primary_metric_value"]
+    summary["attack_overall_best_primary_metric_value"] = attack_summary["overall_best_primary_metric_value"]
+    summary["attack_success_rate"] = attack_summary["overall_success_rate"]
+    summary["attack_evaluations"] = len(attack_records)
+    summary["attack_summary"] = copy.deepcopy(attack_summary)
+    return summary
 
 
 def replay_saved_update_attacks(
@@ -105,11 +130,15 @@ def replay_saved_update_attacks(
     )
     with (output_dir / "attack_summary.json").open('w', encoding='utf-8') as handle:
         json.dump(attack_summary, handle, ensure_ascii=False, indent=2)
+    replay_summary = build_replay_summary(run_dir, attack_records, attack_summary)
+    with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
+        json.dump(replay_summary, handle, ensure_ascii=False, indent=2)
     return {
         "source_run_dir": str(run_dir),
         "output_dir": str(output_dir),
         "attack_count": len(attack_records),
         "attack_summary_path": str(output_dir / "attack_summary.json"),
+        "summary_path": str(output_dir / "summary.json"),
     }
 
 

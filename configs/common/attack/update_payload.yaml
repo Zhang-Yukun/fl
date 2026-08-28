@@ -10,10 +10,7 @@ attack:
   recovery_success_objective: auto
   recovery_success_threshold: null
   # Attack trigger frequency in rounds.
-  frequency_rounds: 10
-  # auto means one independent attack record per attacked client per round.
-  sample_count: auto
-  sample_count_cap: 8
+  frequency_rounds: 30
   # auto means recover up to the attacked client's training-set size, capped below.
   max_samples: auto
   max_samples_cap: 128
@@ -26,6 +23,7 @@ attack:
   clients_per_round: 3
   input_clip: 5.0
   target_clip: 5.0
+  tv_weight: 0.0
   success_rate_threshold: 0.05
   overall_success_rate_threshold: 0.05
   data_range: 1.0

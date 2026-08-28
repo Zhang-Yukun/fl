@@ -34,12 +34,11 @@
 
 对于被攻击客户端，攻击任务会保存：
 
-- `real_x`、`real_y`：本次攻击选中的真实样本批次
-- `reference_inputs`、`reference_targets`：该客户端训练集参考集合
+- 攻击任务快照里的 `sample_x_shape`、`sample_y_shape`、`sample_x_dtype`、`sample_y_dtype`：本次攻击批次的输入/目标模板元信息，用于在线攻击执行和离线回放
+- `reference_inputs`、`reference_targets`：该客户端完整训练集参考集合，用于恢复率计算与可视化参考选择
 
-`sample_count` 控制一轮里对同一客户端发起多少次独立攻击，默认 `auto=1`。
 
-`max_samples` 控制单次攻击联合重构多少个样本；当配置为 `auto` 时，会取该客户端可用训练样本数，并再受 `max_samples_cap` 限制。
+`max_samples` 控制单次攻击联合重构多少个样本；当前每个被攻击客户端每轮只生成一个攻击样本集合，当配置为 `auto` 时，会取该客户端可用训练样本数，并再受 `max_samples_cap` 限制。
 
 因此当前评估语义是：服务器基于一次上传 payload，尝试恢复一个给定预算大小的样本集合，再与客户端训练参考集合做匹配。
 
@@ -74,8 +73,6 @@
 - `reference_count`
 - `budget_recovered_fraction`
 - `coverage_recovered_fraction`
-- `psnr`
-- `ssim`
 - `objective_mse`
 - `iterations`
 - `time_seconds`

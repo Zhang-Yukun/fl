@@ -41,8 +41,6 @@ class AttackResult:
 
     name: str
     mse: float
-    psnr: float
-    ssim: float
     iterations: int
     time_seconds: float
     success: bool
@@ -59,13 +57,11 @@ class AttackResult:
     reference_count: int | None = None
     budget_recovered_fraction: float | None = None
     coverage_recovered_fraction: float | None = None
-    metric_name: str = "nearest_client_train_mse"
+    metric_name: str = "objective_mse"
     client_id: str | None = None
     round_index: int | None = None
     sample_index: int | None = None
     artifact_path: str | None = None
-    real_x: torch.Tensor | None = None
-    real_y: torch.Tensor | None = None
     reference_x: torch.Tensor | None = None
     reference_y: torch.Tensor | None = None
     reference_label: str | None = None
@@ -217,9 +213,9 @@ def _select_reference_targets(
     reference_inputs: torch.Tensor | None,
     reference_targets: torch.Tensor | None,
     nearest_indices: list[int] | None,
-) -> tuple[torch.Tensor | None, torch.Tensor | None, str]:
+) -> tuple[torch.Tensor | None, torch.Tensor | None, str | None]:
     if reference_inputs is None or nearest_indices is None:
-        return None, None, "exact_target"
+        return None, None, None
     index_tensor = torch.tensor(nearest_indices, dtype=torch.long)
     reference_x = reference_inputs.detach().cpu().index_select(0, index_tensor)
     reference_y = None if reference_targets is None else reference_targets.detach().cpu().index_select(0, index_tensor)
@@ -240,58 +236,41 @@ def _metric_passes_threshold(value: float | None, metric: str, objective: str, t
 def _evaluate_reconstruction(
     name: str,
     reconstructed_x: torch.Tensor,
-    real_x: torch.Tensor,
     reconstructed_y: torch.Tensor | None,
-    real_y: torch.Tensor,
     iterations: int,
     elapsed: float,
-    threshold: float,
     objective_mse: float,
-    data_range: float,
-    ssim_threshold: float | None,
     target_type: str,
     reference_inputs: torch.Tensor | None = None,
     reference_targets: torch.Tensor | None = None,
 ) -> AttackResult:
-    exact_target_value = torch.mean((reconstructed_x.detach().cpu() - real_x.detach().cpu()) ** 2).item()
-    psnr = _compute_psnr(exact_target_value, data_range)
-    ssim = _compute_ssim(reconstructed_x, real_x, data_range)
     nearest_client_train_mse = None
     nearest_client_train_indices = None
+    reference_x = None
+    reference_y = None
+    reference_label = None
     if reference_inputs is not None:
         nearest_client_train_mse, nearest_client_train_indices = _nearest_reference_mse(reconstructed_x, reference_inputs)
-    reference_x = real_x.detach().cpu().clone()
-    reference_y = real_y.detach().cpu().clone()
-    reference_label = "exact_target"
-    if nearest_client_train_mse is not None:
+    if nearest_client_train_indices is not None:
         selected_reference_x, selected_reference_y, reference_label = _select_reference_targets(
             reference_inputs,
             reference_targets,
             nearest_client_train_indices,
         )
-        if selected_reference_x is not None:
-            reference_x = selected_reference_x
-        if selected_reference_y is not None:
-            reference_y = selected_reference_y
-    success = exact_target_value <= threshold
-    if ssim_threshold is not None:
-        success = success or ssim >= ssim_threshold
+        reference_x = selected_reference_x
+        reference_y = selected_reference_y
     return AttackResult(
         name=name,
-        mse=float(exact_target_value),
-        psnr=psnr,
-        ssim=ssim,
+        mse=float(objective_mse),
         iterations=iterations,
         time_seconds=elapsed,
-        success=bool(success),
-        success_threshold=threshold,
+        success=False,
+        success_threshold=float("nan"),
         gradient_mse=float(objective_mse),
         target_type=target_type,
         nearest_client_train_mse=None if nearest_client_train_mse is None else float(nearest_client_train_mse),
         nearest_client_train_indices=nearest_client_train_indices,
-        metric_name="nearest_client_train_mse",
-        real_x=real_x.detach().cpu().clone(),
-        real_y=real_y.detach().cpu().clone(),
+        metric_name="objective_mse",
         reference_x=reference_x,
         reference_y=reference_y,
         reference_label=reference_label,
@@ -406,9 +385,6 @@ def run_attack_loop(
     attack_cfg = config.get("attack", {})
     steps = int(attack_cfg.get("steps", 300))
     lr = float(attack_cfg.get("lr", 0.1))
-    threshold = _attack_threshold(config)
-    ssim_threshold = _attack_ssim_threshold(config)
-    data_range = _attack_data_range(config)
     optimizer_name = str(attack_cfg.get("optimizer", "adam")).lower()
     restarts = max(1, int(attack_cfg.get("restarts", 1)))
     input_clip = attack_cfg.get("input_clip")
@@ -418,8 +394,9 @@ def run_attack_loop(
     prepared_target = OrderedDict((parameter_name, tensor.detach().cpu().clone()) for parameter_name, tensor in target.items())
     overall_start = time.perf_counter()
     best_objective_mse = float("inf")
-    best_x = real_x.to(device)
-    best_y = real_y.to(device)
+    best_x = None
+    best_y = None
+    batch_size = int(real_x.shape[0])
     for restart in range(restarts):
         with _attack_rng_context(device):
             if seed is not None:
@@ -431,7 +408,7 @@ def run_attack_loop(
             dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
             optimize_dummy_y = bool(optimize_y)
             inferred_y = None
-            is_classification = is_classification_attack(config, real_y)
+            is_classification = is_classification_attack(config)
             if not optimize_dummy_y and is_classification:
                 try:
                     inferred_y = infer_classification_label(config, model, prepared_target, resolved_target_type, real_x.to(device))
@@ -442,17 +419,19 @@ def run_attack_loop(
             elif not optimize_dummy_y and idlg_uses_dlg_target_optimization():
                 optimize_dummy_y = True
             if optimize_dummy_y:
-                if real_y.ndim == 1 and not torch.is_floating_point(real_y):
+                if is_classification:
                     num_classes = int(config.get("data", {}).get("num_classes", 0))
                     if num_classes <= 0:
                         with torch.no_grad():
                             num_classes = int(model(dummy_x.detach()).shape[1])
-                    dummy_y = torch.randn(real_y.shape[0], num_classes, device=device, requires_grad=True)
+                    dummy_y = torch.randn(batch_size, num_classes, device=device, requires_grad=True)
                 else:
                     dummy_y = torch.randn_like(real_y, device=device, requires_grad=True)
                 variables = [dummy_x, dummy_y]
             else:
-                dummy_y = real_y.to(device) if inferred_y is None else inferred_y
+                if inferred_y is None:
+                    raise RuntimeError("iDLG classification attack could not infer labels and did not enable dummy_y optimization")
+                dummy_y = inferred_y
                 variables = [dummy_x]
             optimizer = _create_optimizer(optimizer_name, variables, lr)
             restart_best_objective = float("inf")
@@ -469,29 +448,26 @@ def run_attack_loop(
                 with torch.no_grad():
                     if input_clip is not None:
                         dummy_x.clamp_(min=-float(input_clip), max=float(input_clip))
-                    if optimize_y and target_clip is not None:
+                    if optimize_dummy_y and target_clip is not None:
                         dummy_y.clamp_(min=-float(target_clip), max=float(target_clip))
                 if dist_value < restart_best_objective:
                     restart_best_objective = dist_value
                     restart_best_x = dummy_x.detach().clone()
                     restart_best_y = dummy_y.detach().clone()
-        if restart_best_objective < best_objective_mse:
+        if best_x is None or restart_best_objective < best_objective_mse:
             best_objective_mse = restart_best_objective
             best_x = restart_best_x
             best_y = restart_best_y
     elapsed = time.perf_counter() - overall_start
+    if best_x is None or best_y is None:
+        raise RuntimeError("Attack loop finished without any reconstruction candidate")
     return _evaluate_reconstruction(
         name,
         best_x,
-        real_x,
         best_y,
-        real_y,
         steps,
         elapsed,
-        threshold,
         best_objective_mse,
-        data_range,
-        ssim_threshold,
         resolved_target_type,
         reference_inputs=reference_inputs,
         reference_targets=reference_targets,

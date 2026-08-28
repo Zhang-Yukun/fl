@@ -45,7 +45,7 @@ from fedlab.federated.algorithms import (
 from fedlab.federated.client import ClientResult, FederatedClient
 from fedlab.federated.server import EarlyStopper, FederatedServer
 from fedlab.federated.protocol import validate_transport_modes
-from fedlab.security.attacks import save_attack_artifacts, summarize_attack_results
+from fedlab.security.attack_common import save_attack_artifacts, summarize_attack_results
 from fedlab.utils.logging import setup_logging
 from fedlab.utils.artifacts import save_experiment_config, should_save_periodic_artifacts
 from fedlab.utils.serialization import state_num_bytes, state_num_parameters

@@ -167,8 +167,6 @@ A:
 | `attack.client_selection` | `all` | `all`, `first`, `round_robin` | 被攻击客户端选择策略。 |
 | `attack.clients_per_round` | `1` | 正整数 | 每个攻击轮次攻击多少客户端。 |
 | `attack.frequency_rounds` | `1` | 正整数 | 每隔多少轮触发一次攻击。 |
-| `attack.sample_count` | `auto` | `auto` 或正整数 | 每客户端每轮发起多少次独立攻击。 |
-| `attack.sample_count_cap` | `8` | 正整数 | 仅作为默认/兼容配置保留；当前主逻辑 `sample_count=auto` 默认解析为 1。 |
 | `attack.max_samples` | `auto` | `auto` 或正整数 | 单次攻击联合重构多少样本。 |
 | `attack.max_samples_cap` | `8` | 正整数 | `max_samples=auto` 时的上限。 |
 | `attack.model_mode` | `train` | `train`, `eval` | 攻击时模型工作模式。 |

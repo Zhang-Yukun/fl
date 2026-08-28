@@ -25,8 +25,8 @@ def _write_run(run_dir: Path, algorithm: str, count_per_attack: int = 3) -> None
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(
                 {
-                    "real_x": torch.tensor([[[1.0], [2.0], [3.0]]]),
-                    "real_y": torch.tensor([[[4.0], [5.0]]]),
+                    "reference_x": torch.tensor([[[1.0], [2.0], [3.0]]]),
+                    "reference_y": torch.tensor([[[4.0], [5.0]]]),
                     "reconstructed_x": torch.tensor([[[1.0 + index], [2.0], [3.0]]]),
                     "reconstructed_y": torch.tensor([[[4.0], [5.0]]]),
                 },

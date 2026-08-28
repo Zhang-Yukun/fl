@@ -173,21 +173,21 @@ sequenceDiagram
 ## 5. 单个攻击任务的内部顺序
 
 1. 服务器选择需要攻击的客户端
-2. 为每个客户端确定攻击次数 `sample_count`
+2. 为每个客户端确定一次攻击样本集合，并由 `max_samples` 控制重构样本数
 3. 保存 `round_base_state`
 4. 保存服务器可见的 `update_payload`
-5. 保存本次攻击批次 `real_x`、`real_y`
+5. 捕获攻击模板元信息 `sample_x_shape`、`sample_y_shape`、`sample_x_dtype`、`sample_y_dtype` 供在线执行与离线回放使用
 6. 保存客户端训练参考集合 `reference_inputs`、`reference_targets`
 7. 分别运行 `DLG` 与 `iDLG`
-8. 计算 `nearest_client_train_mse`、`budget_recovered_fraction`、`coverage_recovered_fraction`、`PSNR`、`SSIM`、`objective_mse`
+8. 计算 `nearest_client_train_mse`、`budget_recovered_fraction`、`coverage_recovered_fraction`、`objective_mse`
 9. 写入 `attack_results.json`、`attack_artifacts/` 和 `summary.json`
 
 ```mermaid
 flowchart TD
-    A[Select attacked clients] --> B[Resolve sample_count and max_samples]
+    A[Select attacked clients] --> B[Resolve max_samples]
     B --> C[Clone round_base_state]
     C --> D[Capture target update payload]
-    D --> E[Capture real_x real_y and reference set]
+    D --> E[Capture template metadata and reference set]
     E --> F[Run DLG]
     E --> G[Run iDLG]
     F --> H[Compute recovery metrics]
