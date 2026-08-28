@@ -1,0 +1,4 @@
+model:
+  name: large_cnn
+  hidden_channels: 64
+  dropout: 0.1

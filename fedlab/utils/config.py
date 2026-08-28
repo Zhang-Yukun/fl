@@ -35,7 +35,6 @@ _RUNTIME_DEFAULTS = {
         "mode": "protocol",
         "metrics": ["mse", "mae", "mape"],
     },
-    "centralized": {},
     "federated": {
         "algorithm": "fedavg",
         "rounds": 20,
@@ -43,6 +42,7 @@ _RUNTIME_DEFAULTS = {
     "attack": {
         "enabled": True,
         "target_type": "update_payload",
+        "methods": ["dlg", "idlg"],
         "steps": 300,
         "lr": 0.001,
         "optimizer": "adam",
@@ -246,4 +246,3 @@ def load_config(path: str | Path, overrides: Iterable[str] | None = None) -> dic
     config = _sanitize_algorithm_config(config)
     logger.info("Loaded config from {}", path)
     return config
-

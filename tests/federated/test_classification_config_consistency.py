@@ -29,6 +29,12 @@ def test_image_classification_configs_match_expected_dataset_and_algorithm(confi
     assert config['training']['loss'] == 'cross_entropy'
     assert config['training']['epochs'] == 1
     assert config['evaluation']['metrics'] == ['accuracy']
+    if 'mnist/' in config_name:
+        assert config['model']['name'] == 'medium_cnn'
+        assert config['model']['hidden_channels'] == 32
+    else:
+        assert config['model']['name'] == 'large_cnn'
+        assert config['model']['hidden_channels'] == 64
 
 
 @pytest.mark.parametrize(
@@ -48,6 +54,12 @@ def test_image_classification_centralized_configs_match_expected_dataset(config_
     assert config['training']['loss'] == 'cross_entropy'
     assert config['training']['epochs'] == 300
     assert config['evaluation']['metrics'] == ['accuracy']
+    if 'mnist/' in config_name:
+        assert config['model']['name'] == 'medium_cnn'
+        assert config['model']['hidden_channels'] == 32
+    else:
+        assert config['model']['name'] == 'large_cnn'
+        assert config['model']['hidden_channels'] == 64
 
 
 

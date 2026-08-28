@@ -1,4 +1,5 @@
 includes:
   - ../common/base/classification.yaml
+  - ../common/model/medium_cnn.yaml
   - ../common/federated/default.yaml
   - ../common/data/mnist.yaml

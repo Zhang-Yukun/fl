@@ -1,5 +1,6 @@
 includes:
   - ../common/base/classification.yaml
+  - ../common/model/medium_cnn.yaml
   - ../common/data/mnist.yaml
 
 experiment:

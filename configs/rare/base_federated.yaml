@@ -1,4 +1,5 @@
 includes:
   - ../common/base/forcasting.yaml
+  - ../common/model/patchtst.yaml
   - ../common/federated/default.yaml
   - ../common/evaluation/forecasting.yaml

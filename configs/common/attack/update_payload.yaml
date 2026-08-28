@@ -2,6 +2,8 @@ attack:
   # The current framework only supports update_payload.
   target_type: update_payload
   enabled: true
+  # Default attack suite; can override to a subset like [dlg] or [idlg].
+  methods: [dlg, idlg]
   # Set-recovery matching metric and direction.
   recovery_match_metric: mse
   recovery_match_objective: auto

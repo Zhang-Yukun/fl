@@ -1,4 +1,5 @@
 includes:
   - ../common/base/classification.yaml
+  - ../common/model/large_cnn.yaml
   - ../common/federated/default.yaml
   - ../common/data/cifar10.yaml

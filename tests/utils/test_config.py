@@ -116,6 +116,7 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["training"]["epochs"] == 1
     assert config["training"]["optimizer"] == "sgd"
     assert config["attack"]["model_mode"] == "train"
+    assert config["attack"]["methods"] == ["dlg", "idlg"]
     assert config["attack"]["optimizer"] == "adam"
     assert config["attack"]["lr"] == 0.001
     assert config["attack"]["max_samples"] == "auto"

@@ -2,7 +2,6 @@ includes:
   - ../task/forecasting.yaml
   - ../runtime/gpu.yaml
   - ../data/rare_earth.yaml
-  - ../model/patchtst.yaml
   - ../training/default.yaml
   - ../loss/forecasting.yaml
   - ../attack/update_payload.yaml

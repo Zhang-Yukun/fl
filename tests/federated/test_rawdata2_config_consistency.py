@@ -47,6 +47,7 @@ def test_retained_rare_configs_default_to_forecasting_protocol_evaluation():
         assert config["task"]["type"] == "forecasting"
         assert config.get("evaluation", {}).get("mode", "protocol") == "protocol"
         assert config["evaluation"]["metrics"] == ["mse", "mae", "mape"]
+        assert config["model"]["name"] == "patchtst"
 
 
 def test_centralized_and_federated_rare_bases_keep_separate_epoch_defaults():

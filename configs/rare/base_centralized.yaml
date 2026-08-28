@@ -1,5 +1,6 @@
 includes:
   - ../common/base/forcasting.yaml
+  - ../common/model/patchtst.yaml
   - ../common/evaluation/forecasting.yaml
 
 experiment:

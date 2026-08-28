@@ -1,7 +1,6 @@
 includes:
   - ../task/classification.yaml
   - ../runtime/gpu.yaml
-  - ../model/small_cnn.yaml
   - ../training/default.yaml
   - ../loss/classification.yaml
   - ../evaluation/classification.yaml

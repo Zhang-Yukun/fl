@@ -62,6 +62,81 @@ class SmallConvClassifier(nn.Module):
         return self.head(self.features(x))
 
 
+class MediumConvClassifier(nn.Module):
+    """Deeper CNN baseline for MNIST and CIFAR-10."""
+
+    def __init__(self, in_channels: int, num_classes: int, hidden_channels: int = 32, dropout: float = 0.1):
+        super().__init__()
+        width = int(hidden_channels)
+        self.features = nn.Sequential(
+            nn.Conv2d(in_channels, width, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(width, width, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(width, width * 2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(width * 2, width * 2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(width * 2, width * 4, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1)),
+        )
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            nn.Dropout(dropout),
+            nn.Linear(width * 4, width * 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(width * 2, int(num_classes)),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.features(x))
+
+
+class LargeConvClassifier(nn.Module):
+    """High-capacity CNN baseline for MNIST and CIFAR-10."""
+
+    def __init__(self, in_channels: int, num_classes: int, hidden_channels: int = 32, dropout: float = 0.1):
+        super().__init__()
+        width = int(hidden_channels)
+        self.features = nn.Sequential(
+            nn.Conv2d(in_channels, width, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(width, width, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(width, width * 2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(width * 2, width * 2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(width * 2, width * 4, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(width * 4, width * 4, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(width * 4, width * 8, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1)),
+        )
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            nn.Dropout(dropout),
+            nn.Linear(width * 8, width * 4),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(width * 4, width * 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(width * 2, int(num_classes)),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.features(x))
+
+
 def build_model(config: dict[str, Any]) -> nn.Module:
     """Build a classification model from ``config['model']``."""
 
@@ -72,6 +147,20 @@ def build_model(config: dict[str, Any]) -> nn.Module:
     name = str(model_cfg.get('name', 'small_cnn')).lower()
     if name in {'small_cnn', 'cnn', 'convnet'}:
         return SmallConvClassifier(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            hidden_channels=int(model_cfg.get('hidden_channels', 32)),
+            dropout=float(model_cfg.get('dropout', 0.1)),
+        )
+    if name == 'medium_cnn':
+        return MediumConvClassifier(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            hidden_channels=int(model_cfg.get('hidden_channels', 32)),
+            dropout=float(model_cfg.get('dropout', 0.1)),
+        )
+    if name == 'large_cnn':
+        return LargeConvClassifier(
             in_channels=in_channels,
             num_classes=num_classes,
             hidden_channels=int(model_cfg.get('hidden_channels', 32)),
