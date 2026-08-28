@@ -8,6 +8,8 @@ from typing import Iterable, Literal
 
 import torch
 
+from fedlab.utils.transport import auxiliary_payload_num_bytes, auxiliary_payload_num_parameters
+
 
 StateDict = OrderedDict[str, torch.Tensor]
 QUANT_SCALE_SUFFIX = ".__scale__"
@@ -96,9 +98,29 @@ class SparseUpdate:
 
     @property
     def nbytes(self) -> int:
-        """Return serialized sparse payload size in bytes."""
+        """Return the numeric sparse payload body size in bytes."""
 
         return self.indices.numel() * self.indices.element_size() + self.values.numel() * self.values.element_size()
+
+    @property
+    def algorithm_metadata_num_bytes(self) -> int:
+        """Return non-string algorithm metadata bytes required to decode this sparse payload."""
+
+        return auxiliary_payload_num_bytes({"shapes": self.shapes, "total_numel": self.total_numel})
+
+    @property
+    def algorithm_num_bytes(self) -> int:
+        """Return sparse payload bytes plus non-string algorithm metadata bytes."""
+
+        return self.nbytes + self.algorithm_metadata_num_bytes
+
+    @property
+    def algorithm_num_parameters(self) -> int:
+        """Return sparse payload scalar count plus non-string algorithm metadata values."""
+
+        return int(self.indices.numel()) + int(self.values.numel()) + auxiliary_payload_num_parameters(
+            {"shapes": self.shapes, "total_numel": self.total_numel}
+        )
 
 
 def serialize_model(

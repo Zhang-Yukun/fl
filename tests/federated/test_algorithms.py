@@ -438,7 +438,10 @@ def test_sparse_fedavg_transport_semantics_match_expected_payloads(tmp_path, mon
         for result in round_result["results"]:
             dense_sparse = decompress_topk(result.sparse_update)
             assert result.aggregation_payload_kind == "sparse_update"
-            assert result.parameter_upload_bytes < result.dense_bytes
+            assert result.sparse_update.nbytes + client_module.state_num_bytes(result.aggregation_state) < result.dense_bytes
+            assert result.parameter_upload_bytes == result.sparse_update.algorithm_num_bytes + client_module.state_num_bytes(result.aggregation_state)
+            assert result.parameter_upload_parameters == result.sparse_update.algorithm_num_parameters + client_module.state_num_parameters(result.aggregation_state)
+            assert result.parameter_upload_bytes > result.sparse_update.nbytes + client_module.state_num_bytes(result.aggregation_state)
             assert torch.allclose(dense_sparse["bn.weight"], torch.tensor([1.0, 2.0]))
             zero_trainable_keys = ["bn.bias", "linear.weight", "linear.bias", "norm.weight", "norm.bias"]
             for key in zero_trainable_keys:
@@ -651,7 +654,6 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
             "attack.frequency_rounds=1",
             "attack.max_samples=1",
             "attack.max_samples_cap=8",
-            "attack.sample_count=1",
             "attack.steps=1",
             "attack.optimizer=adam",
             "attack.local_optimizer=adam",
@@ -664,7 +666,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"primary_metric_name", "primary_metric_value", "psnr", "ssim", "iterations", "time_seconds", "objective_mse", "nearest_client_train_mse", "budget_recovered_fraction"} <= set(attack_results[0])
+    assert {"primary_metric_name", "primary_metric_value", "iterations", "time_seconds", "objective_mse", "nearest_client_train_mse", "budget_recovered_fraction"} <= set(attack_results[0])
     assert "mse" not in attack_results[0]
     assert "metric_name" not in attack_results[0]
     assert result["attack_evaluations"] == 6
@@ -694,7 +696,6 @@ def test_federated_run_supports_configured_attack_method_subset(tmp_path):
             "attack.target_type=update_payload",
             "attack.frequency_rounds=1",
             "attack.max_samples=1",
-            "attack.sample_count=1",
             "attack.steps=1",
             "federated.algorithm=fedavg",
             "federated.rounds=1",
@@ -710,15 +711,12 @@ def test_federated_run_supports_configured_attack_method_subset(tmp_path):
     assert set(result["attack_summary"]["methods"]) == {"DLG"}
 
 
-def test_attack_auto_sampling_defaults_to_one_reconstruction_with_capped_multi_sample_batches():
+def test_attack_max_samples_auto_defaults_to_capped_training_set_size():
     attack_cfg = {
-        "sample_count": "auto",
-        "sample_count_cap": 8,
         "max_samples": "auto",
         "max_samples_cap": 8,
     }
 
-    assert algorithms_module._resolve_attack_sample_count(attack_cfg, available_batches=32) == 1
     assert algorithms_module._resolve_attack_max_samples(attack_cfg, available_samples=18000) == 8
     assert algorithms_module._resolve_attack_max_samples({"max_samples": "auto", "max_samples_cap": 32}, available_samples=20) == 20
     assert algorithms_module._resolve_attack_max_samples({"max_samples": 3}, available_samples=18000) == 3
@@ -733,7 +731,6 @@ def test_attack_task_uses_uploaded_protocol_payload():
             "target_type": "update_payload",
             "frequency_rounds": 1,
             "max_samples": 1,
-            "sample_count": 1,
             "client_selection": "all",
         },
     }
@@ -770,6 +767,10 @@ def test_attack_task_uses_uploaded_protocol_payload():
     )
 
     assert task is not None
+    assert task.samples[0].sample_x_shape == (1, 2, 1)
+    assert task.samples[0].sample_y_shape == (1, 1, 1)
+    assert task.samples[0].sample_x_dtype == "float32"
+    assert task.samples[0].sample_y_dtype == "float32"
     target = task.samples[0].target
     assert isinstance(target, dict)
     assert torch.equal(target["weight"], torch.tensor([[0.0, 2.0]]))
@@ -1128,7 +1129,6 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
         "attack.target_type=update_payload",
         "attack.frequency_rounds=1",
         "attack.max_samples=1",
-        "attack.sample_count=1",
         "attack.clients_per_round=1",
         "attack.client_selection=first",
         "attack.steps=1",
@@ -1187,8 +1187,6 @@ def _attack_result_stub(name: str, mse: float = 0.5, client_id: str = "Nd2O3"):
     return SimpleNamespace(
         name=name,
         mse=mse,
-        psnr=10.0,
-        ssim=0.1,
         iterations=1,
         time_seconds=0.01,
         gradient_mse=0.02,
@@ -1785,6 +1783,9 @@ def test_ega_fedavg_transport_semantics_match_expected_received_models(tmp_path,
             assert result.aggregation_payload_kind == "ega_encoded_update"
             assert result.ega_payload is not None
             assert result.parameter_upload_bytes > 0
+            assert result.parameter_upload_bytes == result.ega_payload.algorithm_num_bytes + client_module.state_num_bytes(result.aggregation_state)
+            assert result.parameter_upload_parameters == result.ega_payload.algorithm_num_parameters + client_module.state_num_parameters(result.aggregation_state)
+            assert result.parameter_upload_bytes > result.ega_payload.nbytes + client_module.state_num_bytes(result.aggregation_state)
         expected_global = float(round_result["round_index"] + 1)
         _assert_selected_values(
             round_result["global_state"],
@@ -1807,6 +1808,20 @@ def test_single_node_transport_envelope_bytes_exceed_parameter_payload_for_dense
             assert result.transport_upload_bytes > result.parameter_upload_bytes
             assert result.transport_download_overhead_bytes > 0
             assert result.transport_upload_overhead_bytes > 0
+
+
+def test_auxiliary_payload_bytes_exclude_string_metadata():
+    payload = {"label": "int8", "shape": [2, 3], "scale": 1.5, "flag": True}
+
+    assert auxiliary_payload_num_bytes(payload) == 21
+    assert auxiliary_payload_num_parameters(payload) == 4
+
+
+def test_auxiliary_payload_counters_reject_unknown_objects():
+    with pytest.raises(TypeError, match="Unsupported auxiliary payload type"):
+        auxiliary_payload_num_bytes(object())
+    with pytest.raises(TypeError, match="Unsupported auxiliary payload type"):
+        auxiliary_payload_num_parameters(object())
 
 
 def test_single_node_ega_transport_counts_round_context_bytes(tmp_path, monkeypatch):

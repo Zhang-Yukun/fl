@@ -22,8 +22,8 @@ def serialized_num_bytes(payload: Any) -> int:
 def auxiliary_payload_num_bytes(payload: Any) -> int:
     """Return algorithm-level bytes needed to reconstruct one auxiliary payload.
 
-    Only payload values are counted. Container keys are treated as protocol labels,
-    not algorithm data.
+    Only non-string payload values are counted. Container keys and string labels are
+    treated as protocol metadata, not algorithm data.
     """
 
     if payload is None:
@@ -41,28 +41,32 @@ def auxiliary_payload_num_bytes(payload: Any) -> int:
     if isinstance(payload, bytes):
         return len(payload)
     if isinstance(payload, str):
-        return len(payload.encode("utf-8"))
+        return 0
     if isinstance(payload, dict):
         return sum(auxiliary_payload_num_bytes(value) for value in payload.values())
     if isinstance(payload, (list, tuple, set)):
         return sum(auxiliary_payload_num_bytes(value) for value in payload)
-    return serialized_num_bytes(payload)
+    raise TypeError(f"Unsupported auxiliary payload type for byte counting: {type(payload).__name__}")
 
 
 def auxiliary_payload_num_parameters(payload: Any) -> int:
-    """Return the number of scalar algorithm values in one auxiliary payload."""
+    """Return the number of non-string scalar algorithm values in one auxiliary payload."""
 
     if payload is None:
         return 0
     if isinstance(payload, torch.Tensor):
         return int(payload.numel())
-    if isinstance(payload, (bool, int, float, complex, bytes, str)):
+    if isinstance(payload, str):
+        return 0
+    if isinstance(payload, bytes):
+        return len(payload)
+    if isinstance(payload, (bool, int, float, complex)):
         return 1
     if isinstance(payload, dict):
         return sum(auxiliary_payload_num_parameters(value) for value in payload.values())
     if isinstance(payload, (list, tuple, set)):
         return sum(auxiliary_payload_num_parameters(value) for value in payload)
-    return 1
+    raise TypeError(f"Unsupported auxiliary payload type for parameter counting: {type(payload).__name__}")
 
 
 def estimate_download_transport_bytes(

@@ -20,6 +20,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from fedlab.utils.serialization import StateDict
+from fedlab.utils.transport import auxiliary_payload_num_bytes, auxiliary_payload_num_parameters
 
 
 @dataclass
@@ -46,16 +47,56 @@ class EncodedStatePayload:
 
     @property
     def nbytes(self) -> int:
-        """Return the numeric payload size in bytes."""
+        """Return the numeric encoded-block payload size in bytes."""
 
         scale_bytes = 4 if self.encoded_scale is not None else 0
         return self.encoded_blocks.numel() * self.encoded_blocks.element_size() + scale_bytes
 
     @property
     def num_parameters(self) -> int:
-        """Return the number of transmitted scalar values."""
+        """Return the number of transmitted encoded-block scalar values."""
 
         return int(self.encoded_blocks.numel()) + (1 if self.encoded_scale is not None else 0)
+
+    @property
+    def algorithm_metadata_num_bytes(self) -> int:
+        """Return non-string algorithm metadata bytes required to decode this payload."""
+
+        return auxiliary_payload_num_bytes(
+            {
+                "shapes": self.shapes,
+                "original_numel": self.original_numel,
+                "block_size": self.block_size,
+                "encoded_dim": self.encoded_dim,
+                "quantization_level": self.quantization_level,
+                "normalization": self.normalization,
+                "contribution_scale": self.contribution_scale,
+                "observed_update_absmax": self.observed_update_absmax,
+            }
+        )
+
+    @property
+    def algorithm_num_bytes(self) -> int:
+        """Return encoded payload bytes plus non-string algorithm metadata bytes."""
+
+        return self.nbytes + self.algorithm_metadata_num_bytes
+
+    @property
+    def algorithm_num_parameters(self) -> int:
+        """Return encoded payload scalar count plus non-string algorithm metadata values."""
+
+        return self.num_parameters + auxiliary_payload_num_parameters(
+            {
+                "shapes": self.shapes,
+                "original_numel": self.original_numel,
+                "block_size": self.block_size,
+                "encoded_dim": self.encoded_dim,
+                "quantization_level": self.quantization_level,
+                "normalization": self.normalization,
+                "contribution_scale": self.contribution_scale,
+                "observed_update_absmax": self.observed_update_absmax,
+            }
+        )
 
 
 class ResidualMLPBlock(nn.Module):
