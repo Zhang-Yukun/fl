@@ -46,6 +46,7 @@ from fedlab.tasks import primary_metric as task_primary_metric, primary_metric_m
 from fedlab.federated.protocol import validate_transport_modes
 from fedlab.utils.tracking import Tracker
 from fedlab.engine.training import build_training_optimizer, evaluate, predict_first_batch, predict_first_batch_for_state, train_one_epoch
+from fedlab.utils.random import seed_cuda_device
 
 
 def configure_torch_runtime(config: dict[str, Any]) -> None:
@@ -65,7 +66,7 @@ def configure_torch_runtime(config: dict[str, Any]) -> None:
             logger.warning("Could not set torch interop threads after runtime start: {}", exc)
 
 
-def setup_seed(seed: int, deterministic: bool = True) -> None:
+def setup_seed(seed: int, deterministic: bool = True, *, device: torch.device | None = None) -> None:
     """Set Python, NumPy, and torch random sources to a reproducible state.
 
     Example:
@@ -81,8 +82,7 @@ def setup_seed(seed: int, deterministic: bool = True) -> None:
     if np is not None:
         np.random.seed(seed_value)
     torch.manual_seed(seed_value)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed_value)
+    seed_cuda_device(seed_value, device)
     if hasattr(torch.backends, "cudnn"):
         torch.backends.cudnn.deterministic = deterministic
         torch.backends.cudnn.benchmark = not deterministic
@@ -90,17 +90,18 @@ def setup_seed(seed: int, deterministic: bool = True) -> None:
         torch.use_deterministic_algorithms(deterministic, warn_only=True)
     except Exception as exc:  # pragma: no cover - depends on torch build/runtime
         logger.warning("Could not set deterministic torch algorithms: {}", exc)
-    logger.info("Set runtime seed={} deterministic={}", seed_value, deterministic)
+    logger.info("Set runtime seed={} deterministic={} device={}", seed_value, deterministic, device or "cpu")
 
 
-def configure_random_seed(config: dict[str, Any]) -> None:
+def configure_random_seed(config: dict[str, Any], *, device: torch.device | None = None) -> None:
     """Apply the configured runtime seed when one is provided."""
 
     runtime_cfg = config.get("runtime", {})
     seed = runtime_cfg.get("seed")
     if seed is None:
         return
-    setup_seed(int(seed), deterministic=bool(runtime_cfg.get("deterministic", True)))
+    resolved_device = resolve_device(config) if device is None else device
+    setup_seed(int(seed), deterministic=bool(runtime_cfg.get("deterministic", True)), device=resolved_device)
 
 
 def _resolve_training_epochs(config: dict[str, Any]) -> int:
@@ -1153,11 +1154,11 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     saved_configs = save_experiment_config(config, output_dir, config_formats)
     logger.info("Saved startup config artifacts: {}", [str(path) for path in saved_configs])
     configure_torch_runtime(config)
-    configure_random_seed(config)
+    device = resolve_device(config)
+    configure_random_seed(config, device=device)
     _log_mode_specific_schedule(config, "centralized")
     tracker = Tracker(config)
     start_time = time.perf_counter()
-    device = resolve_device(config)
     train_loaders, val_loader, test_loader = build_federated_loaders(config)
     client_ids = list(train_loaders.keys())
     model = build_model(config).to(device)
@@ -1317,12 +1318,12 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     saved_configs = save_experiment_config(config, output_dir, config_formats)
     logger.info("Saved startup config artifacts: {}", [str(path) for path in saved_configs])
     configure_torch_runtime(config)
-    configure_random_seed(config)
+    device = resolve_device(config)
+    configure_random_seed(config, device=device)
     validate_transport_modes(config)
     _log_mode_specific_schedule(config, "federated")
     tracker = Tracker(config)
     start_time = time.perf_counter()
-    device = resolve_device(config)
     train_loaders, val_loader, test_loader = build_federated_loaders(config)
     client_ids = list(train_loaders.keys())
     server = FederatedServer(config, val_loader, test_loader, device)

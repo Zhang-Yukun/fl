@@ -32,6 +32,7 @@ from fedlab.security.registry import (
     summarize_metric_values,
 )
 from fedlab.tasks import create_loss
+from fedlab.utils.random import seed_cuda_device
 from fedlab.utils.serialization import StateDict, load_serialized
 
 
@@ -402,8 +403,7 @@ def run_attack_loop(
             if seed is not None:
                 local_seed = int(seed) + restart
                 torch.manual_seed(local_seed)
-                if device.type == "cuda":
-                    torch.cuda.manual_seed_all(local_seed)
+                seed_cuda_device(local_seed, device)
             model = _prepare_attack_model(config, state, device)
             dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
             optimize_dummy_y = bool(optimize_y)
