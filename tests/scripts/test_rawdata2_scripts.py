@@ -187,6 +187,8 @@ def test_seed_wrappers_delegate_to_controlled_suite():
         assert 'bash scripts/run_controlled_suite.sh' in content
         assert 'BASE_ALGOS=fedavg,topk,ega' in content
         assert 'RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"' in content
+        if '_part' in path.name:
+            assert 'LOSSES=(mse)' in content
         if '_part1.sh' in path.name:
             assert 'PROFILE="noattack"' in content
             assert 'MODES=(single_sync multi_sync)' in content

@@ -14,7 +14,7 @@ MODES=(single_sync multi_sync)
 for task in "${TASKS[@]}"; do
   case "${task}" in
     rare)
-      LOSSES=(mse mae)
+      LOSSES=(mse)
       ;;
     *)
       LOSSES=(cross_entropy)
