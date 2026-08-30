@@ -47,14 +47,6 @@ REMOVED_SCRIPTS = (
     "run_exp_seed8192_mse.sh",
     "run_exp_seed8192_mse_part1.sh",
     "run_exp_seed8192_mse_part2.sh",
-    "run_exp_seed42_part3.sh",
-    "run_exp_seed42_part4.sh",
-    "run_exp_seed2026_part3.sh",
-    "run_exp_seed2026_part4.sh",
-    "run_exp_seed55_part3.sh",
-    "run_exp_seed55_part4.sh",
-    "run_exp_seed8192_part3.sh",
-    "run_exp_seed8192_part4.sh",
     "run_tmux_three_task_suite.sh",
     "run_ega_noattack_adam_sweep_tmux.sh",
     "run_ega_noattack_adam_sweep_worker.sh",
@@ -191,12 +183,16 @@ def test_seed_wrappers_delegate_to_controlled_suite():
             assert 'LOSSES=(mse)' in content
         if '_part1.sh' in path.name:
             assert 'PROFILE="noattack"' in content
-            assert 'MODES=(single_sync multi_sync)' in content
-            assert 'BASE_PORT="${mode_base_port}"' in content
+            assert 'MODE="single_sync"' in content
         if '_part2.sh' in path.name:
+            assert 'PROFILE="noattack"' in content
+            assert 'MODE="multi_sync"' in content
+        if '_part3.sh' in path.name:
             assert 'PROFILE="attack"' in content
-            assert 'MODES=(single_sync multi_sync)' in content
-            assert 'BASE_PORT="${mode_base_port}"' in content
+            assert 'MODE="single_sync"' in content
+        if '_part4.sh' in path.name:
+            assert 'PROFILE="attack"' in content
+            assert 'MODE="multi_sync"' in content
 
 
 def test_removed_scripts_are_absent():

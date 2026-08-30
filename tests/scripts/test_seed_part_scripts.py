@@ -13,14 +13,14 @@ PART_SPECS = (
     ("run_exp_seed55_part2.sh", "55", "59100", "noattack", "multi_sync"),
     ("run_exp_seed55_part3.sh", "55", "59200", "attack", "single_sync"),
     ("run_exp_seed55_part4.sh", "55", "59300", "attack", "multi_sync"),
-    ("run_exp_seed2026_part1.sh", "2026", "59000", "noattack", "single_sync"),
-    ("run_exp_seed2026_part2.sh", "2026", "59100", "noattack", "multi_sync"),
-    ("run_exp_seed2026_part3.sh", "2026", "59200", "attack", "single_sync"),
-    ("run_exp_seed2026_part4.sh", "2026", "59300", "attack", "multi_sync"),
-    ("run_exp_seed8192_part1.sh", "8192", "58000", "noattack", "single_sync"),
-    ("run_exp_seed8192_part2.sh", "8192", "58100", "noattack", "multi_sync"),
-    ("run_exp_seed8192_part3.sh", "8192", "58200", "attack", "single_sync"),
-    ("run_exp_seed8192_part4.sh", "8192", "58300", "attack", "multi_sync"),
+    ("run_exp_seed2026_part1.sh", "2026", "60000", "noattack", "single_sync"),
+    ("run_exp_seed2026_part2.sh", "2026", "60100", "noattack", "multi_sync"),
+    ("run_exp_seed2026_part3.sh", "2026", "60200", "attack", "single_sync"),
+    ("run_exp_seed2026_part4.sh", "2026", "60300", "attack", "multi_sync"),
+    ("run_exp_seed8192_part1.sh", "8192", "61000", "noattack", "single_sync"),
+    ("run_exp_seed8192_part2.sh", "8192", "61100", "noattack", "multi_sync"),
+    ("run_exp_seed8192_part3.sh", "8192", "61200", "attack", "single_sync"),
+    ("run_exp_seed8192_part4.sh", "8192", "61300", "attack", "multi_sync"),
 )
 
 
@@ -35,6 +35,7 @@ def test_seed_part_wrappers_delegate_with_expected_split():
         assert f'BASE_PORT="${{BASE_PORT:-{port}}}"' in content
         assert f'PROFILE="{profile}"' in content
         assert f'MODE="{mode}"' in content
+        assert 'LOSSES=(mse)' in content
         assert 'BASE_ALGOS=fedavg,topk,ega' in content
         assert 'TASKS=(rare mnist cifar10)' in content
         assert 'TASK_IN_BASE_OUTPUT=true' in content
