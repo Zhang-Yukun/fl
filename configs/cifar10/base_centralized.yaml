@@ -1,6 +1,6 @@
 includes:
   - ../common/base/classification.yaml
-  - ../common/model/large_cnn.yaml
+  - ../common/model/medium_cnn.yaml
   - ../common/data/cifar10.yaml
 
 experiment:

@@ -103,6 +103,8 @@ def test_current_scripts_are_executable():
 def test_run_suite_supports_task_matrix_and_default_four_algorithms():
     content = _assert_executable("run_suite.sh")
     for marker in (
+        'RUN_TAG="${RUN_TAG:-suite}"',
+        'TRACKING_TAG="${TRACKING_TAG:-suite}"',
         'FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"',
         'TASK_SET="${TASK_SET:-rare}"',
         'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"',
@@ -129,6 +131,10 @@ def test_run_suite_supports_task_matrix_and_default_four_algorithms():
         'list_named_values "${clients_raw}"',
     ):
         assert marker in content
+    assert 'ATTACK_ENABLED="${ATTACK_ENABLED:-}"' in content
+    assert 'ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-}"' in content
+    assert "emit_optional_override 'attack.enabled' \"${ATTACK_ENABLED}\"" in content
+    assert "emit_optional_override 'attack.frequency_rounds' \"${ATTACK_FREQUENCY_ROUNDS}\"" in content
 
 
 def test_run_suite_keeps_loss_override_only_for_rare_forecasting():
@@ -140,6 +146,7 @@ def test_run_suite_keeps_loss_override_only_for_rare_forecasting():
 def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
     content = _assert_executable("run_controlled_suite.sh")
     for marker in (
+        'ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-}"',
         'TASK_SET="${TASK_SET:-rare}"',
         'TASK_SET=task1,task2|all',
         'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"',
@@ -166,6 +173,9 @@ def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
         'bash scripts/run_suite.sh --modes "${SUITE_MODES}" --tasks "${TASK_SET}"',
     ):
         assert marker in content
+    assert 'RUN_TAG="${RUN_TAG:-attackfreq${ATTACK_FREQUENCY_ROUNDS}}"' in content
+    assert 'RUN_TAG="${RUN_TAG:-attack}"' in content
+    assert 'TRACKING_TAG="${TRACKING_TAG:-attack}"' in content
     assert 'run_ega_matrix' not in content
     assert 'EVAL_MODE=' not in content
     assert content.count('bash scripts/run_suite.sh --modes') == 1

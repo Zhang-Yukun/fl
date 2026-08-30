@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
 SUITE_SEED="${SUITE_SEED:-2026}"
-RUN_TAG="${RUN_TAG:-attackfreq5}"
-TRACKING_TAG="${TRACKING_TAG:-attackfreq5}"
+RUN_TAG="${RUN_TAG:-suite}"
+TRACKING_TAG="${TRACKING_TAG:-suite}"
 BASE_OUTPUT="${BASE_OUTPUT:-outputs/${RUN_TAG}_seed${SUITE_SEED}_$(date +%Y%m%d_%H%M%S)}"
 PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-${TRACKING_TAG}-v1}"
 RUN_NAME_PREFIX="${RUN_NAME_PREFIX:-}"
@@ -20,8 +20,9 @@ ROUNDS="${ROUNDS:-}"
 PATIENCE="${PATIENCE:-500}"
 LOSS_NAME="${LOSS_NAME:-mse}"
 LOSS_TAG="${LOSS_TAG:-${LOSS_NAME}}"
-ATTACK_ENABLED="${ATTACK_ENABLED:-true}"
-ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-10}"
+ATTACK_ENABLED="${ATTACK_ENABLED:-}"
+ATTACK_ASYNC_ENABLED="${ATTACK_ASYNC_ENABLED:-}"
+ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-}"
 ATTACK_CLIENT_SELECTION="${ATTACK_CLIENT_SELECTION:-}"
 ATTACK_CLIENTS_PER_ROUND="${ATTACK_CLIENTS_PER_ROUND:-}"
 ATTACK_MAX_SAMPLES="${ATTACK_MAX_SAMPLES:-}"
@@ -549,46 +550,16 @@ federated_common_args() {
   local task="$1"
   printf -- '--override
 experiment.mode=federated
---override
-attack.enabled=%s
---override
-attack.async_enabled=false
-' "${ATTACK_ENABLED}"
-  if [[ "${ATTACK_ENABLED}" == "true" ]]; then
-    printf -- '--override
-attack.frequency_rounds=%s
-' "${ATTACK_FREQUENCY_ROUNDS}"
-    if [[ -n "${ATTACK_CLIENT_SELECTION}" ]]; then
-      printf -- '--override
-attack.client_selection=%s
-' "${ATTACK_CLIENT_SELECTION}"
-    fi
-    if [[ -n "${ATTACK_CLIENTS_PER_ROUND}" ]]; then
-      printf -- '--override
-attack.clients_per_round=%s
-' "${ATTACK_CLIENTS_PER_ROUND}"
-    fi
-    if [[ -n "${ATTACK_MAX_SAMPLES}" ]]; then
-      printf -- '--override
-attack.max_samples=%s
-' "${ATTACK_MAX_SAMPLES}"
-    fi
-    if [[ -n "${ATTACK_SEED}" ]]; then
-      printf -- '--override
-attack.seed=%s
-' "${ATTACK_SEED}"
-    fi
-    if [[ -n "${ATTACK_LR}" ]]; then
-      printf -- '--override
-attack.lr=%s
-' "${ATTACK_LR}"
-    fi
-    if [[ -n "${ATTACK_OPTIMIZER}" ]]; then
-      printf -- '--override
-attack.optimizer=%s
-' "${ATTACK_OPTIMIZER}"
-    fi
-  fi
+'
+  emit_optional_override 'attack.enabled' "${ATTACK_ENABLED}"
+  emit_optional_override 'attack.async_enabled' "${ATTACK_ASYNC_ENABLED}"
+  emit_optional_override 'attack.frequency_rounds' "${ATTACK_FREQUENCY_ROUNDS}"
+  emit_optional_override 'attack.client_selection' "${ATTACK_CLIENT_SELECTION}"
+  emit_optional_override 'attack.clients_per_round' "${ATTACK_CLIENTS_PER_ROUND}"
+  emit_optional_override 'attack.max_samples' "${ATTACK_MAX_SAMPLES}"
+  emit_optional_override 'attack.seed' "${ATTACK_SEED}"
+  emit_optional_override 'attack.lr' "${ATTACK_LR}"
+  emit_optional_override 'attack.optimizer' "${ATTACK_OPTIMIZER}"
   if [[ -n "${ROUNDS}" ]]; then
     printf -- '--override
 federated.rounds=%s

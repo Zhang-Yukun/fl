@@ -33,8 +33,8 @@ def test_image_classification_configs_match_expected_dataset_and_algorithm(confi
         assert config['model']['name'] == 'medium_cnn'
         assert config['model']['hidden_channels'] == 32
     else:
-        assert config['model']['name'] == 'large_cnn'
-        assert config['model']['hidden_channels'] == 64
+        assert config['model']['name'] == 'medium_cnn'
+        assert config['model']['hidden_channels'] == 32
 
 
 @pytest.mark.parametrize(
@@ -58,8 +58,8 @@ def test_image_classification_centralized_configs_match_expected_dataset(config_
         assert config['model']['name'] == 'medium_cnn'
         assert config['model']['hidden_channels'] == 32
     else:
-        assert config['model']['name'] == 'large_cnn'
-        assert config['model']['hidden_channels'] == 64
+        assert config['model']['name'] == 'medium_cnn'
+        assert config['model']['hidden_channels'] == 32
 
 
 
