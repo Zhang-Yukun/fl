@@ -4,5 +4,7 @@ includes:
   - ../training/default.yaml
   - ../loss/classification.yaml
   - ../evaluation/classification.yaml
-  - ../tracking/disabled.yaml
+  - ../attack/update_payload.yaml
+  - ../tracking/offline.yaml
+  - ../artifacts/yaml_json.yaml
   - ../grpc/default.yaml

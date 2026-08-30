@@ -120,7 +120,8 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["attack"]["optimizer"] == "adam"
     assert config["attack"]["lr"] == 0.001
     assert config["attack"]["max_samples"] == "auto"
-    assert config["attack"]["max_samples_cap"] == 8
+    assert config["attack"]["frequency_rounds"] == 30
+    assert config["attack"]["max_samples_cap"] == 128
     assert config["attack"]["tv_weight"] == 0.0
     assert config["attack"]["recovery_match_metric"] == "mse"
     assert config["attack"]["recovery_success_metric"] == "mse"

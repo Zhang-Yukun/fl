@@ -4,6 +4,7 @@ includes:
   - ../data/rare_earth.yaml
   - ../training/default.yaml
   - ../loss/forecasting.yaml
+  - ../evaluation/forecasting.yaml
   - ../attack/update_payload.yaml
   - ../tracking/offline.yaml
   - ../artifacts/yaml_json.yaml
