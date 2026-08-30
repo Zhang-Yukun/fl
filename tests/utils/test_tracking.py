@@ -161,7 +161,7 @@ def test_attack_reconstruction_figure_supports_image_classification_payloads():
         "reference_x": torch.rand(1, 1, 4, 4),
         "reconstructed_x": torch.rand(1, 1, 4, 4),
         "reference_y": torch.tensor([2]),
-        "reconstructed_y": torch.randn(1, 3),
+        "reconstructed_y": torch.tensor([[0.1, 3.0, -1.0]]),
     })()
 
     figure = _attack_reconstruction_figure(result)
@@ -170,3 +170,9 @@ def test_attack_reconstruction_figure_supports_image_classification_payloads():
     assert len(figure.axes) == 4
     assert figure.axes[0].images
     assert figure.axes[1].images
+    reference_texts = [text.get_text() for text in figure.axes[2].texts]
+    reconstructed_texts = [text.get_text() for text in figure.axes[3].texts]
+    assert any("class: 2" in value for value in reference_texts)
+    assert figure.axes[3].patches
+    assert any("pred=1" in value for value in reconstructed_texts)
+    assert any("ref=2" in value for value in reconstructed_texts)

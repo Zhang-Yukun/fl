@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import random
@@ -27,7 +28,12 @@ from fedlab.security.attack_common import (
     save_attack_artifacts,
     summarize_attack_results,
 )
-from fedlab.security.registry import list_registered_attack_tracking_metrics, run_attacks
+from fedlab.security.registry import (
+    compute_recovery_metric_matrix,
+    list_registered_attack_tracking_metrics,
+    resolve_recovery_objective,
+    run_attacks,
+)
 from fedlab.federated.client import FederatedClient
 from fedlab.federated.methods import build_method, is_registered_compressed
 from fedlab.datasets import build_federated_loaders
@@ -942,28 +948,139 @@ def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: l
     return payload
 
 
-def _log_attack_reconstruction_views(tracker: Tracker, results: list[Any], step: int) -> None:
-    """Log merged and per-client attack reconstruction figures."""
+def _attack_plot_data_range(config: dict[str, Any]) -> float:
+    """Return the positive data range used by recovery metric helpers."""
+
+    value = float(config.get("attack", {}).get("data_range", 1.0))
+    return value if value > 0 else 1.0
+
+
+def _attack_result_batch_size(result: Any) -> int | None:
+    """Return the batch size for one attack result payload when available."""
+
+    for field in ("reconstructed_x", "plot_reconstructed_x", "reference_x", "plot_reference_x"):
+        tensor = getattr(result, field, None)
+        if isinstance(tensor, torch.Tensor) and tensor.ndim >= 1:
+            return int(tensor.shape[0])
+    return None
+
+
+def _slice_attack_tensor(tensor: Any, row_index: int, batch_size: int | None) -> Any:
+    """Return one batch row for visualization-only attack payloads."""
+
+    if not isinstance(tensor, torch.Tensor) or batch_size is None or batch_size <= 1 or tensor.ndim == 0:
+        return tensor
+    if int(tensor.shape[0]) != batch_size:
+        return tensor
+    row = max(0, min(int(row_index), batch_size - 1))
+    return tensor[row:row + 1].detach().cpu().clone()
+
+
+def _attack_result_row_metrics(result: Any, config: dict[str, Any]) -> tuple[list[float] | None, str | None]:
+    """Return one per-row matched metric list for a result when available."""
+
+    metric_name = getattr(result, "matched_reference_metric_name", None)
+    reconstructed_x = getattr(result, "reconstructed_x", None)
+    reference_x = getattr(result, "reference_x", None)
+    if metric_name is None or not isinstance(reconstructed_x, torch.Tensor) or not isinstance(reference_x, torch.Tensor):
+        return None, None
+    if reconstructed_x.ndim == 0 or reference_x.ndim == 0:
+        return None, None
+    if reconstructed_x.shape[0] == 0 or reconstructed_x.shape[0] != reference_x.shape[0]:
+        return None, None
+    metric_matrix = compute_recovery_metric_matrix(
+        reconstructed_x.detach().cpu(),
+        reference_x.detach().cpu(),
+        str(metric_name),
+        _attack_plot_data_range(config),
+    )
+    diagonal = metric_matrix.diagonal()
+    return [float(value) for value in diagonal.tolist()], resolve_recovery_objective(None, str(metric_name))
+
+
+def _select_attack_visualization_result(results: list[Any], config: dict[str, Any]) -> Any:
+    """Choose one best-matched sample and return a sliced visualization payload."""
+
+    if not results:
+        return None
+    best_result = results[0]
+    best_row_index = 0
+    best_score: float | None = None
+    best_objective: str | None = None
+    for result in results:
+        row_metrics, objective = _attack_result_row_metrics(result, config)
+        if not row_metrics or objective not in {"min", "max"}:
+            continue
+        candidate_score = min(row_metrics) if objective == "min" else max(row_metrics)
+        candidate_row_index = row_metrics.index(candidate_score)
+        if best_score is None:
+            best_result = result
+            best_row_index = candidate_row_index
+            best_score = float(candidate_score)
+            best_objective = objective
+            continue
+        if best_objective != objective:
+            continue
+        is_better = candidate_score < best_score if objective == "min" else candidate_score > best_score
+        if is_better:
+            best_result = result
+            best_row_index = candidate_row_index
+            best_score = float(candidate_score)
+            best_objective = objective
+    visualization_result = copy.copy(best_result)
+    batch_size = _attack_result_batch_size(best_result)
+    for field in (
+        "reference_x",
+        "reference_y",
+        "reconstructed_x",
+        "reconstructed_y",
+        "plot_reference_x",
+        "plot_reference_y",
+        "plot_reconstructed_x",
+        "plot_reconstructed_y",
+    ):
+        setattr(
+            visualization_result,
+            field,
+            _slice_attack_tensor(getattr(best_result, field, None), best_row_index, batch_size),
+        )
+    matched_indices = getattr(best_result, "matched_reference_indices", None)
+    if matched_indices is not None:
+        if 0 <= best_row_index < len(matched_indices):
+            visualization_result.matched_reference_indices = [int(matched_indices[best_row_index])]
+        else:
+            visualization_result.matched_reference_indices = None
+    if best_score is not None:
+        visualization_result.matched_reference_metric_value = float(best_score)
+        visualization_result.matched_reference_metric_min_value = float(best_score)
+    return visualization_result
+
+
+def _log_attack_reconstruction_views(tracker: Tracker, results: list[Any], step: int, config: dict[str, Any]) -> None:
+    """Log one best-match reconstruction figure per method and per client."""
 
     if not hasattr(tracker, "log_attack_reconstruction"):
         return
-    seen_methods: set[str] = set()
-    seen_client_methods: set[tuple[str, str]] = set()
+    method_groups: dict[str, list[Any]] = {}
+    client_method_groups: dict[tuple[str, str], list[Any]] = {}
     for result in results:
         method = str(result.name)
-        if method not in seen_methods:
-            seen_methods.add(method)
-            tracker.log_attack_reconstruction(f"attack/{method}/reconstruction", result, step=step)
+        method_groups.setdefault(method, []).append(result)
         client_id = getattr(result, "client_id", None)
-        if client_id is None:
+        if client_id is not None:
+            client_method_groups.setdefault((str(client_id), method), []).append(result)
+    for method, subset in method_groups.items():
+        visualization_result = _select_attack_visualization_result(subset, config)
+        if visualization_result is None:
             continue
-        client_method = (str(client_id), method)
-        if client_method in seen_client_methods:
+        tracker.log_attack_reconstruction(f"attack/{method}/reconstruction", visualization_result, step=step)
+    for (client_id, method), subset in client_method_groups.items():
+        visualization_result = _select_attack_visualization_result(subset, config)
+        if visualization_result is None:
             continue
-        seen_client_methods.add(client_method)
         tracker.log_attack_reconstruction(
             f"attack/client/{client_id}/{method}/reconstruction",
-            result,
+            visualization_result,
             step=step,
         )
 
@@ -1131,7 +1248,7 @@ class AsyncAttackManager:
             self.attack_results.extend(round_result.attacks)
             payload = _round_attack_payload(round_result, self.attack_results)
             self.tracker.log(payload, step=round_index)
-            _log_attack_reconstruction_views(self.tracker, round_result.attacks, round_index)
+            _log_attack_reconstruction_views(self.tracker, round_result.attacks, round_index, self.config)
             logger.info("Round {} attack metrics {}", round_index, payload)
 
     def finalize(self) -> None:

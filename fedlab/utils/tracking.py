@@ -257,25 +257,87 @@ def _classification_probabilities(tensor) -> torch.Tensor | None:
     return None
 
 
-def _render_target_panel(axis, tensor, title: str, reference_label: int | None = None) -> None:
-    """Render one target tensor either as class text, probability bars, or a line plot."""
+def _classification_prediction_summary(tensor) -> tuple[int, float] | None:
+    """Return the top-1 predicted class and confidence for one classification tensor."""
+
+    probabilities = _classification_probabilities(tensor)
+    if probabilities is None or probabilities.numel() == 0:
+        return None
+    confidence, predicted = torch.max(probabilities, dim=0)
+    return int(predicted.item()), float(confidence.item())
+
+
+def _render_classification_summary(axis, tensor, title: str, reference_label: int | None = None) -> bool:
+    """Render one classification target as a compact text summary."""
+
+    label_text = _classification_label_text(tensor)
+    prediction = _classification_prediction_summary(tensor)
+    if prediction is None and label_text is None:
+        return False
+    lines = []
+    if prediction is not None:
+        predicted_label, confidence = prediction
+        lines.append(f'pred class: {predicted_label}')
+        lines.append(f'confidence: {confidence:.4f}')
+    elif label_text is not None:
+        lines.append(f'class: {label_text}')
+    if reference_label is not None:
+        lines.append(f'ref: {reference_label}')
+    axis.text(0.5, 0.5, '\n'.join(lines), ha='center', va='center')
+    axis.set_title(title)
+    axis.set_axis_off()
+    return True
+
+
+def _render_classification_probabilities(axis, tensor, title: str, reference_label: int | None = None) -> bool:
+    """Render one classification prediction as a probability bar chart."""
+
+    probabilities = _classification_probabilities(tensor)
+    prediction = _classification_prediction_summary(tensor)
+    if probabilities is None or probabilities.numel() == 0 or probabilities.numel() > 32:
+        return False
+    values = probabilities.tolist()
+    colors = ['tab:blue'] * len(values)
+    if prediction is not None:
+        predicted_label, _confidence = prediction
+        if 0 <= predicted_label < len(colors):
+            colors[predicted_label] = 'tab:green'
+    if reference_label is not None and 0 <= reference_label < len(colors):
+        colors[reference_label] = 'tab:orange'
+    axis.bar(list(range(len(values))), values, color=colors, alpha=0.85)
+    axis.set_ylim(0.0, 1.0)
+    axis.set_xlabel('class')
+    axis.set_ylabel('probability')
+    axis.set_title(title)
+    axis.grid(True, axis='y', alpha=0.25)
+    notes = []
+    if prediction is not None:
+        predicted_label, confidence = prediction
+        notes.append(f'pred={predicted_label} ({confidence:.3f})')
+    if reference_label is not None:
+        notes.append(f'ref={reference_label}')
+    if notes:
+        axis.text(0.98, 0.95, '\n'.join(notes), ha='right', va='top', transform=axis.transAxes)
+    return True
+
+
+def _render_target_panel(
+    axis,
+    tensor,
+    title: str,
+    reference_label: int | None = None,
+    *,
+    classification_mode: str = 'auto',
+) -> None:
+    """Render one target tensor either as class text, probabilities, summary, or a line plot."""
 
     label_text = _classification_label_text(tensor)
     probabilities = _classification_probabilities(tensor)
     if probabilities is not None and probabilities.numel() <= 32:
-        values = probabilities.tolist()
-        colors = ['tab:blue'] * len(values)
-        if reference_label is not None and 0 <= reference_label < len(colors):
-            colors[reference_label] = 'tab:orange'
-        axis.bar(list(range(len(values))), values, color=colors, alpha=0.85)
-        axis.set_ylim(0.0, 1.0)
-        axis.set_xlabel('class')
-        axis.set_ylabel('probability')
-        axis.set_title(title)
-        axis.grid(True, axis='y', alpha=0.25)
-        if reference_label is not None:
-            axis.text(0.98, 0.95, f'ref={reference_label}', ha='right', va='top', transform=axis.transAxes)
-        return
+        if classification_mode == 'probabilities' and _render_classification_probabilities(axis, tensor, title, reference_label=reference_label):
+            return
+        if _render_classification_summary(axis, tensor, title, reference_label=reference_label):
+            return
     if label_text is not None:
         axis.text(0.5, 0.5, f'class: {label_text}', ha='center', va='center')
         axis.set_title(title)
@@ -329,7 +391,13 @@ def _attack_reconstruction_figure(result):
             except ValueError:
                 reference_class = None
         _render_target_panel(axes[1, 0], real_y, f"{reference_label}_y")
-        _render_target_panel(axes[1, 1], reconstructed_y, 'reconstructed_y', reference_label=reference_class)
+        _render_target_panel(
+            axes[1, 1],
+            reconstructed_y,
+            'reconstructed_y',
+            reference_label=reference_class,
+            classification_mode='probabilities',
+        )
     else:
         figure, axes = plt.subplots(1, 2, figsize=(12, 3))
         axes[0].plot(_to_series(real_x), label=f"{reference_label}_x", linewidth=2.0)

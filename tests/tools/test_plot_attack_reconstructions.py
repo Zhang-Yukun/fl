@@ -27,42 +27,41 @@ def test_plot_attack_reconstructions_plots_saved_artifacts(tmp_path):
             "sample_index": 0,
             "target_type": "update_payload",
             "primary_metric_name": "budget_recovered_fraction",
-            "reference_x": torch.tensor([[[1.0], [2.0], [3.0]]]),
-            "reference_y": torch.tensor([[[4.0], [5.0]]]),
+            "reference_x": torch.tensor([[[1.0], [2.0], [3.0]], [[10.0], [20.0], [30.0]]]),
+            "reference_y": torch.tensor([[[4.0], [5.0]], [[8.0], [9.0]]]),
             "reference_label": "nearest_client_train",
-            "reconstructed_x": torch.tensor([[[1.1], [1.9], [3.2]]]),
-            "reconstructed_y": torch.tensor([[[4.2], [4.8]]]),
+            "reconstructed_x": torch.tensor([[[1.1], [1.9], [3.2]], [[40.0], [50.0], [60.0]]]),
+            "reconstructed_y": torch.tensor([[[4.2], [4.8]], [[7.0], [7.0]]]),
+            "matched_reference_metric_name": "mse",
+            "matched_reference_indices": [5, 8],
         },
         artifact_path,
     )
-    (run_dir / "attack_results.json").write_text(
-        json.dumps(
-            [
-                {
-                    "name": "DLG",
-                    "client_id": "Nd2O3",
-                    "round_index": 0,
-                    "sample_index": 0,
-                    "artifact_path": "attack_artifacts/round_0000/Nd2O3/sample_0000/dlg_00000.pt",
-                    "primary_metric_value": 0.12,
-                    "primary_metric_name": "budget_recovered_fraction",
-                }
-            ],
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    records = [
+        {
+            "name": "DLG",
+            "client_id": "Nd2O3",
+            "round_index": 0,
+            "sample_index": 0,
+            "artifact_path": "attack_artifacts/round_0000/Nd2O3/sample_0000/dlg_00000.pt",
+            "primary_metric_value": 0.12,
+            "primary_metric_name": "budget_recovered_fraction",
+        }
+    ]
+    (run_dir / "attack_results.json").write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    selected = module.select_records(module.load_json(run_dir / "attack_results.json"), sort_key="primary_metric_value", descending=False, attack_name=None, client_id=None, round_index=None, limit=5)
-    assert len(selected) == 1
+    selected = module.select_candidates(run_dir, records, sort_key="matched_metric_value", descending=False, attack_name=None, client_id=None, round_index=None, limit=5)
+    assert len(selected) == 2
+    assert selected[0]["pair_index"] == 0
+    assert selected[0]["matched_reference_index"] == 5
+    assert selected[0]["matched_metric_value"] < selected[1]["matched_metric_value"]
 
     output_dir = run_dir / "plots"
-    output_path = module.plot_one_artifact(run_dir, selected[0], output_dir)
-    assert output_path.exists()
-    report = module.build_report(selected, [output_path])
-    assert report[0] == "plotted 1 attack reconstructions"
-    assert "Nd2O3" in report[1]
+    plotted = [module.plot_candidate(candidate, output_dir) for candidate in selected]
+    assert plotted[0].exists()
+    report = module.build_report(selected, plotted)
+    assert report[0] == "plotted 2 attack reconstructions"
+    assert "pair=0" in report[1]
 
 
 def test_plot_attack_reconstructions_script_exists():
@@ -71,6 +70,7 @@ def test_plot_attack_reconstructions_script_exists():
     assert content.startswith("#!/usr/bin/env python3")
     assert "attack_results.json" in content
     assert "artifact_path" in content
+    assert "matched_metric_value" in content
 
 
 def test_plot_attack_reconstructions_hides_idlg_target_by_default():
@@ -96,34 +96,32 @@ def test_plot_attack_reconstructions_supports_image_artifacts(tmp_path):
             "sample_index": 0,
             "target_type": "update_payload",
             "primary_metric_name": "budget_recovered_fraction",
-            "reference_x": torch.rand(1, 1, 4, 4),
-            "reference_y": torch.tensor([2]),
+            "reference_x": torch.rand(2, 1, 4, 4),
+            "reference_y": torch.tensor([2, 1]),
             "reference_label": "nearest_client_train",
-            "reconstructed_x": torch.rand(1, 1, 4, 4),
-            "reconstructed_y": torch.randn(1, 3),
+            "reconstructed_x": torch.rand(2, 1, 4, 4),
+            "reconstructed_y": torch.tensor([[0.1, 3.0, -1.0], [2.0, 0.5, -1.0]]),
+            "matched_reference_metric_name": "mse",
+            "matched_reference_indices": [2, 4],
         },
         artifact_path,
     )
-    (run_dir / "attack_results.json").write_text(
-        json.dumps(
-            [
-                {
-                    "name": "DLG",
-                    "client_id": "client1",
-                    "round_index": 1,
-                    "sample_index": 0,
-                    "artifact_path": "attack_artifacts/round_0001/client1/sample_0000/dlg_00000.pt",
-                    "primary_metric_value": 0.08,
-                    "primary_metric_name": "budget_recovered_fraction",
-                }
-            ],
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    record = {
+        "name": "DLG",
+        "client_id": "client1",
+        "round_index": 1,
+        "sample_index": 0,
+        "artifact_path": "attack_artifacts/round_0001/client1/sample_0000/dlg_00000.pt",
+        "primary_metric_value": 0.08,
+        "primary_metric_name": "budget_recovered_fraction",
+    }
 
-    output_path = module.plot_one_artifact(run_dir, module.load_json(run_dir / "attack_results.json")[0], run_dir / "plots")
+    candidates = module.expand_record_candidates(run_dir, record)
+    assert len(candidates) == 2
+    assert candidates[0]['result'].reference_y.shape == (1,)
+    assert candidates[0]['result'].reconstructed_y.shape == (1, 3)
+
+    output_path = module.plot_one_artifact(run_dir, record, run_dir / "plots")
     assert output_path.exists()
 
 
