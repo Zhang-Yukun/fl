@@ -8,7 +8,7 @@ INPUT_ROOT="${INPUT_ROOT:-outputs/output/exp}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/analysis/exp}"
 MODE="${MODE:-single_sync}"
 PROFILE="${PROFILE:-noattack}"
-SEEDS_RAW="${SEEDS:-42 55 2026 8192}"
+SEEDS_RAW="${SEEDS:-42 4096 2026 8192}"
 LOSSES_RAW="${LOSSES:-mse mae}"
 ALGORITHMS_RAW="${ALGORITHMS:-centralized fedavg topk ega}"
 INCLUDE_OLD="${INCLUDE_OLD:-false}"
@@ -20,7 +20,7 @@ Usage:
   OUTPUT_ROOT=outputs/analysis/exp \
   MODE=single_sync \
   PROFILE=noattack \
-  SEEDS="42 55 2026 8192" \
+  SEEDS="42 4096 2026 8192" \
   LOSSES="mse mae" \
   ALGORITHMS="centralized fedavg topk ega" \
   bash scripts/run_analyze_experiment_suite_batch.sh
@@ -30,7 +30,7 @@ Optional flags:
   --output-root PATH
   --mode NAME
   --profile noattack|attack
-  --seeds "42 55 2026 8192" | 42,55,2026,8192
+  --seeds "42 4096 2026 8192" | 42,4096,2026,8192
   --losses "mse mae" | mse,mae
   --algorithms "centralized fedavg topk ega" | centralized,fedavg,topk,ega
   --include-old

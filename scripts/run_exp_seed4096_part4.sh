@@ -3,12 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SUITE_SEED="${SUITE_SEED:-55}"
+SUITE_SEED="${SUITE_SEED:-4096}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
-BASE_PORT="${BASE_PORT:-59100}"
+BASE_PORT="${BASE_PORT:-59300}"
 OUTPUT_PREFIX="${OUTPUT_PREFIX:-outputs/exp}"
 TASKS=(rare mnist cifar10)
-PROFILE="noattack"
+PROFILE="attack"
 MODE="multi_sync"
 
 for task in "${TASKS[@]}"; do
