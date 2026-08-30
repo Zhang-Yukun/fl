@@ -134,8 +134,6 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     assert torch.isfinite(torch.tensor(idlg.mse))
     assert dlg.metric_name == "objective_mse"
     assert idlg.metric_name == "objective_mse"
-    assert dlg.nearest_client_train_mse is not None
-    assert idlg.nearest_client_train_mse is not None
     assert dlg.reference_label == "nearest_client_train"
     assert torch.allclose(dlg.reference_x, x)
     assert dlg.reference_y is None
@@ -150,6 +148,10 @@ def test_update_payload_attacks_run_on_vendored_patchtst():
     assert summary["methods"]["DLG"]["target_type"] == "update_payload"
     assert summary["overall_avg_budget_recovered_fraction"] is not None
     assert summary["overall_avg_objective_mse"] is not None
+    assert dlg.matched_reference_metric_name == 'mse'
+    assert dlg.matched_reference_metric_value is not None
+    assert dlg.matched_reference_metric_min_value is not None
+    assert dlg.matched_reference_metric_min_value <= dlg.matched_reference_metric_value
     assert summary["clients"]["Nd2O3"]["methods"]["DLG"]["target_type"] == "update_payload"
 
 
@@ -470,8 +472,6 @@ def test_classification_update_payload_attacks_keep_reference_labels():
     assert dlg.metric_name == "objective_mse"
     assert dlg.reference_label == "nearest_client_train"
     assert dlg.reference_x.shape == x.shape
-    assert dlg.nearest_client_train_indices is not None
-    expected_reference_y = reference_targets.index_select(0, torch.tensor(dlg.nearest_client_train_indices, dtype=torch.long))
     assert dlg.reference_y is not None
-    assert torch.equal(dlg.reference_y, expected_reference_y)
+    assert torch.equal(dlg.reference_y, torch.tensor([1], dtype=torch.long))
     assert dlg.reconstructed_y is not None

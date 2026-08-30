@@ -415,11 +415,10 @@ def _ensure_builtin_attack_record_fields_registered() -> None:
     register_attack_record_field('success', lambda result: getattr(result, 'success', None))
     register_attack_record_field('success_threshold', lambda result: getattr(result, 'success_threshold', None))
     register_attack_record_field('target_type', lambda result: getattr(result, 'target_type', None))
-    register_attack_record_field('nearest_client_train_mse', lambda result: getattr(result, 'nearest_client_train_mse', None))
-    register_attack_record_field('nearest_client_train_indices', lambda result: getattr(result, 'nearest_client_train_indices', None))
     register_attack_record_field('matched_reference_indices', lambda result: getattr(result, 'matched_reference_indices', None))
     register_attack_record_field('matched_reference_metric_name', lambda result: getattr(result, 'matched_reference_metric_name', None))
     register_attack_record_field('matched_reference_metric_value', lambda result: getattr(result, 'matched_reference_metric_value', None))
+    register_attack_record_field('matched_reference_metric_min_value', lambda result: getattr(result, 'matched_reference_metric_min_value', None))
     register_attack_record_field('recovered_count', lambda result: getattr(result, 'recovered_count', None))
     register_attack_record_field('reconstructed_count', lambda result: getattr(result, 'reconstructed_count', None))
     register_attack_record_field('reference_count', lambda result: getattr(result, 'reference_count', None))
@@ -448,11 +447,10 @@ def _ensure_builtin_attack_artifact_fields_registered() -> None:
     for key in ('plot_reference_x', 'plot_reference_y', 'plot_reconstructed_x', 'plot_reconstructed_y'):
         register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None), tensor_to_cpu=True)
     for key in (
-        'nearest_client_train_mse',
-        'nearest_client_train_indices',
         'matched_reference_indices',
         'matched_reference_metric_name',
         'matched_reference_metric_value',
+        'matched_reference_metric_min_value',
         'recovered_count',
         'reconstructed_count',
         'reference_count',

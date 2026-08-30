@@ -135,7 +135,7 @@ def build_report(records: list[dict[str, Any]], plotted_paths: list[Path]) -> li
     for record, path in zip(records, plotted_paths):
         lines.append(
             f"- {path.name}: name={record.get('name')} client={record.get('client_id')} round={record.get('round_index')} "
-            f"sample={record.get('sample_index')} primary_metric_value={record.get('primary_metric_value', record.get('mse'))} nearest_client_train_mse={record.get('nearest_client_train_mse')}"
+            f"sample={record.get('sample_index')} primary_metric_value={record.get('primary_metric_value', record.get('mse'))} matched_metric_avg={record.get('matched_reference_metric_value')} matched_metric_min={record.get('matched_reference_metric_min_value')}"
         )
     return lines
 

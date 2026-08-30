@@ -48,11 +48,10 @@ class AttackResult:
     success_threshold: float
     gradient_mse: float
     target_type: str = "update_payload"
-    nearest_client_train_mse: float | None = None
-    nearest_client_train_indices: list[int] | None = None
     matched_reference_indices: list[int] | None = None
     matched_reference_metric_name: str | None = None
     matched_reference_metric_value: float | None = None
+    matched_reference_metric_min_value: float | None = None
     recovered_count: int | None = None
     reconstructed_count: int | None = None
     reference_count: int | None = None
@@ -245,13 +244,12 @@ def _evaluate_reconstruction(
     reference_inputs: torch.Tensor | None = None,
     reference_targets: torch.Tensor | None = None,
 ) -> AttackResult:
-    nearest_client_train_mse = None
     nearest_client_train_indices = None
     reference_x = None
     reference_y = None
     reference_label = None
     if reference_inputs is not None:
-        nearest_client_train_mse, nearest_client_train_indices = _nearest_reference_mse(reconstructed_x, reference_inputs)
+        _, nearest_client_train_indices = _nearest_reference_mse(reconstructed_x, reference_inputs)
     if nearest_client_train_indices is not None:
         selected_reference_x, selected_reference_y, reference_label = _select_reference_targets(
             reference_inputs,
@@ -269,8 +267,6 @@ def _evaluate_reconstruction(
         success_threshold=float("nan"),
         gradient_mse=float(objective_mse),
         target_type=target_type,
-        nearest_client_train_mse=None if nearest_client_train_mse is None else float(nearest_client_train_mse),
-        nearest_client_train_indices=nearest_client_train_indices,
         metric_name="objective_mse",
         reference_x=reference_x,
         reference_y=reference_y,
@@ -351,6 +347,7 @@ def apply_set_recovery_metrics(
         result.matched_reference_indices = matched_indices or None
         result.matched_reference_metric_name = success_metric
         result.matched_reference_metric_value = None if not matched_metric_values else float(sum(matched_metric_values) / len(matched_metric_values))
+        result.matched_reference_metric_min_value = None if not matched_metric_values else float(min(matched_metric_values))
         result.recovered_count = recovered
         result.reconstructed_count = reconstructed_count
         result.reference_count = reference_count

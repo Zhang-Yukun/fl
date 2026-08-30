@@ -111,7 +111,8 @@ def test_replay_saved_update_attacks_matches_inline_results(tmp_path):
         assert online["target_type"] == replay["target_type"] == "update_payload"
         assert online["primary_metric_name"] == replay["primary_metric_name"]
         assert online["primary_metric_value"] == pytest.approx(replay["primary_metric_value"])
-        assert online["nearest_client_train_mse"] == pytest.approx(replay["nearest_client_train_mse"])
+        assert online["matched_reference_metric_value"] == pytest.approx(replay["matched_reference_metric_value"])
+        assert online["matched_reference_metric_min_value"] == pytest.approx(replay["matched_reference_metric_min_value"])
         assert online["budget_recovered_fraction"] == pytest.approx(replay["budget_recovered_fraction"])
         assert online["objective_mse"] == pytest.approx(replay["objective_mse"])
         assert online["artifact_path"] == replay["artifact_path"]

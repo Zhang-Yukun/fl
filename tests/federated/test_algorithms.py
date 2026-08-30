@@ -666,7 +666,7 @@ def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
     attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
     assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"primary_metric_name", "primary_metric_value", "iterations", "time_seconds", "objective_mse", "nearest_client_train_mse", "budget_recovered_fraction"} <= set(attack_results[0])
+    assert {"primary_metric_name", "primary_metric_value", "iterations", "time_seconds", "objective_mse", "budget_recovered_fraction", "matched_reference_metric_value", "matched_reference_metric_min_value"} <= set(attack_results[0])
     assert "mse" not in attack_results[0]
     assert "metric_name" not in attack_results[0]
     assert result["attack_evaluations"] == 6
