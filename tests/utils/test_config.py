@@ -125,6 +125,7 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["attack"]["tv_weight"] == 0.0
     assert config["attack"]["recovery_match_metric"] == "mse"
     assert config["attack"]["recovery_success_metric"] == "mse"
+    assert config["attack"]["recovery_success_threshold"] == 0.5
     assert config["grpc"]["max_message_mb"] == 384.0
     assert config["artifacts"]["config_formats"] == ["yaml"]
 
@@ -197,3 +198,17 @@ def test_load_config_uses_registered_method_config_metadata(monkeypatch):
     assert 'topk_fraction' not in config['federated']
     assert 'custom_block' in config
     assert config['privacy']['clip_norm'] == 2.0
+
+
+def test_load_config_preserves_unresolved_attack_threshold_auto(monkeypatch):
+    from fedlab.security import registry as security_registry
+
+    def _boom(_config, _metric, _data_range):
+        raise RuntimeError("cannot resolve now")
+
+    monkeypatch.setattr(security_registry, "resolve_recovery_threshold", _boom)
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        ["attack.recovery_success_threshold=auto", "tracking.enabled=false"],
+    )
+    assert config["attack"]["recovery_success_threshold"] == "auto"

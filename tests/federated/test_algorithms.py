@@ -610,6 +610,7 @@ def test_saved_config_contains_materialized_runtime_defaults(tmp_path):
     saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
     assert saved["evaluation"]["mode"] == "protocol"
     assert saved["attack"]["model_mode"] == "train"
+    assert saved["attack"]["recovery_success_threshold"] == 0.5
 
 
 def test_config_artifact_formats_are_configurable(tmp_path):

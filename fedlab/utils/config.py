@@ -172,6 +172,39 @@ def _materialize_runtime_defaults(config: dict[str, Any]) -> dict[str, Any]:
     return _deep_merge(_RUNTIME_DEFAULTS, config)
 
 
+def _materialize_attack_threshold_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    """Resolve attack thresholds when they can be determined at config-load time."""
+
+    materialized = copy.deepcopy(config)
+    attack_cfg = materialized.get("attack")
+    if not isinstance(attack_cfg, dict):
+        return materialized
+    configured = attack_cfg.get("recovery_success_threshold")
+    if configured not in (None, "auto", "AUTO", "Auto"):
+        return materialized
+    try:
+        from fedlab.security.registry import normalize_recovery_metric_name, resolve_recovery_threshold
+
+        metric = normalize_recovery_metric_name(attack_cfg.get("recovery_success_metric"), default="mse")
+        data_range = float(attack_cfg.get("data_range", 1.0))
+        attack_cfg["recovery_success_threshold"] = float(
+            resolve_recovery_threshold(
+                {
+                    **materialized,
+                    "attack": {
+                        **attack_cfg,
+                        "recovery_success_threshold": None,
+                    },
+                },
+                metric,
+                data_range,
+            )
+        )
+    except Exception:
+        return materialized
+    return materialized
+
+
 def _validate_epoch_schedule_config(config: dict[str, Any]) -> None:
     """Reject removed schedule keys; only ``training.epochs`` is supported."""
 
@@ -242,6 +275,7 @@ def load_config(path: str | Path, overrides: Iterable[str] | None = None) -> dic
     config = apply_overrides(config, overrides)
     _validate_epoch_schedule_config(config)
     config = _materialize_runtime_defaults(config)
+    config = _materialize_attack_threshold_defaults(config)
     _validate_no_legacy_transport_keys(config)
     config = _sanitize_algorithm_config(config)
     logger.info("Loaded config from {}", path)
