@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SUITE_SEED="${SUITE_SEED:-8192}"
-RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:1}"
+RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
 BASE_PORT="${BASE_PORT:-61000}"
 OUTPUT_PREFIX="${OUTPUT_PREFIX:-outputs/exp}"
 TASKS=(rare mnist cifar10)
