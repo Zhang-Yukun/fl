@@ -36,9 +36,6 @@ from fedlab.federated.algorithms import (
     _log_prediction_views,
     _configured_primary_metric_name,
     _configured_primary_metric_mode,
-    configure_random_seed,
-    configure_torch_runtime,
-    resolve_device,
     is_compressed_algorithm,
 )
 from fedlab.federated.client import ClientResult, FederatedClient
@@ -47,6 +44,7 @@ from fedlab.federated.protocol import validate_transport_modes
 from fedlab.replay_capture.artifacts import save_captured_update_records
 from fedlab.tasks.registry import task_type
 from fedlab.utils.logging import setup_logging
+from fedlab.utils.runtime import configure_random_seed, configure_torch_runtime, resolve_device
 from fedlab.utils.artifacts import save_experiment_config, should_save_periodic_artifacts
 from fedlab.utils.serialization import state_num_bytes, state_num_parameters
 from fedlab.utils.transport import estimate_upload_transport_bytes

@@ -3,19 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import random
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
-
-try:
-    import numpy as np
-except ImportError:  # pragma: no cover - numpy is expected in the training env
-    np = None
 from loguru import logger
 
 from fedlab.utils.artifacts import save_experiment_config, save_federated_snapshot, should_save_periodic_artifacts
@@ -24,6 +17,7 @@ from fedlab.federated.client import FederatedClient
 from fedlab.federated.methods import build_method, is_registered_compressed
 from fedlab.datasets import build_federated_loaders
 from fedlab.utils.logging import setup_logging
+from fedlab.utils.runtime import configure_random_seed, configure_torch_runtime, resolve_device
 from fedlab.modeling import build_model
 from fedlab.utils.serialization import (
     StateDict,
@@ -38,62 +32,6 @@ from fedlab.tasks import primary_metric as task_primary_metric, primary_metric_m
 from fedlab.federated.protocol import validate_transport_modes
 from fedlab.utils.tracking import Tracker
 from fedlab.engine.training import build_training_optimizer, evaluate, predict_first_batch, predict_first_batch_for_state, train_one_epoch
-from fedlab.utils.random import seed_cuda_device
-
-
-def configure_torch_runtime(config: dict[str, Any]) -> None:
-    """Apply CPU thread limits from runtime config before training starts."""
-
-    runtime_cfg = config.get("runtime", {})
-    num_threads = runtime_cfg.get("num_threads")
-    interop_threads = runtime_cfg.get("num_interop_threads")
-    if num_threads is not None:
-        torch.set_num_threads(int(num_threads))
-        logger.info("Set torch num_threads={}", int(num_threads))
-    if interop_threads is not None:
-        try:
-            torch.set_num_interop_threads(int(interop_threads))
-            logger.info("Set torch num_interop_threads={}", int(interop_threads))
-        except RuntimeError as exc:
-            logger.warning("Could not set torch interop threads after runtime start: {}", exc)
-
-
-def setup_seed(seed: int, deterministic: bool = True, *, device: torch.device | None = None) -> None:
-    """Set Python, NumPy, and torch random sources to a reproducible state.
-
-    Example:
-        ``setup_seed(2026, deterministic=True)`` makes repeated local runs
-        reproduce the same model init and dataloader shuffles.
-    """
-
-    seed_value = int(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed_value)
-    if deterministic:
-        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-    random.seed(seed_value)
-    if np is not None:
-        np.random.seed(seed_value)
-    torch.manual_seed(seed_value)
-    seed_cuda_device(seed_value, device)
-    if hasattr(torch.backends, "cudnn"):
-        torch.backends.cudnn.deterministic = deterministic
-        torch.backends.cudnn.benchmark = not deterministic
-    try:
-        torch.use_deterministic_algorithms(deterministic, warn_only=True)
-    except Exception as exc:  # pragma: no cover - depends on torch build/runtime
-        logger.warning("Could not set deterministic torch algorithms: {}", exc)
-    logger.info("Set runtime seed={} deterministic={} device={}", seed_value, deterministic, device or "cpu")
-
-
-def configure_random_seed(config: dict[str, Any], *, device: torch.device | None = None) -> None:
-    """Apply the configured runtime seed when one is provided."""
-
-    runtime_cfg = config.get("runtime", {})
-    seed = runtime_cfg.get("seed")
-    if seed is None:
-        return
-    resolved_device = resolve_device(config) if device is None else device
-    setup_seed(int(seed), deterministic=bool(runtime_cfg.get("deterministic", True)), device=resolved_device)
 
 
 def _resolve_training_epochs(config: dict[str, Any]) -> int:
@@ -109,16 +47,6 @@ def _log_mode_specific_schedule(config: dict[str, Any], mode: str) -> None:
         rounds = config.get("federated", {}).get("rounds")
         if rounds is not None:
             logger.info("Centralized mode ignores federated.rounds={} and uses training.epochs", rounds)
-
-
-def resolve_device(config: dict[str, Any]) -> torch.device:
-    """Resolve the configured torch device with a CPU fallback."""
-
-    requested = str(config.get("runtime", {}).get("device", "cpu"))
-    if requested.startswith("cuda") and not torch.cuda.is_available():
-        logger.warning("CUDA requested but unavailable; falling back to CPU")
-        requested = "cpu"
-    return torch.device(requested)
 
 
 def _loader_num_samples(loader: Any) -> int:

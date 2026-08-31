@@ -14,7 +14,7 @@ from loguru import logger
 
 from fedlab.datasets import build_federated_loaders
 from fedlab.engine.training import evaluate
-from fedlab.federated.algorithms import configure_random_seed, configure_torch_runtime, resolve_device
+from fedlab.utils.runtime import configure_random_seed, configure_torch_runtime, resolve_device
 from fedlab.modeling import build_model
 from fedlab.tools.replay_saved_update_common import default_config_path
 from fedlab.utils.artifacts import save_experiment_config

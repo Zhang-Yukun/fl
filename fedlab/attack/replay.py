@@ -13,7 +13,7 @@ from loguru import logger
 from fedlab.replay_capture.artifacts import load_captured_update_records
 from fedlab.attack.runner import execute_attack_round_task, resolve_attack_device
 from fedlab.attack.tasks import build_update_attack_round_task
-from fedlab.federated.algorithms import configure_random_seed, configure_torch_runtime
+from fedlab.utils.runtime import configure_random_seed, configure_torch_runtime
 from fedlab.security.attack_common import save_attack_artifacts, summarize_attack_results
 from fedlab.utils.artifacts import save_experiment_config
 from fedlab.utils.config import load_config
