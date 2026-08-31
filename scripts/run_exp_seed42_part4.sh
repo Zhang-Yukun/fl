@@ -7,7 +7,8 @@ SUITE_SEED="${SUITE_SEED:-42}"
 RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"
 BASE_PORT="${BASE_PORT:-58300}"
 OUTPUT_PREFIX="${OUTPUT_PREFIX:-outputs/exp}"
-TASKS=(rare mnist cifar10)
+TASKS_RAW="${TASKS:-rare mnist cifar10}"
+read -r -a TASKS <<< "${TASKS_RAW}"
 PROFILE="attack"
 MODE="multi_sync"
 

@@ -37,6 +37,7 @@ def test_seed_part_wrappers_delegate_with_expected_split():
         assert f'MODE="{mode}"' in content
         assert 'LOSSES=(mse)' in content
         assert 'BASE_ALGOS=fedavg,topk,ega' in content
-        assert 'TASKS=(rare mnist cifar10)' in content
+        assert 'TASKS_RAW="${TASKS:-rare mnist cifar10}"' in content
+        assert 'read -r -a TASKS <<< "${TASKS_RAW}"' in content
         assert 'TASK_IN_BASE_OUTPUT=true' in content
         assert 'bash scripts/run_controlled_suite.sh' in content
