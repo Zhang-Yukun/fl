@@ -186,6 +186,8 @@ def test_federated_run_supports_classification_task(tmp_path, monkeypatch, algor
     assert len(captures) == len(client_ids)
     assert {record['client_id'] for record in captures} == set(client_ids)
     assert (output_dir / 'saved_updates' / 'index.json').exists()
+    assert 'reference_inputs' not in captures[0]
+    assert 'reference_targets' not in captures[0]
 
 
 def test_federated_run_supports_classification_update_capture_for_replay(tmp_path):
@@ -207,4 +209,6 @@ def test_federated_run_supports_classification_update_capture_for_replay(tmp_pat
     assert len(captures) == 3
     assert {record['client_id'] for record in captures} == {'m1', 'm2', 'm3'}
     assert (output_dir / 'saved_updates' / 'index.json').exists()
+    assert 'reference_inputs' not in captures[0]
+    assert 'reference_targets' not in captures[0]
     assert not (output_dir / 'attack_results.json').exists()

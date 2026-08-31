@@ -670,6 +670,8 @@ def test_federated_run_saves_update_captures_for_offline_replay(tmp_path):
     assert len(captures) == 3
     assert {record['client_id'] for record in captures} == {'Nd2O3', 'CeO2', 'La2O3'}
     assert (tmp_path / 'saved_updates' / 'index.json').exists()
+    assert 'reference_inputs' not in captures[0]
+    assert 'reference_targets' not in captures[0]
     assert not (tmp_path / 'attack_results.json').exists()
 
 
@@ -733,7 +735,6 @@ def test_attack_task_uses_uploaded_protocol_payload():
     client = SimpleNamespace(
         client_id="Nd2O3",
         sample_batch=lambda max_samples=None, batch_index=0: (torch.zeros(1, 2, 1), torch.zeros(1, 1, 1)),
-        train_reference_inputs=lambda: torch.zeros(1, 2, 1),
     )
 
     records = algorithms_module._capture_round_update_records(

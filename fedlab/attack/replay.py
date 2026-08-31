@@ -11,6 +11,7 @@ from typing import Sequence
 from loguru import logger
 
 from fedlab.replay_capture.artifacts import load_captured_update_records
+from fedlab.attack.data import load_client_reference_set
 from fedlab.attack.runner import execute_attack_round_task, resolve_attack_device
 from fedlab.attack.tasks import build_update_attack_round_task
 from fedlab.utils.runtime import configure_random_seed, configure_torch_runtime
@@ -108,7 +109,12 @@ def replay_saved_update_attacks(
         task = build_update_attack_round_task(replay_config, records, round_index, max_rounds)
         if task is None:
             continue
-        round_result = execute_attack_round_task(replay_config, task, attack_device)
+        round_result = execute_attack_round_task(
+            replay_config,
+            task,
+            attack_device,
+            reference_loader=lambda client_id: load_client_reference_set(replay_config, client_id),
+        )
         attack_results.extend(round_result.attacks)
         logger.info(
             "Replayed round {} with {} attacks on {}",

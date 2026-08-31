@@ -24,8 +24,6 @@ class AttackSampleTask:
     sample_y_shape: tuple[int, ...]
     sample_x_dtype: str
     sample_y_dtype: str
-    reference_inputs: torch.Tensor | None = None
-    reference_targets: torch.Tensor | None = None
     scale_mean: list[float] | None = None
     scale_std: list[float] | None = None
 
@@ -132,8 +130,6 @@ def build_update_attack_round_task(
                     sample_y_shape=tuple(int(value) for value in sample["sample_y_shape"]),
                     sample_x_dtype=str(sample["sample_x_dtype"]),
                     sample_y_dtype=str(sample["sample_y_dtype"]),
-                    reference_inputs=None if record.get("reference_inputs") is None else record["reference_inputs"].detach().cpu().clone(),
-                    reference_targets=None if record.get("reference_targets") is None else record["reference_targets"].detach().cpu().clone(),
                     scale_mean=None if record.get("scale_mean") is None else [float(value) for value in record["scale_mean"]],
                     scale_std=None if record.get("scale_std") is None else [float(value) for value in record["scale_std"]],
                 )

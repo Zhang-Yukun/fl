@@ -451,9 +451,6 @@ def _capture_round_update_records(
             round_context=round_context,
         )
         scale_mean, scale_std = _resolve_client_scale_metadata(client)
-        reference_inputs = client.train_reference_inputs()
-        reference_target_getter = getattr(client, "train_reference_targets", None)
-        reference_targets = reference_target_getter() if callable(reference_target_getter) else None
         samples = []
         max_samples = _resolve_capture_max_samples(capture_cfg, _client_attack_available_samples(client))
         sample_x, sample_y = client.sample_batch(max_samples=max_samples, batch_index=0)
@@ -475,8 +472,6 @@ def _capture_round_update_records(
                 "compressor": getattr(result, "compressor", "none"),
                 "round_base_state": _clone_state(round_base_state),
                 "target_update": _clone_state(target_update),
-                "reference_inputs": None if reference_inputs is None else reference_inputs.detach().cpu().clone(),
-                "reference_targets": None if reference_targets is None else reference_targets.detach().cpu().clone(),
                 "scale_mean": scale_mean,
                 "scale_std": scale_std,
                 "samples": samples,

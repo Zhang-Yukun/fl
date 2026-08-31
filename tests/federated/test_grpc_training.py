@@ -401,6 +401,8 @@ def test_grpc_coordinator_saves_update_captures_when_attacks_disabled(tmp_path):
     assert len(captures) == 3
     assert {record["client_id"] for record in captures} == {"Nd2O3", "CeO2", "La2O3"}
     assert (tmp_path / "saved_updates" / "index.json").exists()
+    assert "reference_inputs" not in captures[0]
+    assert "reference_targets" not in captures[0]
 
 
 def test_grpc_coordinator_defers_ega_runtime_until_explicit_start(tmp_path, monkeypatch):

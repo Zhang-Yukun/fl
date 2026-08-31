@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from loguru import logger
 
+from fedlab.attack.data import ClientReferenceSet
 from fedlab.attack.tasks import AttackRoundResult, AttackRoundTask
 from fedlab.security.attack_common import apply_set_recovery_metrics, attach_attack_metadata
 from fedlab.security.registry import run_attacks
+
+
+ReferenceLoader = Callable[[str], ClientReferenceSet]
 
 
 def resolve_attack_device(config: dict[str, Any]) -> torch.device:
@@ -58,13 +62,25 @@ def execute_attack_round_task(
     config: dict[str, Any],
     task: AttackRoundTask,
     attack_device: torch.device,
+    *,
+    reference_loader: ReferenceLoader | None = None,
 ) -> AttackRoundResult:
     """Run one detached round of DLG/iDLG evaluation from frozen snapshots."""
 
     start = time.perf_counter()
     attacks = []
     sample_lookup = {(sample.client_id, sample.round_index, sample.sample_index): sample for sample in task.samples}
+    reference_cache: dict[str, ClientReferenceSet] = {}
+
+    def get_reference_set(client_id: str) -> ClientReferenceSet | None:
+        if reference_loader is None:
+            return None
+        if client_id not in reference_cache:
+            reference_cache[client_id] = reference_loader(client_id)
+        return reference_cache[client_id]
+
     for sample in task.samples:
+        reference_set = get_reference_set(sample.client_id)
         sample_x = _materialize_attack_template(sample.sample_x_shape, sample.sample_x_dtype)
         sample_y = _materialize_attack_template(sample.sample_y_shape, sample.sample_y_dtype)
         for result in run_attacks(
@@ -75,8 +91,8 @@ def execute_attack_round_task(
             sample_y,
             attack_device,
             target_type=sample.target_type,
-            reference_inputs=sample.reference_inputs,
-            reference_targets=sample.reference_targets,
+            reference_inputs=None if reference_set is None else reference_set.inputs,
+            reference_targets=None if reference_set is None else reference_set.targets,
         ):
             result = attach_attack_metadata(
                 result,
@@ -97,12 +113,15 @@ def execute_attack_round_task(
     for key, subset in grouped.items():
         _client_id, _round_index, _name = key
         first = next((sample_lookup.get((result.client_id, result.round_index, result.sample_index)) for result in subset), None)
-        if first is None or first.reference_inputs is None:
+        if first is None:
+            continue
+        reference_set = get_reference_set(first.client_id)
+        if reference_set is None:
             continue
         apply_set_recovery_metrics(
             subset,
-            reference_inputs=first.reference_inputs,
-            reference_targets=first.reference_targets,
+            reference_inputs=reference_set.inputs,
+            reference_targets=reference_set.targets,
             config=config,
         )
         for result in subset:
