@@ -6,6 +6,7 @@ SCRIPT_DIR = Path(__file__).parents[2] / "scripts"
 
 CURRENT_SCRIPTS = (
     "run_analyze_experiment_suite_batch.sh",
+    "run_replay_saved_update_batch.sh",
     "run_controlled_suite.sh",
     "run_exp_seed42.sh",
     "run_exp_seed42_part1.sh",
@@ -188,6 +189,35 @@ def test_seed_wrappers_delegate_to_controlled_suite():
 def test_removed_scripts_are_absent():
     for name in REMOVED_SCRIPTS:
         assert not (SCRIPT_DIR / name).exists(), name
+
+
+def test_batch_replay_wrapper_scans_saved_update_runs_and_splits_dlg_idlg_outputs():
+    content = _assert_executable("run_replay_saved_update_batch.sh")
+    for marker in (
+        'INPUT_ROOT="${INPUT_ROOT:-outputs/exp}"',
+        'ALGORITHMS_RAW="${ALGORITHMS:-fedavg topk ega}"',
+        'TASKS_RAW="${TASKS:-}"',
+        'MODES_RAW="${MODES:-}"',
+        'SEEDS_RAW="${SEEDS:-}"',
+        'LOSSES_RAW="${LOSSES:-}"',
+        'RUN_DLG="${RUN_DLG:-true}"',
+        'RUN_IDLG="${RUN_IDLG:-true}"',
+        'SKIP_EXISTING="${SKIP_EXISTING:-true}"',
+        '--dlg-only',
+        '--idlg-only',
+        '--force',
+        '--override KEY=VALUE',
+        'discover_run_dirs() {',
+        "find \"${INPUT_ROOT}\" -type f -path '*/saved_updates/index.json' | sort",
+        'run_method() {',
+        'offline_attack_replay_${method}',
+        'fedlab.tools.replay_saved_update_${method}',
+        'if [[ "${SKIP_EXISTING}" == "true" && -f "${output_dir}/attack_summary.json" ]]; then',
+        "IFS='/' read -r -a parts <<< \"${rel_path}\"",
+        'if ! matches_filters "${task}" "${mode}" "${seed}" "${loss}" "${algorithm}"; then',
+        'PYTHONPATH=. "${cmd[@]}"',
+    ):
+        assert marker in content
 
 
 def test_batch_analysis_wrapper_supports_task_scoped_single_seed_and_multiseed_outputs():
