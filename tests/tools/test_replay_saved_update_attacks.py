@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from fedlab.federated.algorithms import load_captured_update_records, run_federated
+from fedlab.attack.artifacts import load_captured_update_records
+from fedlab.federated.algorithms import run_federated
 from fedlab.utils.config import load_config
 
 
@@ -146,5 +147,5 @@ def test_replay_saved_update_scripts_exist():
     wrapper_content = SCRIPT_PATH.read_text(encoding="utf-8")
     common_content = COMMON_SCRIPT_PATH.read_text(encoding="utf-8")
     assert "run_replay_cli" in wrapper_content
-    assert "saved_updates" in common_content
-    assert "attack_summary.json" in common_content
+    assert "fedlab.attack.replay" in common_content
+    assert "replay_saved_update_attacks" in common_content

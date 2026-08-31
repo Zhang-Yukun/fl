@@ -22,17 +22,13 @@ from loguru import logger
 
 from fedlab.utils.artifacts import save_experiment_config, save_federated_snapshot, should_save_periodic_artifacts
 from fedlab.attack.artifacts import load_captured_update_records, save_captured_update_records
+from fedlab.attack.runner import execute_attack_round_task, resolve_attack_device
 from fedlab.attack.tasks import AttackRoundResult, AttackRoundTask, build_update_attack_round_task
-from fedlab.security.attack_common import (
-    apply_set_recovery_metrics,
-    attack_success_rate,
-    attach_attack_metadata,
-)
+from fedlab.security.attack_common import attack_success_rate
 from fedlab.security.registry import (
     compute_recovery_metric_matrix,
     list_registered_attack_tracking_metrics,
     resolve_recovery_objective,
-    run_attacks,
 )
 from fedlab.federated.client import FederatedClient
 from fedlab.federated.methods import build_method, is_registered_compressed
@@ -611,99 +607,6 @@ def _capture_round_update_records(
 
 
 
-def _resolve_attack_device(config: dict[str, Any]) -> torch.device:
-    """Resolve the device used for reconstruction attacks."""
-
-    attack_cfg = config.get("attack", {})
-    requested = str(attack_cfg.get("device", "same")).lower()
-    if requested == "same":
-        requested = str(config.get("runtime", {}).get("device", "cpu"))
-    if requested.startswith("cuda") and not torch.cuda.is_available():
-        logger.warning("Attack device {} unavailable; falling back to CPU", requested)
-        requested = "cpu"
-    return torch.device(requested)
-
-
-
-def _inverse_plot_tensor(values: torch.Tensor, mean: list[float] | None, std: list[float] | None) -> torch.Tensor:
-    """Restore one standardized tensor for visualization only."""
-
-    if mean is None or std is None:
-        return values.detach().cpu().clone()
-    tensor = values.detach().cpu().to(torch.float32)
-    mean_tensor = torch.tensor(mean, dtype=tensor.dtype).reshape(1, 1, -1)
-    std_tensor = torch.tensor(std, dtype=tensor.dtype).reshape(1, 1, -1)
-    while mean_tensor.ndim < tensor.ndim:
-        mean_tensor = mean_tensor.unsqueeze(0)
-        std_tensor = std_tensor.unsqueeze(0)
-    return tensor * std_tensor + mean_tensor
-
-
-def _execute_attack_round_task(
-    config: dict[str, Any],
-    task: AttackRoundTask,
-    attack_device: torch.device,
-) -> AttackRoundResult:
-    """Run one detached round of DLG/iDLG evaluation from frozen snapshots."""
-
-    start = time.perf_counter()
-    attacks = []
-    sample_lookup = {(sample.client_id, sample.round_index, sample.sample_index): sample for sample in task.samples}
-    for sample in task.samples:
-        sample_x = _materialize_attack_template(sample.sample_x_shape, sample.sample_x_dtype)
-        sample_y = _materialize_attack_template(sample.sample_y_shape, sample.sample_y_dtype)
-        for result in run_attacks(
-            config,
-            sample.round_base_state,
-            sample.target,
-            sample_x,
-            sample_y,
-            attack_device,
-            target_type=sample.target_type,
-            reference_inputs=sample.reference_inputs,
-            reference_targets=sample.reference_targets,
-        ):
-            result = attach_attack_metadata(
-                result,
-                client_id=sample.client_id,
-                round_index=sample.round_index,
-                sample_index=sample.sample_index,
-            )
-            plot_reference_x = getattr(result, "reference_x", None)
-            plot_reference_y = getattr(result, "reference_y", None)
-            result.plot_reference_x = None if plot_reference_x is None else _inverse_plot_tensor(plot_reference_x, sample.scale_mean, sample.scale_std)
-            result.plot_reconstructed_x = _inverse_plot_tensor(result.reconstructed_x, sample.scale_mean, sample.scale_std)
-            result.plot_reference_y = None if plot_reference_y is None else _inverse_plot_tensor(plot_reference_y, sample.scale_mean, sample.scale_std)
-            result.plot_reconstructed_y = None if result.reconstructed_y is None else _inverse_plot_tensor(result.reconstructed_y, sample.scale_mean, sample.scale_std)
-            attacks.append(result)
-    grouped: dict[tuple[str | None, int | None, str], list[Any]] = {}
-    for result in attacks:
-        grouped.setdefault((result.client_id, result.round_index, result.name), []).append(result)
-    for key, subset in grouped.items():
-        client_id, round_index, _name = key
-        first = next((sample_lookup.get((result.client_id, result.round_index, result.sample_index)) for result in subset), None)
-        if first is None or first.reference_inputs is None:
-            continue
-        apply_set_recovery_metrics(
-            subset,
-            reference_inputs=first.reference_inputs,
-            reference_targets=first.reference_targets,
-            config=config,
-        )
-        for result in subset:
-            if result.reference_x is not None:
-                result.plot_reference_x = _inverse_plot_tensor(result.reference_x, first.scale_mean, first.scale_std)
-            if result.reference_y is not None:
-                result.plot_reference_y = _inverse_plot_tensor(result.reference_y, first.scale_mean, first.scale_std)
-    return AttackRoundResult(
-        round_index=task.round_index,
-        time_seconds=time.perf_counter() - start,
-        clients_this_round=task.clients_this_round,
-        evaluations_per_client=task.evaluations_per_client,
-        attacks=attacks,
-    )
-
-
 def _mean_finite(values: list[float]) -> float | None:
     """Return the mean of finite values, or None when all values are non-finite."""
 
@@ -983,7 +886,7 @@ class AsyncAttackManager:
         self.config = config
         self.tracker = tracker
         self.attack_results: list[Any] = []
-        self.attack_device = _resolve_attack_device(config)
+        self.attack_device = resolve_attack_device(config)
         attack_cfg = config.get("attack", {})
         self.async_enabled = bool(attack_cfg.get("async_enabled", False))
         self.pending_round_order: list[int] = []
@@ -1033,10 +936,10 @@ class AsyncAttackManager:
             self._wait_for_capacity()
         self.pending_round_order.append(task.round_index)
         if self.executor is None:
-            self.completed_rounds[task.round_index] = _execute_attack_round_task(self.config, task, self.attack_device)
+            self.completed_rounds[task.round_index] = execute_attack_round_task(self.config, task, self.attack_device)
         else:
             self.pending_futures[task.round_index] = self.executor.submit(
-                _execute_attack_round_task,
+                execute_attack_round_task,
                 self.config,
                 task,
                 self.attack_device,

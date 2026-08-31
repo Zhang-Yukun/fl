@@ -1201,7 +1201,7 @@ def test_async_attack_manager_preserves_sync_mode(monkeypatch):
             attacks=[_attack_result_stub("DLG", client_id="Nd2O3")],
         )
 
-    monkeypatch.setattr(algorithms_module, "_execute_attack_round_task", fake_execute)
+    monkeypatch.setattr(algorithms_module, "execute_attack_round_task", fake_execute)
 
     manager = AsyncAttackManager(config, tracker)
     manager.submit(task)
@@ -1514,7 +1514,7 @@ def test_client_train_returns_aggregation_payload():
 def test_attack_device_defaults_to_runtime_device():
     config = {"runtime": {"device": "cpu"}, "attack": {}}
 
-    assert str(algorithms_module._resolve_attack_device(config)) == "cpu"
+    assert str(algorithms_module.resolve_attack_device(config)) == "cpu"
 
 
 def test_one_round_federated_run_with_sgd_optimizer(tmp_path):
