@@ -42,8 +42,6 @@ _RUNTIME_DEFAULTS = {
     "replay_capture": {
         "enabled": True,
         "frequency_rounds": 30,
-        "max_samples": "auto",
-        "max_samples_cap": 128,
     },
     "attack": {
         "enabled": True,

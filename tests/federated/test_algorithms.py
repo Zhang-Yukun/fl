@@ -8,6 +8,7 @@ import torch
 import yaml
 
 import fedlab.federated.algorithms as algorithms_module
+import fedlab.attack.runner as runner_module
 import fedlab.federated.client as client_module
 import fedlab.federated.server as server_module
 import fedlab.federated.methods.encoded as encoded_methods
@@ -683,7 +684,7 @@ def test_federated_run_ignores_online_attack_execution_flags(tmp_path):
             "attack.methods=dlg",
             "attack.target_type=update_payload",
             "replay_capture.frequency_rounds=1",
-            "replay_capture.max_samples=1",
+            "attack.max_samples=1",
             "attack.steps=1",
             "federated.algorithm=fedavg",
             "federated.rounds=1",
@@ -697,15 +698,15 @@ def test_federated_run_ignores_online_attack_execution_flags(tmp_path):
     assert not (tmp_path / 'attack_results.json').exists()
 
 
-def test_replay_capture_max_samples_auto_defaults_to_capped_training_set_size():
-    capture_cfg = {
+def test_attack_max_samples_auto_defaults_to_capped_training_set_size():
+    attack_cfg = {
         "max_samples": "auto",
         "max_samples_cap": 8,
     }
 
-    assert algorithms_module._resolve_capture_max_samples(capture_cfg, available_samples=18000) == 8
-    assert algorithms_module._resolve_capture_max_samples({"max_samples": "auto", "max_samples_cap": 32}, available_samples=20) == 20
-    assert algorithms_module._resolve_capture_max_samples({"max_samples": 3}, available_samples=18000) == 3
+    assert runner_module._resolve_attack_max_samples({"attack": attack_cfg}, available_samples=18000) == 8
+    assert runner_module._resolve_attack_max_samples({"attack": {"max_samples": "auto", "max_samples_cap": 32}}, available_samples=20) == 20
+    assert runner_module._resolve_attack_max_samples({"attack": {"max_samples": 3}}, available_samples=18000) == 3
 
 
 
@@ -715,12 +716,12 @@ def test_attack_task_uses_uploaded_protocol_payload():
         "replay_capture": {
             "enabled": True,
             "frequency_rounds": 1,
-            "max_samples": 1,
         },
         "attack": {
             "enabled": True,
             "target_type": "update_payload",
             "client_selection": "all",
+            "max_samples": 1,
         },
     }
     protocol_update = serialize_model(torch.nn.Linear(2, 1, bias=False))
@@ -755,10 +756,7 @@ def test_attack_task_uses_uploaded_protocol_payload():
     )
 
     assert task is not None
-    assert task.samples[0].sample_x_shape == (1, 2, 1)
-    assert task.samples[0].sample_y_shape == (1, 1, 1)
-    assert task.samples[0].sample_x_dtype == "float32"
-    assert task.samples[0].sample_y_dtype == "float32"
+    assert task.samples[0].sample_index == 0
     target = task.samples[0].target
     assert isinstance(target, dict)
     assert torch.equal(target["weight"], torch.tensor([[0.0, 2.0]]))

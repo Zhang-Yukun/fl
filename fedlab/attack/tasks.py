@@ -20,12 +20,6 @@ class AttackSampleTask:
     target_type: str
     round_base_state: StateDict
     target: list[torch.Tensor] | StateDict
-    sample_x_shape: tuple[int, ...]
-    sample_y_shape: tuple[int, ...]
-    sample_x_dtype: str
-    sample_y_dtype: str
-    scale_mean: list[float] | None = None
-    scale_std: list[float] | None = None
 
 
 @dataclass
@@ -112,31 +106,20 @@ def build_update_attack_round_task(
     selected_records = [record for record in records_this_round if str(record["client_id"]) in selected_client_ids]
     if not selected_records:
         return None
-    samples: list[AttackSampleTask] = []
-    evaluations_per_client = 0
-    for record in selected_records:
-        record_samples = list(record.get("samples", []))
-        evaluations_per_client = max(evaluations_per_client, len(record_samples))
-        for sample in record_samples:
-            samples.append(
-                AttackSampleTask(
-                    client_id=str(record["client_id"]),
-                    round_index=int(record["round_index"]),
-                    sample_index=int(sample.get("sample_index", 0)),
-                    target_type="update_payload",
-                    round_base_state=_clone_state(record["round_base_state"]),
-                    target=_clone_attack_target(record["target_update"]),
-                    sample_x_shape=tuple(int(value) for value in sample["sample_x_shape"]),
-                    sample_y_shape=tuple(int(value) for value in sample["sample_y_shape"]),
-                    sample_x_dtype=str(sample["sample_x_dtype"]),
-                    sample_y_dtype=str(sample["sample_y_dtype"]),
-                    scale_mean=None if record.get("scale_mean") is None else [float(value) for value in record["scale_mean"]],
-                    scale_std=None if record.get("scale_std") is None else [float(value) for value in record["scale_std"]],
-                )
-            )
+    samples = [
+        AttackSampleTask(
+            client_id=str(record["client_id"]),
+            round_index=int(record["round_index"]),
+            sample_index=0,
+            target_type="update_payload",
+            round_base_state=_clone_state(record["round_base_state"]),
+            target=_clone_attack_target(record["target_update"]),
+        )
+        for record in selected_records
+    ]
     return AttackRoundTask(
         round_index=int(round_index),
         clients_this_round=len(selected_records),
-        evaluations_per_client=evaluations_per_client,
+        evaluations_per_client=1,
         samples=samples,
     )

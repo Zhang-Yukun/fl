@@ -117,8 +117,6 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["training"]["optimizer"] == "sgd"
     assert config["replay_capture"]["enabled"] is True
     assert config["replay_capture"]["frequency_rounds"] == 30
-    assert config["replay_capture"]["max_samples"] == "auto"
-    assert config["replay_capture"]["max_samples_cap"] == 128
     assert config["attack"]["model_mode"] == "train"
     assert config["attack"]["methods"] == ["dlg", "idlg"]
     assert config["attack"]["optimizer"] == "adam"

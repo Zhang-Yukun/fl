@@ -32,7 +32,6 @@ def save_captured_update_records(output_dir: Path, records: list[dict[str, Any]]
             {
                 "client_id": str(payload["client_id"]),
                 "round_index": int(payload["round_index"]),
-                "target_type": payload.get("target_type", "update_payload"),
                 "path": str(path.relative_to(output_dir)),
             }
         )

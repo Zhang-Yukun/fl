@@ -115,8 +115,8 @@ def _classification_config(
         'training': {'epochs': 1, 'lr': 0.001, 'optimizer': 'adam', 'loss': 'cross_entropy', 'patience': 1, 'min_delta': 0.0},
         'centralized': {},
         'federated': {'algorithm': 'fedavg', 'rounds': 1},
-        'replay_capture': {'enabled': True, 'frequency_rounds': 1, 'max_samples': 1},
-        'attack': {'enabled': False, 'target_type': 'update_payload', 'steps': 1, 'async_enabled': False, 'device': 'same'},
+        'replay_capture': {'enabled': True, 'frequency_rounds': 1},
+        'attack': {'enabled': False, 'target_type': 'update_payload', 'steps': 1, 'async_enabled': False, 'device': 'same', 'max_samples': 1},
         'tracking': {'enabled': False},
         'evaluation': {'metrics': ['accuracy']},
         'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},
@@ -147,7 +147,7 @@ def _deterministic_overrides(output_dir: Path) -> list[str]:
         f"experiment.output_dir={output_dir}",
         "attack.target_type=update_payload",
         "replay_capture.frequency_rounds=1",
-        "replay_capture.max_samples=1",
+        "attack.max_samples=1",
         "attack.clients_per_round=1",
         "attack.client_selection=first",
         "attack.steps=1",
@@ -193,11 +193,6 @@ def test_replay_saved_update_attacks_runs_from_saved_updates_only(tmp_path):
     assert len(captures) == 3
     assert {record["client_id"] for record in captures} == {"Nd2O3", "CeO2", "La2O3"}
     assert (source_dir / "saved_updates" / "index.json").exists()
-    sample = captures[0]["samples"][0]
-    assert "real_x" not in sample
-    assert "real_y" not in sample
-    assert sample["sample_x_shape"][0] == 1
-    assert sample["sample_x_dtype"] == "float32"
     assert "reference_inputs" not in captures[0]
     assert "reference_targets" not in captures[0]
 

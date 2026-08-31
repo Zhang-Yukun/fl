@@ -359,68 +359,6 @@ def _extract_attack_payload(
 
 
 
-def _torch_dtype_name(dtype: torch.dtype) -> str:
-    """Return one stable dtype name for saved attack templates."""
-
-    return str(dtype).replace("torch.", "")
-
-
-def _client_attack_available_samples(client: FederatedClient) -> int | None:
-    """Best-effort training-sample count used by attack sampling defaults."""
-
-    getter = getattr(client, "train_num_samples", None)
-    if callable(getter):
-        try:
-            return int(getter())
-        except Exception:
-            pass
-    reference_getter = getattr(client, "train_reference_inputs", None)
-    if callable(reference_getter):
-        try:
-            reference_inputs = reference_getter()
-            return int(reference_inputs.shape[0])
-        except Exception:
-            pass
-    train_loader = getattr(client, "train_loader", None)
-    dataset = getattr(train_loader, "dataset", None) if train_loader is not None else None
-    if dataset is None:
-        return None
-    try:
-        return int(len(dataset))
-    except Exception:
-        return None
-
-
-def _resolve_capture_max_samples(capture_cfg: dict[str, Any], available_samples: int | None) -> int | None:
-    """Resolve how many training samples each saved replay template should include."""
-
-    configured = capture_cfg.get("max_samples", 1)
-    if configured is None:
-        return None
-    if str(configured).strip().lower() == "auto":
-        count = None if available_samples is None else max(1, int(available_samples))
-        cap = capture_cfg.get("max_samples_cap")
-        if count is not None and cap is not None:
-            count = min(count, max(1, int(cap)))
-        return count
-    return max(1, int(configured))
-
-
-def _resolve_client_scale_metadata(client: FederatedClient) -> tuple[list[float] | None, list[float] | None]:
-    """Return scaler statistics for one client, preferring registered metadata when present."""
-
-    registered_mean = getattr(client, 'registered_scale_mean', None)
-    registered_std = getattr(client, 'registered_scale_std', None)
-    if registered_mean is not None or registered_std is not None:
-        return registered_mean, registered_std
-    train_loader = getattr(client, 'train_loader', None)
-    scaler = getattr(train_loader, 'scaler', None)
-    scale_mean = None if getattr(scaler, 'mean', None) is None else [float(value) for value in scaler.mean.reshape(-1).tolist()]
-    scale_std = None if getattr(scaler, 'std', None) is None else [float(value) for value in scaler.std.reshape(-1).tolist()]
-    return scale_mean, scale_std
-
-
-
 def _capture_round_update_records(
     config: dict[str, Any],
     clients: list[FederatedClient],
@@ -431,11 +369,10 @@ def _capture_round_update_records(
     server: FederatedServer | None = None,
     round_context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Capture server-visible client updates plus replay inputs for one round."""
+    """Capture only the server-visible updates required for offline replay."""
 
     if not _should_capture_update_payload(config, round_index, max_rounds):
         return []
-    capture_cfg = config.get("replay_capture", {})
     round_context = round_context or {}
     results_by_client = {result.client_id: result for result in results}
     records: list[dict[str, Any]] = []
@@ -450,31 +387,12 @@ def _capture_round_update_records(
             round_index=round_index,
             round_context=round_context,
         )
-        scale_mean, scale_std = _resolve_client_scale_metadata(client)
-        samples = []
-        max_samples = _resolve_capture_max_samples(capture_cfg, _client_attack_available_samples(client))
-        sample_x, sample_y = client.sample_batch(max_samples=max_samples, batch_index=0)
-        samples.append(
-            {
-                "sample_index": 0,
-                "sample_x_shape": list(sample_x.shape),
-                "sample_y_shape": list(sample_y.shape),
-                "sample_x_dtype": _torch_dtype_name(sample_x.dtype),
-                "sample_y_dtype": _torch_dtype_name(sample_y.dtype),
-            }
-        )
         records.append(
             {
                 "client_id": client.client_id,
                 "round_index": int(round_index),
-                "target_type": "update_payload",
-                "aggregation_payload_kind": getattr(result, "aggregation_payload_kind", "dense_update"),
-                "compressor": getattr(result, "compressor", "none"),
                 "round_base_state": _clone_state(round_base_state),
                 "target_update": _clone_state(target_update),
-                "scale_mean": scale_mean,
-                "scale_std": scale_std,
-                "samples": samples,
             }
         )
     return records
