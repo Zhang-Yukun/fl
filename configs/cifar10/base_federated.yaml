@@ -1,5 +1,5 @@
 includes:
   - ../common/base/classification.yaml
-  - ../common/model/medium_cnn.yaml
+  - ../common/model/medium_resnet.yaml
   - ../common/federated/default.yaml
   - ../common/data/cifar10.yaml

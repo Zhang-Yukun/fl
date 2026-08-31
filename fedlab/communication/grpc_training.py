@@ -327,7 +327,7 @@ class GrpcFederatedCoordinator:
             ready = self.runtime_ready and self.registration_ready
             return {
                 'round': self.round_index,
-                'state': self.server.global_state,
+                'state': self.server.global_state if ready else None,
                 'compressed': self.compressed,
                 'round_context': self.server.build_round_context() if ready else {},
                 'stop': self.stopped,

@@ -423,12 +423,14 @@ def test_grpc_coordinator_defers_ega_runtime_until_explicit_start(tmp_path, monk
     _register_loaded_clients(coordinator, train_loaders)
     initial_payload = coordinator.get_global()
     assert initial_payload['ready'] is False
+    assert initial_payload['state'] is None
     assert initial_payload['round_context'] == {}
 
     coordinator.start_runtime_initialization()
     time.sleep(0.05)
     waiting_payload = coordinator.get_global()
     assert waiting_payload['ready'] is False
+    assert waiting_payload['state'] is None
 
     ready_event.set()
     deadline = time.time() + 2.0

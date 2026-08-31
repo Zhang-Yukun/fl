@@ -650,7 +650,7 @@ PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/ra
 如果你的实验目录遵循现在的批量实验结构：
 
 ```text
-../outputs/exp/<task>/<mode>/<seed>/<profile>_<loss>
+../outputs/exp/<task>/<mode>/<seed>/<loss>
 ```
 
 那么可以直接用：
@@ -663,19 +663,19 @@ bash scripts/run_analyze_experiment_suite_batch.sh
 默认等价于：
 
 ```bash
-INPUT_ROOT=../outputs/exp OUTPUT_ROOT=../outputs/analysis/exp TASKS="rare mnist cifar10" TASK_LOSS_MAP="rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy" MODE=single_sync PROFILE=noattack SEEDS="42 4096 2026 8192" ALGORITHMS="centralized fedavg topk ega" bash scripts/run_analyze_experiment_suite_batch.sh
+INPUT_ROOT=../outputs/exp OUTPUT_ROOT=../outputs/analysis/exp TASKS="rare mnist cifar10" TASK_LOSS_MAP="rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy" MODE=single_sync SEEDS="42 4096 2026 8192" ALGORITHMS="centralized fedavg topk ega" bash scripts/run_analyze_experiment_suite_batch.sh
 ```
 
 只分析某一个任务和模式：
 
 ```bash
-TASKS="mnist" MODE=multi_sync PROFILE=attack SEEDS="42 4096" bash scripts/run_analyze_experiment_suite_batch.sh
+TASKS="mnist" MODE=multi_sync SEEDS="42 4096" bash scripts/run_analyze_experiment_suite_batch.sh
 ```
 
 也可以通过命令行参数传入：
 
 ```bash
-bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp   --output-root ../outputs/analysis/exp   --tasks "rare mnist cifar10"   --task-loss-map "rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy"   --mode multi_sync   --profile attack   --seeds "42 4096 2026 8192"   --algorithms "centralized fedavg topk ega"
+bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp   --output-root ../outputs/analysis/exp   --tasks "rare mnist cifar10"   --task-loss-map "rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy"   --mode multi_sync   --seeds "42 4096 2026 8192"   --algorithms "centralized fedavg topk ega"
 ```
 
 ### 6.3 批量实验的运行与分析建议

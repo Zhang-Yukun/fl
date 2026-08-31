@@ -149,11 +149,11 @@ run_single_seed() {
   local task="$1"
   local seed="$2"
   local loss="$3"
-  local input_dir
-  input_dir="$(resolve_input_dir "${task}" "${seed}" "${loss}")" || {
-    echo "[skip] task=${task} seed=${seed} loss=${loss} mode=${MODE} missing=${INPUT_ROOT}/${task}/${MODE}/${seed}/${loss}"
+  local input_dir="${INPUT_ROOT}/${task}/${MODE}/${seed}/${loss}"
+  if [[ ! -d "${input_dir}" ]]; then
+    echo "[skip] task=${task} seed=${seed} loss=${loss} mode=${MODE} missing=${input_dir}"
     return 0
-  }
+  fi
   local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/${seed}/${loss}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.tools.analyze_experiment_suite
@@ -180,8 +180,8 @@ run_multi_seed() {
   local found_inputs=0
   local seed
   for seed in "${SEED_LIST[@]}"; do
-    local input_dir
-    if input_dir="$(resolve_input_dir "${task}" "${seed}" "${loss}")"; then
+    local input_dir="${INPUT_ROOT}/${task}/${MODE}/${seed}/${loss}"
+    if [[ -d "${input_dir}" ]]; then
       cmd+=("${input_dir}")
       found_inputs=1
     fi
