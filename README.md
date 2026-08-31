@@ -23,8 +23,10 @@ git clone <your-repo-url> src
 ```text
 workspace/
 ├── data/
-│   ├── raw_data/                  # rare 的 rawdata2 Excel 原始文件，按客户端分目录存放
-│   ├── raw_image_datasets/        # MNIST / CIFAR-10 原始下载目录
+│   ├── raw_data/
+│   │   ├── rare/                  # rare 的 rawdata2 Excel 原始文件
+│   │   ├── mnist/                 # MNIST 原始下载目录
+│   │   └── cifar10/               # CIFAR-10 原始下载目录
 │   ├── rare_earth_rawdata2/       # rare 预处理后的联邦数据目录
 │   ├── mnist/                     # MNIST 预处理后的联邦数据目录
 │   └── cifar10/                   # CIFAR-10 预处理后的联邦数据目录
@@ -129,31 +131,21 @@ data:
 
 `rare` 以后统一只使用 `rawdata2` Excel 原始数据，不再使用 `XT_data`。
 
-请把原始 Excel 按客户端分目录放到：
+推荐把 `rare` 原始文件放到：
 
 ```text
-workspace/data/raw_data/
-├── Nd2O3/
-│   ├── *.xls
-│   └── *.xlsx
-├── CeO2/
-│   ├── *.xls
-│   └── *.xlsx
-└── La2O3/
-    ├── *.xls
-    └── *.xlsx
+workspace/data/raw_data/rare/
+├── *.xls
+└── *.xlsx
 ```
 
-也支持使用中文目录名：
+最常见的情况就是这里直接放三个 Excel，分别对应三个稀土客户端；只要文件内容里的 `品名` 列能区分出：
 
-```text
-workspace/data/raw_data/
-├── 氧化钕/
-├── 氧化铈/
-└── 氧化镧/
-```
+- `氧化钕` -> `Nd2O3`
+- `氧化铈` -> `CeO2`
+- `氧化镧` -> `La2O3`
 
-脚本会递归扫描 `raw_data/` 下的所有 `.xls` / `.xlsx` 文件，并优先根据所在子目录推断它属于哪个客户端；同时也会读取文件内容里的 `品名` 列做一致性检查。
+那就可以直接预处理，不要求再额外分客户端子目录。
 
 每个 Excel 至少需要包含列：
 
@@ -170,58 +162,58 @@ workspace/data/raw_data/
 - 价格类型包含 `出厂价`
 - 付款方式包含 `含税现款`
 
-如果同一个客户端目录下有多个 Excel，预处理脚本会先把它们按日期合并；若日期重复，会对同一天的数值取平均。之后再构造三客户端的日级插值宽表，并按时间顺序切分成 `train/val/test`。
+如果 `raw_data/rare/` 下有多个属于同一客户端的 Excel，预处理脚本会先按日期合并；若日期重复，会对同一天的数值取平均。之后再构造三客户端的日级插值宽表，并按时间顺序切分成 `train/val/test`。
 
 生成联邦训练数据：
 
 ```bash
 cd workspace/src
 python -m fedlab.tools.prepare_rawdata2 \
-  --raw-dir ../data/raw_data \
+  --raw-dir ../data/raw_data/rare \
   --output-dir ../data/rare_earth_rawdata2
 ```
 
 ### 3.3 `mnist` / `cifar10` 原始数据如何放置
 
-图像分类数据推荐直接让框架自动下载；也可以手动 `wget` 到 `workspace/data/raw_image_datasets/`。
+图像分类数据推荐统一放到 `workspace/data/raw_data/mnist` 和 `workspace/data/raw_data/cifar10`；也可以让框架自动下载到这两个目录。
 
 #### 推荐方式：让框架自动下载并切分
 
 ```bash
 cd workspace/src
-python -m fedlab.tools.prepare_image_classification_data   --dataset all   --raw-root ../data/raw_image_datasets   --output-root ../data   --num-clients 3   --val-ratio 0.1   --seed 2026
+python -m fedlab.tools.prepare_image_classification_data   --dataset all   --raw-root ../data/raw_data   --output-root ../data   --num-clients 3   --val-ratio 0.1   --seed 2026
 ```
 
 只准备 MNIST：
 
 ```bash
-python -m fedlab.tools.prepare_image_classification_data   --dataset mnist   --raw-root ../data/raw_image_datasets   --output-root ../data
+python -m fedlab.tools.prepare_image_classification_data   --dataset mnist   --raw-root ../data/raw_data   --output-root ../data
 ```
 
 只准备 CIFAR-10：
 
 ```bash
-python -m fedlab.tools.prepare_image_classification_data   --dataset cifar10   --raw-root ../data/raw_image_datasets   --output-root ../data
+python -m fedlab.tools.prepare_image_classification_data   --dataset cifar10   --raw-root ../data/raw_data   --output-root ../data
 ```
 
 #### 可选方式：手动 `wget` 原始数据
 
-MNIST 原始文件可放到 `workspace/data/raw_image_datasets/mnist/MNIST/raw/`：
+MNIST 原始文件可放到 `workspace/data/raw_data/mnist/MNIST/raw/`：
 
 ```bash
-mkdir -p ../data/raw_image_datasets/mnist/MNIST/raw
-wget -O ../data/raw_image_datasets/mnist/MNIST/raw/train-images-idx3-ubyte.gz   https://ossci-datasets.s3.amazonaws.com/mnist/train-images-idx3-ubyte.gz
-wget -O ../data/raw_image_datasets/mnist/MNIST/raw/train-labels-idx1-ubyte.gz   https://ossci-datasets.s3.amazonaws.com/mnist/train-labels-idx1-ubyte.gz
-wget -O ../data/raw_image_datasets/mnist/MNIST/raw/t10k-images-idx3-ubyte.gz   https://ossci-datasets.s3.amazonaws.com/mnist/t10k-images-idx3-ubyte.gz
-wget -O ../data/raw_image_datasets/mnist/MNIST/raw/t10k-labels-idx1-ubyte.gz   https://ossci-datasets.s3.amazonaws.com/mnist/t10k-labels-idx1-ubyte.gz
+mkdir -p ../data/raw_data/mnist/MNIST/raw
+wget -O ../data/raw_data/mnist/MNIST/raw/train-images-idx3-ubyte.gz   https://ossci-datasets.s3.amazonaws.com/mnist/train-images-idx3-ubyte.gz
+wget -O ../data/raw_data/mnist/MNIST/raw/train-labels-idx1-ubyte.gz   https://ossci-datasets.s3.amazonaws.com/mnist/train-labels-idx1-ubyte.gz
+wget -O ../data/raw_data/mnist/MNIST/raw/t10k-images-idx3-ubyte.gz   https://ossci-datasets.s3.amazonaws.com/mnist/t10k-images-idx3-ubyte.gz
+wget -O ../data/raw_data/mnist/MNIST/raw/t10k-labels-idx1-ubyte.gz   https://ossci-datasets.s3.amazonaws.com/mnist/t10k-labels-idx1-ubyte.gz
 ```
 
-CIFAR-10 原始文件可放到 `workspace/data/raw_image_datasets/cifar10/`：
+CIFAR-10 原始文件可放到 `workspace/data/raw_data/cifar10/`：
 
 ```bash
-mkdir -p ../data/raw_image_datasets/cifar10
-wget -O ../data/raw_image_datasets/cifar10/cifar-10-python.tar.gz   https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
-tar -xzf ../data/raw_image_datasets/cifar10/cifar-10-python.tar.gz   -C ../data/raw_image_datasets/cifar10
+mkdir -p ../data/raw_data/cifar10
+wget -O ../data/raw_data/cifar10/cifar-10-python.tar.gz   https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
+tar -xzf ../data/raw_data/cifar10/cifar-10-python.tar.gz   -C ../data/raw_data/cifar10
 ```
 
 手动下载后，仍然使用 `prepare_image_classification_data` 生成联邦训练数据。
