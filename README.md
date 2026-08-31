@@ -295,6 +295,9 @@ python -m fedlab.entrypoints.train   --config configs/mnist/ega.yaml   --mode fe
 - 客户端 `grpc.server_address` 需要指向服务器的实际 `IP:PORT`
 - 客户端 `client-id` 必须与 `data.clients` 一致
 - 下面示例里的默认地址使用 `127.0.0.1`，表示服务端和客户端都在本机运行；如果跨机器部署，请把它替换成服务器的实际 IP，并根据需要调整端口
+- 客户端只需要能访问自己的本地训练数据；图像任务下通常只需要 `split_dir/clients/<client_id>/`，时间序列任务下通常只需要自己的客户端原始数据或本地切分结果
+- 服务端不执行攻击，也不需要客户端完整训练集；服务端主要需要全局验证/测试所依赖的数据，以及正常聚合所需配置
+- EGA 首轮会先等待服务端准备 codec，然后再开始真正的第 0 轮训练；首次等待时间较长时属于正常现象
 
 推荐把 `experiment.output_dir` 设到 `../outputs/...`，这样实验产物会落在 `src` 外层，避免污染代码目录。客户端会在本地额外写日志到：
 
@@ -555,16 +558,19 @@ python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/
 - `model.pt`
 - `config.yaml`
 - `saved_updates/`
-- `attack_results.json`（如果在线攻击开启）
 
 其中：
 
 - `saved_updates/` 用于离线重放攻击
 - `model.pt` 用于离线重放测试
 
+当前框架本身不在联邦训练过程中执行在线攻击；攻击统一通过离线重放脚本独立完成。
+
 ### 5.2 回放全部已配置攻击
 
-`replay_saved_update_attacks.py` 会读取某个实验目录下的 `saved_updates/`，并按当前配置重新执行已启用攻击：
+`replay_saved_update_attacks.py` 会读取某个实验目录下的 `saved_updates/`，并按当前配置重新执行已启用攻击。
+
+注意：离线攻击回放不会再从训练输出里读取参考样本模板，而是会根据 `config.yaml` 里的数据配置重新加载客户端本地训练集。因此做离线攻击时，原始数据或预处理后的联邦数据目录仍然必须可访问，且路径要与配置一致；如果目录变了，需要通过 `--config` 或 `--override data.split_dir=...` / `--override data.csv_path=...` 指到新的位置。
 
 ```bash
 cd workspace/src
@@ -574,10 +580,12 @@ python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc
 如果想临时修改攻击参数，可以继续追加 `--override`：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override attack.steps=300   --override attack.lr=0.05
+python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override attack.steps=300   --override attack.lr=0.05   --override attack.max_samples=8
 ```
 
 ### 5.3 只回放 DLG 或 iDLG
+
+如果只想评估单一攻击方法，可以使用专门的入口；它们仍然会按当前配置重新加载客户端本地参考数据。
 
 只回放 DLG：
 
@@ -621,13 +629,13 @@ python -m fedlab.tools.replay_saved_model_evaluation   ../outputs/mnist_fedavg_g
 
 ```bash
 cd workspace/src
-PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/rare/single_sync/42/noattack_mse   --loss mse   --output-dir ../outputs/analysis/rare_single_sync_42_noattack_mse   --algorithms centralized fedavg topk ega
+PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/rare/single_sync/42/mse   --loss mse   --output-dir ../outputs/analysis/rare_single_sync_42_mse   --algorithms centralized fedavg topk ega
 ```
 
 多 seed 联合分析时，可以一次传多个根目录：
 
 ```bash
-PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/rare/single_sync/42/noattack_mse   ../outputs/exp/rare/single_sync/4096/noattack_mse   ../outputs/exp/rare/single_sync/2026/noattack_mse   ../outputs/exp/rare/single_sync/8192/noattack_mse   --loss mse   --output-dir ../outputs/analysis/rare_single_sync_multiseed_noattack_mse   --algorithms centralized fedavg topk ega
+PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/rare/single_sync/42/mse   ../outputs/exp/rare/single_sync/4096/mse   ../outputs/exp/rare/single_sync/2026/mse   ../outputs/exp/rare/single_sync/8192/mse   --loss mse   --output-dir ../outputs/analysis/rare_single_sync_multiseed_mse   --algorithms centralized fedavg topk ega
 ```
 
 当前工具支持：
