@@ -37,3 +37,32 @@ def test_flatten_classifier_output_shape():
         'model': {'name': 'mlp', 'hidden_size': 16},
     })
     assert model(torch.zeros(2, 3, 32, 32)).shape == (2, 5)
+
+
+def test_small_resnet_classifier_output_shape_for_mnist():
+    model = build_model({
+        'task': {'type': 'classification'},
+        'data': {'dataset_name': 'mnist', 'image_shape': [1, 28, 28], 'num_classes': 10},
+        'model': {'name': 'small_resnet', 'hidden_channels': 8},
+    })
+    assert model(torch.zeros(2, 1, 28, 28)).shape == (2, 10)
+
+
+def test_medium_resnet_classifier_output_shape_for_cifar10():
+    model = build_model({
+        'task': {'type': 'classification'},
+        'data': {'dataset_name': 'cifar10', 'image_shape': [3, 32, 32], 'num_classes': 10},
+        'model': {'name': 'medium_resnet', 'hidden_channels': 8},
+    })
+    assert model(torch.zeros(2, 3, 32, 32)).shape == (2, 10)
+
+
+def test_large_resnet_registers_batchnorm_buffers():
+    model = build_model({
+        'task': {'type': 'classification'},
+        'data': {'dataset_name': 'cifar10', 'image_shape': [3, 32, 32], 'num_classes': 10},
+        'model': {'name': 'large_resnet', 'hidden_channels': 8},
+    })
+    buffer_names = {name for name, _tensor in model.named_buffers()}
+    assert 'stem.1.running_mean' in buffer_names
+    assert 'stages.0.0.bn1.running_mean' in buffer_names

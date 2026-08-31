@@ -1,0 +1,4 @@
+model:
+  name: small_resnet
+  hidden_channels: 32
+  dropout: 0.1
