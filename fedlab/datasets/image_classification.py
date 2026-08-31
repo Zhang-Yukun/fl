@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,15 @@ def _attach_loader_metadata(loader: DataLoader, class_names: list[str] | None) -
     return loader
 
 
+def _read_split_summary(split_dir: str | Path) -> dict[str, Any]:
+    """Read the optional split summary for one prepared image dataset."""
+
+    summary_path = Path(split_dir) / 'summary.json'
+    if not summary_path.exists():
+        return {}
+    return json.loads(summary_path.read_text(encoding='utf-8'))
+
+
 def _build_loader_from_payload(
     payload: dict[str, torch.Tensor],
     *,
@@ -96,12 +106,8 @@ def build_federated_image_classification_loaders(config: dict[str, Any]) -> tupl
     num_workers = int(data_cfg.get('num_workers', 0))
     shuffle_train = bool(data_cfg.get('shuffle_train', True))
     seed = config.get('runtime', {}).get('seed')
-    summary_path = split_dir / 'summary.json'
-    class_names = None
-    if summary_path.exists():
-        import json
-
-        class_names = json.loads(summary_path.read_text(encoding='utf-8')).get('class_names')
+    summary = _read_split_summary(split_dir)
+    class_names = summary.get('class_names')
 
     train_loaders: dict[str, DataLoader] = {}
     for client_id in clients:
@@ -155,3 +161,56 @@ def build_federated_image_classification_loaders(config: dict[str, Any]) -> tupl
         class_names=class_names,
     )
     return train_loaders, val_loader, test_loader
+
+def build_client_image_classification_train_loader(config: dict[str, Any], client_id: str) -> DataLoader:
+    """Build only one client's local training loader from a prepared split directory."""
+
+    data_cfg = config.get('data', {})
+    split_dir = Path(data_cfg['split_dir'])
+    batch_size = int(data_cfg.get('batch_size', 64))
+    num_workers = int(data_cfg.get('num_workers', 0))
+    shuffle_train = bool(data_cfg.get('shuffle_train', True))
+    seed = config.get('runtime', {}).get('seed')
+    summary = _read_split_summary(split_dir)
+    class_names = summary.get('class_names')
+    client_dir = split_dir / 'clients' / client_id
+    if not client_dir.exists():
+        raise ValueError(f'Unknown client_id {client_id}; expected local split under {client_dir}')
+    train_payload = read_split_payload(client_dir / 'train.pt')
+    return _build_loader_from_payload(
+        train_payload,
+        batch_size=batch_size,
+        shuffle=shuffle_train,
+        num_workers=num_workers,
+        seed=seed,
+        identity=client_id + ':train',
+        class_names=class_names,
+    )
+
+
+def summarize_image_classification_training(config: dict[str, Any]) -> dict[str, int]:
+    """Return total client count and total training samples for one prepared split."""
+
+    data_cfg = config.get('data', {})
+    split_dir = Path(data_cfg['split_dir'])
+    clients = list(data_cfg.get('clients', ['client1', 'client2', 'client3']))
+    summary = _read_split_summary(split_dir)
+    client_summaries = summary.get('clients')
+    if isinstance(client_summaries, dict) and client_summaries:
+        total_clients = int(summary.get('num_clients') or len(client_summaries))
+        total_train_samples = 0
+        for client_id in clients:
+            payload = client_summaries.get(client_id) or {}
+            train_payload = payload.get('train') or {}
+            total_train_samples += int(train_payload.get('rows', 0) or 0)
+        if total_train_samples > 0:
+            return {
+                'total_clients': total_clients,
+                'total_train_samples': total_train_samples,
+            }
+    train_loaders, _, _ = build_federated_image_classification_loaders(config)
+    return {
+        'total_clients': len(train_loaders),
+        'total_train_samples': sum(len(loader.dataset) for loader in train_loaders.values()),
+    }
+

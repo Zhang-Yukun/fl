@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -335,4 +336,81 @@ class _ConcatLoader:
         """Return the total number of batches across wrapped loaders."""
 
         return sum(len(loader) for loader in self.loaders)
+
+def build_client_rare_earth_train_loader(config: dict[str, Any], client_id: str) -> DataLoader:
+    """Build only one client's local training loader for a prepared split directory."""
+
+    data_cfg = config['data']
+    if 'split_dir' not in data_cfg:
+        train_loaders, _, _ = build_federated_loaders(config)
+        if client_id not in train_loaders:
+            raise ValueError(f'Unknown client_id {client_id}; expected one of {sorted(train_loaders)}')
+        return train_loaders[client_id]
+    split_dir = Path(data_cfg['split_dir'])
+    seq_len = int(data_cfg.get('seq_len', 21))
+    pred_len = int(data_cfg.get('pred_len', 7))
+    batch_size = int(data_cfg.get('batch_size', 32))
+    num_workers = int(data_cfg.get('num_workers', 0))
+    shuffle_train = bool(data_cfg.get('shuffle_train', True))
+    seed = config.get('runtime', {}).get('seed')
+    client_dir = split_dir / 'clients' / client_id
+    if not client_dir.exists():
+        raise ValueError(f'Unknown client_id {client_id}; expected local split under {client_dir}')
+    train = read_value_frame(client_dir / 'train.csv')[['value']].to_numpy(dtype='float32')
+    train_loader, _, _, _ = make_loaders_from_splits(
+        train,
+        train,
+        train,
+        seq_len,
+        pred_len,
+        batch_size,
+        num_workers,
+        shuffle_train,
+        seed,
+        client_id,
+    )
+    return train_loader
+
+
+def summarize_rare_earth_training(config: dict[str, Any]) -> dict[str, int]:
+    """Return total client count and total train-window count for one experiment."""
+
+    data_cfg = config['data']
+    if 'split_dir' not in data_cfg:
+        train_loaders, _, _ = build_federated_loaders(config)
+        return {
+            'total_clients': len(train_loaders),
+            'total_train_samples': sum(_loader_num_samples(loader) for loader in train_loaders.values()),
+        }
+    split_dir = Path(data_cfg['split_dir'])
+    clients = list(data_cfg.get('clients', list(OXIDE_COLUMNS.keys())))
+    seq_len = int(data_cfg.get('seq_len', 21))
+    pred_len = int(data_cfg.get('pred_len', 7))
+    summary_path = split_dir / 'summary.json'
+    if summary_path.exists():
+        summary = json.loads(summary_path.read_text(encoding='utf-8'))
+        row_summary = summary.get('rows')
+        if isinstance(row_summary, dict) and row_summary:
+            total_train_samples = 0
+            for client_id in clients:
+                counts = row_summary.get(client_id) or {}
+                train_rows = int(counts.get('train', 0) or 0)
+                total_train_samples += max(0, train_rows - seq_len - pred_len + 1)
+            if total_train_samples > 0:
+                return {
+                    'total_clients': len(clients),
+                    'total_train_samples': total_train_samples,
+                }
+    train_loaders, _, _ = build_federated_loaders(config)
+    return {
+        'total_clients': len(train_loaders),
+        'total_train_samples': sum(_loader_num_samples(loader) for loader in train_loaders.values()),
+    }
+
+
+def _loader_num_samples(loader: Any) -> int:
+    """Return the number of samples carried by one loader-like object."""
+
+    dataset = getattr(loader, 'dataset', None)
+    return len(dataset) if dataset is not None else len(loader)
 

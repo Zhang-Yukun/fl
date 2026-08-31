@@ -21,6 +21,14 @@ from loguru import logger
 
 from fedlab.communication.grpc_service import FederatedRpcClient, FederatedRpcServer
 from fedlab.datasets import build_federated_loaders
+from fedlab.datasets.image_classification import (
+    build_client_image_classification_train_loader,
+    summarize_image_classification_training,
+)
+from fedlab.datasets.rare_earth import (
+    build_client_rare_earth_train_loader,
+    summarize_rare_earth_training,
+)
 from fedlab.federated.algorithms import (
     AsyncAttackManager,
     _build_federated_resume_state,
@@ -45,6 +53,7 @@ from fedlab.federated.algorithms import (
 from fedlab.federated.client import ClientResult, FederatedClient
 from fedlab.federated.server import EarlyStopper, FederatedServer
 from fedlab.federated.protocol import validate_transport_modes
+from fedlab.tasks.registry import task_type
 from fedlab.security.attack_common import save_attack_artifacts, summarize_attack_results
 from fedlab.utils.logging import setup_logging
 from fedlab.utils.artifacts import save_experiment_config, should_save_periodic_artifacts
@@ -78,6 +87,25 @@ def _loader_num_samples(loader: Any) -> int:
     dataset = getattr(loader, "dataset", None)
     return len(dataset) if dataset is not None else len(loader)
 
+
+
+
+def _build_grpc_client_training_state(config: dict[str, Any], client_id: str) -> tuple[Any, int, int]:
+    """Build one client's local training loader plus global training metadata."""
+
+    resolved_task_type = task_type(config)
+    if resolved_task_type == 'classification' and 'split_dir' in config.get('data', {}):
+        loader = build_client_image_classification_train_loader(config, client_id)
+        summary = summarize_image_classification_training(config)
+        return loader, int(summary['total_train_samples']), int(summary['total_clients'])
+    if resolved_task_type == 'forecasting':
+        loader = build_client_rare_earth_train_loader(config, client_id)
+        summary = summarize_rare_earth_training(config)
+        return loader, int(summary['total_train_samples']), int(summary['total_clients'])
+    train_loaders, _, _ = build_federated_loaders(config)
+    if client_id not in train_loaders:
+        raise ValueError(f'Unknown client_id {client_id}; expected one of {sorted(train_loaders)}')
+    return train_loaders[client_id], sum(_loader_num_samples(loader) for loader in train_loaders.values()), len(train_loaders)
 
 def _apply_transport_metrics(
     result: ClientResult,
@@ -588,17 +616,14 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
     device = resolve_device(config)
     configure_random_seed(config, device=device)
     validate_transport_modes(config)
-    train_loaders, _, _ = build_federated_loaders(config)
-    if client_id not in train_loaders:
-        raise ValueError(f'Unknown client_id {client_id}; expected one of {sorted(train_loaders)}')
-    total_train_samples = sum(_loader_num_samples(loader) for loader in train_loaders.values())
+    train_loader, total_train_samples, total_clients = _build_grpc_client_training_state(config, client_id)
     client = FederatedClient(
         client_id,
-        train_loaders[client_id],
+        train_loader,
         config,
         device,
         total_train_samples=total_train_samples,
-        total_clients=len(train_loaders),
+        total_clients=total_clients,
         allow_ega_pretrain=False,
     )
     rpc = FederatedRpcClient(address, max_message_length=max_message_length)

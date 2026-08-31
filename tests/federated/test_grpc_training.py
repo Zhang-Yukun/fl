@@ -627,6 +627,130 @@ def test_networked_grpc_ega_deferred_runtime_startup(tmp_path):
     assert Path(config['ega']['artifact_path']).exists()
 
 
+
+def test_run_client_classification_only_needs_local_train_split(tmp_path, monkeypatch):
+    split_dir = tmp_path / 'classification_split'
+    _prepare_classification_split_dir(split_dir, client_ids=['m1', 'm2', 'm3'], image_shape=(1, 4, 4), num_classes=3)
+    for missing_client in ['m2', 'm3']:
+        client_dir = split_dir / 'clients' / missing_client
+        for path in client_dir.glob('*'):
+            path.unlink()
+        client_dir.rmdir()
+
+    config = _classification_grpc_config(tmp_path, algorithm='fedavg')
+    config['data']['split_dir'] = str(split_dir)
+    captured: dict[str, object] = {}
+
+    class _FakeFederatedClient:
+        def __init__(self, client_id, train_loader, _config, _device, total_train_samples=None, total_clients=None, allow_ega_pretrain=False):
+            captured['client_id'] = client_id
+            captured['local_train_samples'] = len(train_loader.dataset)
+            captured['total_train_samples'] = total_train_samples
+            captured['total_clients'] = total_clients
+            captured['allow_ega_pretrain'] = allow_ega_pretrain
+
+    class _FakeRpcClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def snapshot_counters(self):
+            return {'sent_bytes': 0, 'received_bytes': 0}
+
+        def get_global(self):
+            return {'stop': True}
+
+        def ack_stop(self, payload):
+            return payload
+
+    monkeypatch.setattr(grpc_training_module, 'FederatedClient', _FakeFederatedClient)
+    monkeypatch.setattr(grpc_training_module, 'FederatedRpcClient', _FakeRpcClient)
+
+    run_client(config, 'm1')
+
+    assert captured['client_id'] == 'm1'
+    assert captured['local_train_samples'] == 6
+    assert captured['total_train_samples'] == 18
+    assert captured['total_clients'] == 3
+    assert captured['allow_ega_pretrain'] is False
+
+
+def test_run_client_forecasting_only_needs_local_train_split(tmp_path, monkeypatch):
+    split_dir = tmp_path / 'rare_split'
+    summary_rows = {}
+    for client in ['Nd2O3', 'CeO2', 'La2O3']:
+        client_dir = split_dir / 'clients' / client
+        client_dir.mkdir(parents=True, exist_ok=True)
+        for split, start, length in [('train', 0, 40), ('val', 40, 20), ('test', 60, 20)]:
+            dates = [f'2020-01-{(index % 28) + 1:02d}' for index in range(start, start + length)]
+            values = torch.arange(start, start + length, dtype=torch.float32).tolist()
+            rows = 'date,value\n' + '\n'.join(f'{date},{value}' for date, value in zip(dates, values)) + '\n'
+            (client_dir / f'{split}.csv').write_text(rows, encoding='utf-8')
+        summary_rows[client] = {'total': 80, 'train': 40, 'val': 20, 'test': 20}
+    (split_dir / 'summary.json').write_text(json.dumps({'rows': summary_rows}, ensure_ascii=False, indent=2), encoding='utf-8')
+    for missing_client in ['CeO2', 'La2O3']:
+        client_dir = split_dir / 'clients' / missing_client
+        for path in client_dir.glob('*'):
+            path.unlink()
+        client_dir.rmdir()
+
+    config = {
+        'experiment': {'output_dir': str(tmp_path / 'forecasting_client'), 'mode': 'federated'},
+        'runtime': {'device': 'cpu', 'log_level': 'INFO', 'deterministic': True, 'seed': 2026},
+        'task': {'type': 'forecasting'},
+        'data': {
+            'split_dir': str(split_dir),
+            'clients': ['Nd2O3', 'CeO2', 'La2O3'],
+            'seq_len': 4,
+            'pred_len': 2,
+            'batch_size': 8,
+            'shuffle_train': False,
+            'num_workers': 0,
+        },
+        'model': {'name': 'lstm', 'input_dim': 1, 'hidden_dim': 8, 'num_layers': 1, 'dropout': 0.0, 'pred_len': 2},
+        'training': {'epochs': 1, 'lr': 0.001, 'optimizer': 'adam', 'loss': 'mse', 'patience': 1, 'min_delta': 0.0},
+        'centralized': {},
+        'federated': {'algorithm': 'fedavg', 'rounds': 1},
+        'attack': {'enabled': False, 'frequency_rounds': 1, 'max_samples': 1, 'async_enabled': False, 'device': 'cpu'},
+        'tracking': {'enabled': False},
+        'evaluation': {'metrics': ['mse', 'mae', 'mape']},
+        'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},
+        'grpc': {'address': '127.0.0.1:50051', 'server_address': '127.0.0.1:50051', 'poll_seconds': 0.05, 'max_message_mb': 32.0},
+    }
+    captured: dict[str, object] = {}
+
+    class _FakeFederatedClient:
+        def __init__(self, client_id, train_loader, _config, _device, total_train_samples=None, total_clients=None, allow_ega_pretrain=False):
+            captured['client_id'] = client_id
+            captured['local_train_samples'] = len(train_loader.dataset)
+            captured['total_train_samples'] = total_train_samples
+            captured['total_clients'] = total_clients
+            captured['allow_ega_pretrain'] = allow_ega_pretrain
+
+    class _FakeRpcClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def snapshot_counters(self):
+            return {'sent_bytes': 0, 'received_bytes': 0}
+
+        def get_global(self):
+            return {'stop': True}
+
+        def ack_stop(self, payload):
+            return payload
+
+    monkeypatch.setattr(grpc_training_module, 'FederatedClient', _FakeFederatedClient)
+    monkeypatch.setattr(grpc_training_module, 'FederatedRpcClient', _FakeRpcClient)
+
+    run_client(config, 'Nd2O3')
+
+    assert captured['client_id'] == 'Nd2O3'
+    assert captured['local_train_samples'] == 35
+    assert captured['total_train_samples'] == 105
+    assert captured['total_clients'] == 3
+    assert captured['allow_ega_pretrain'] is False
+
+
 def test_grpc_finalization_does_not_block_last_submit_response(tmp_path, monkeypatch):
     """The final client submit should return stop promptly even if finalization is slow."""
 
