@@ -1,7 +1,7 @@
 training:
   lr: 0.001
   # Number of training epochs.
-  epochs: 300
+  epochs: 150
   # Early-stop patience for validation on the primary metric.
   patience: 500
   min_delta: 0.0

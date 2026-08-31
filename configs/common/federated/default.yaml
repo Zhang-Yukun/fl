@@ -7,4 +7,4 @@ federated:
   # Registered method name. Concrete configs usually override this.
   algorithm: fedavg
   # Number of communication rounds.
-  rounds: 300
+  rounds: 150
