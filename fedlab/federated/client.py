@@ -290,6 +290,19 @@ class FederatedClient:
         dataset = self.train_loader.dataset
         return int(len(dataset))
 
+    def registration_payload(self) -> dict[str, Any]:
+        """Return the static client metadata uploaded during gRPC registration."""
+
+        scaler = getattr(self.train_loader, 'scaler', None)
+        scale_mean = None if getattr(scaler, 'mean', None) is None else [float(value) for value in scaler.mean.reshape(-1).tolist()]
+        scale_std = None if getattr(scaler, 'std', None) is None else [float(value) for value in scaler.std.reshape(-1).tolist()]
+        return {
+            'client_id': self.client_id,
+            'local_train_samples': self.train_num_samples(),
+            'scale_mean': scale_mean,
+            'scale_std': scale_std,
+        }
+
     def train_reference_inputs(self) -> torch.Tensor:
         """Return all normalized input windows from this client training dataset.
 

@@ -444,6 +444,53 @@ def test_grpc_coordinator_defers_ega_runtime_until_explicit_start(tmp_path, monk
         pytest.fail('deferred EGA runtime initialization did not complete in time')
 
 
+def test_grpc_registration_records_uploaded_scaler_metadata(tmp_path):
+    split_dir = tmp_path / 'rare_split'
+    for client, start_offset in [('Nd2O3', 0), ('CeO2', 100), ('La2O3', 200)]:
+        client_dir = split_dir / 'clients' / client
+        client_dir.mkdir(parents=True, exist_ok=True)
+        for split, start, length in [('train', start_offset, 40), ('val', start_offset + 40, 20), ('test', start_offset + 60, 20)]:
+            dates = [f'2020-01-{(index % 28) + 1:02d}' for index in range(start, start + length)]
+            values = torch.arange(start, start + length, dtype=torch.float32).tolist()
+            rows = 'date,value\n' + '\n'.join(f'{date},{value}' for date, value in zip(dates, values)) + '\n'
+            (client_dir / f'{split}.csv').write_text(rows, encoding='utf-8')
+
+    config = {
+        'experiment': {'output_dir': str(tmp_path / 'forecasting_server'), 'mode': 'federated'},
+        'runtime': {'device': 'cpu', 'log_level': 'INFO', 'deterministic': True, 'seed': 2026},
+        'task': {'type': 'forecasting'},
+        'data': {
+            'split_dir': str(split_dir),
+            'clients': ['Nd2O3', 'CeO2', 'La2O3'],
+            'seq_len': 4,
+            'pred_len': 2,
+            'batch_size': 8,
+            'shuffle_train': False,
+            'num_workers': 0,
+        },
+        'model': {'name': 'lstm', 'input_dim': 1, 'hidden_dim': 8, 'num_layers': 1, 'dropout': 0.0, 'pred_len': 2},
+        'training': {'epochs': 1, 'lr': 0.001, 'optimizer': 'adam', 'loss': 'mse', 'patience': 1, 'min_delta': 0.0},
+        'centralized': {},
+        'federated': {'algorithm': 'fedavg', 'rounds': 1},
+        'attack': {'enabled': False, 'frequency_rounds': 1, 'max_samples': 1, 'async_enabled': False, 'device': 'cpu'},
+        'tracking': {'enabled': False},
+        'evaluation': {'metrics': ['mse', 'mae', 'mape']},
+        'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},
+        'grpc': {'address': '127.0.0.1:50051', 'server_address': '127.0.0.1:50051', 'poll_seconds': 0.05, 'max_message_mb': 32.0},
+    }
+
+    coordinator = GrpcFederatedCoordinator(config)
+    train_loaders, _, _ = build_federated_loaders(config)
+    payload = FederatedClient('Nd2O3', train_loaders['Nd2O3'], config, resolve_device(config)).registration_payload()
+
+    response = coordinator.register_client(payload)
+
+    assert response['accepted'] is True
+    assert coordinator.registered_client_metadata['Nd2O3']['local_train_samples'] == 35
+    assert coordinator.registered_client_metadata['Nd2O3']['scale_mean'] == pytest.approx([19.5])
+    assert coordinator.registered_client_metadata['Nd2O3']['scale_std'] == pytest.approx([11.54339599609375])
+
+
 def test_grpc_round_context_broadcasts_registered_global_training_stats(tmp_path):
     config = _classification_grpc_config(tmp_path, algorithm='fedavg')
 
@@ -676,6 +723,11 @@ def test_run_client_classification_only_needs_local_train_split(tmp_path, monkey
             captured['initial_total_clients'] = total_clients
             captured['allow_ega_pretrain'] = allow_ega_pretrain
 
+        def registration_payload(self):
+            payload = {'client_id': captured['client_id'], 'local_train_samples': captured['local_train_samples'], 'scale_mean': None, 'scale_std': None}
+            captured['registration_payload'] = payload
+            return payload
+
     class _FakeRpcClient:
         def __init__(self, *_args, **_kwargs):
             pass
@@ -684,7 +736,6 @@ def test_run_client_classification_only_needs_local_train_split(tmp_path, monkey
             return {'sent_bytes': 0, 'received_bytes': 0}
 
         def register_client(self, payload):
-            captured['registration_payload'] = payload
             return {'accepted': True, 'registered_clients': 1, 'expected_clients': 3, 'registration_ready': False}
 
         def get_global(self):
@@ -702,7 +753,7 @@ def test_run_client_classification_only_needs_local_train_split(tmp_path, monkey
     assert captured['local_train_samples'] == 6
     assert captured['initial_total_train_samples'] == 6
     assert captured['initial_total_clients'] == 1
-    assert captured['registration_payload'] == {'client_id': 'm1', 'local_train_samples': 6}
+    assert captured['registration_payload'] == {'client_id': 'm1', 'local_train_samples': 6, 'scale_mean': None, 'scale_std': None}
     assert captured['allow_ega_pretrain'] is False
 
 
@@ -755,6 +806,11 @@ def test_run_client_forecasting_only_needs_local_train_split(tmp_path, monkeypat
             captured['initial_total_clients'] = total_clients
             captured['allow_ega_pretrain'] = allow_ega_pretrain
 
+        def registration_payload(self):
+            payload = {'client_id': captured['client_id'], 'local_train_samples': captured['local_train_samples'], 'scale_mean': [19.5], 'scale_std': [11.54339599609375]}
+            captured['registration_payload'] = payload
+            return payload
+
     class _FakeRpcClient:
         def __init__(self, *_args, **_kwargs):
             pass
@@ -781,7 +837,10 @@ def test_run_client_forecasting_only_needs_local_train_split(tmp_path, monkeypat
     assert captured['local_train_samples'] == 35
     assert captured['initial_total_train_samples'] == 35
     assert captured['initial_total_clients'] == 1
-    assert captured['registration_payload'] == {'client_id': 'Nd2O3', 'local_train_samples': 35}
+    assert captured['registration_payload']['client_id'] == 'Nd2O3'
+    assert captured['registration_payload']['local_train_samples'] == 35
+    assert captured['registration_payload']['scale_mean'] == pytest.approx([19.5])
+    assert captured['registration_payload']['scale_std'] == pytest.approx([11.54339599609375])
     assert captured['allow_ega_pretrain'] is False
 
 

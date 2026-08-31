@@ -147,6 +147,7 @@ class GrpcFederatedCoordinator:
         self.server.total_clients = len(train_loaders)
         self.server.total_train_samples = total_train_samples
         self.registered_client_samples: dict[str, int] = {}
+        self.registered_client_metadata: dict[str, dict[str, Any]] = {}
         self.registration_ready = False
         self.attack_clients = [
             FederatedClient(
@@ -234,6 +235,8 @@ class GrpcFederatedCoordinator:
 
         client_id = str(payload.get('client_id', ''))
         local_train_samples = int(payload.get('local_train_samples', 0) or 0)
+        scale_mean = payload.get('scale_mean')
+        scale_std = payload.get('scale_std')
         with self.lock:
             if client_id not in self.expected_clients:
                 return {
@@ -246,6 +249,16 @@ class GrpcFederatedCoordinator:
                 }
             previous = self.registered_client_samples.get(client_id)
             self.registered_client_samples[client_id] = local_train_samples
+            self.registered_client_metadata[client_id] = {
+                'local_train_samples': local_train_samples,
+                'scale_mean': None if scale_mean is None else [float(value) for value in scale_mean],
+                'scale_std': None if scale_std is None else [float(value) for value in scale_std],
+            }
+            for attack_client in self.attack_clients:
+                if attack_client.client_id == client_id:
+                    setattr(attack_client, 'registered_scale_mean', self.registered_client_metadata[client_id]['scale_mean'])
+                    setattr(attack_client, 'registered_scale_std', self.registered_client_metadata[client_id]['scale_std'])
+                    break
             self.registration_ready = set(self.expected_clients).issubset(self.registered_client_samples)
             if previous is None:
                 logger.info(
@@ -684,7 +697,7 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
 
     while True:
         try:
-            registration = rpc.register_client({'client_id': client_id, 'local_train_samples': local_train_samples})
+            registration = rpc.register_client(client.registration_payload())
         except Exception as exc:
             logger.warning('Client {} could not register with {}: {}', client_id, address, exc)
             time.sleep(poll_seconds)

@@ -622,6 +622,20 @@ def _resolve_attack_max_samples(attack_cfg: dict[str, Any], available_samples: i
     return max(1, int(configured))
 
 
+def _resolve_client_scale_metadata(client: FederatedClient) -> tuple[list[float] | None, list[float] | None]:
+    """Return scaler statistics for one client, preferring registered metadata when present."""
+
+    registered_mean = getattr(client, 'registered_scale_mean', None)
+    registered_std = getattr(client, 'registered_scale_std', None)
+    if registered_mean is not None or registered_std is not None:
+        return registered_mean, registered_std
+    train_loader = getattr(client, 'train_loader', None)
+    scaler = getattr(train_loader, 'scaler', None)
+    scale_mean = None if getattr(scaler, 'mean', None) is None else [float(value) for value in scaler.mean.reshape(-1).tolist()]
+    scale_std = None if getattr(scaler, 'std', None) is None else [float(value) for value in scaler.std.reshape(-1).tolist()]
+    return scale_mean, scale_std
+
+
 def _capture_round_update_records(
     config: dict[str, Any],
     clients: list[FederatedClient],
@@ -651,8 +665,7 @@ def _capture_round_update_records(
             round_index=round_index,
             round_context=round_context,
         )
-        train_loader = getattr(client, "train_loader", None)
-        scaler = getattr(train_loader, "scaler", None)
+        scale_mean, scale_std = _resolve_client_scale_metadata(client)
         reference_inputs = client.train_reference_inputs()
         reference_target_getter = getattr(client, "train_reference_targets", None)
         reference_targets = reference_target_getter() if callable(reference_target_getter) else None
@@ -679,8 +692,8 @@ def _capture_round_update_records(
                 "target_update": _clone_state(target_update),
                 "reference_inputs": None if reference_inputs is None else reference_inputs.detach().cpu().clone(),
                 "reference_targets": None if reference_targets is None else reference_targets.detach().cpu().clone(),
-                "scale_mean": None if getattr(scaler, "mean", None) is None else [float(value) for value in scaler.mean.reshape(-1).tolist()],
-                "scale_std": None if getattr(scaler, "std", None) is None else [float(value) for value in scaler.std.reshape(-1).tolist()],
+                "scale_mean": scale_mean,
+                "scale_std": scale_std,
                 "samples": samples,
             }
         )
