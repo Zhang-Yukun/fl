@@ -12,6 +12,13 @@ import pandas as pd
 
 
 CLIENT_NAME_BY_CHINESE = {"氧化钕": "Nd2O3", "氧化铈": "CeO2", "氧化镧": "La2O3"}
+CLIENT_NAME_ALIASES = {
+    **CLIENT_NAME_BY_CHINESE,
+    "Nd2O3": "Nd2O3",
+    "CeO2": "CeO2",
+    "La2O3": "La2O3",
+}
+SUPPORTED_SUFFIXES = (".xls", ".xlsx")
 
 
 def reset_output_dir(output_dir: Path) -> None:
@@ -25,6 +32,38 @@ def reset_output_dir(output_dir: Path) -> None:
             if artifact.is_file():
                 artifact.unlink()
 
+
+def _normalize_client_name(name: str | None) -> str | None:
+    """Map known Chinese and English client aliases to persisted client ids."""
+
+    if name is None:
+        return None
+    return CLIENT_NAME_ALIASES.get(str(name), None)
+
+
+def _client_id_from_path(path: Path, raw_dir: Path) -> str | None:
+    """Infer one client id from the relative parent directories when available."""
+
+    try:
+        relative_parts = path.relative_to(raw_dir).parts[:-1]
+    except ValueError:
+        relative_parts = path.parts[:-1]
+    for part in reversed(relative_parts):
+        client_id = _normalize_client_name(part)
+        if client_id is not None:
+            return client_id
+    return None
+
+
+def _discover_raw_excel_files(raw_dir: Path) -> list[Path]:
+    """Return all supported Excel files under ``raw_dir`` recursively."""
+
+    files = [
+        path
+        for path in raw_dir.rglob('*')
+        if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES
+    ]
+    return sorted(files)
 
 
 def _read_daily_series(path: Path) -> tuple[str, pd.DataFrame]:
@@ -61,6 +100,17 @@ def _read_daily_series(path: Path) -> tuple[str, pd.DataFrame]:
     daily = data.groupby("date", as_index=False)["value"].mean().sort_values("date")
     daily["date"] = daily["date"].dt.strftime("%Y-%m-%d")
     return client_id, daily
+
+
+def _merge_client_daily_series(series_list: list[pd.DataFrame]) -> pd.DataFrame:
+    """Merge multiple daily series for one client and average overlapping dates."""
+
+    merged = pd.concat(series_list, ignore_index=True)
+    merged["date"] = pd.to_datetime(merged["date"], errors="coerce")
+    merged = merged.dropna(subset=["date"])
+    merged = merged.groupby("date", as_index=False)["value"].mean().sort_values("date")
+    merged["date"] = merged["date"].dt.strftime("%Y-%m-%d")
+    return merged
 
 
 def _split_frame(frame: pd.DataFrame, train_ratio: float = 0.8, val_ratio: float = 0.1):
@@ -113,8 +163,12 @@ def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int
     """Prepare all rawdata2 Excel files into client and server CSV files.
 
     Example:
-        ``prepare_rawdata2(Path("rawdata2"), Path("data/rare_earth_rawdata2"))``.
+        ``prepare_rawdata2(Path("raw_data"), Path("data/rare_earth_rawdata2"))``.
     """
+
+    raw_files = _discover_raw_excel_files(raw_dir)
+    if not raw_files:
+        raise FileNotFoundError(f"No Excel files found under {raw_dir}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     reset_output_dir(output_dir)
@@ -124,11 +178,21 @@ def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int
     server_train = []
     server_val = []
     server_test = []
-    series_by_client: dict[str, pd.DataFrame] = {}
-    for path in sorted(raw_dir.glob("*.xls")):
-        client_id, daily = _read_daily_series(path)
-        series_by_client[client_id] = daily
+    series_fragments: dict[str, list[pd.DataFrame]] = {}
+    for path in raw_files:
+        inferred_client_id, daily = _read_daily_series(path)
+        explicit_client_id = _client_id_from_path(path, raw_dir)
+        if explicit_client_id is not None and explicit_client_id != inferred_client_id:
+            raise ValueError(
+                f"Path-derived client {explicit_client_id!r} conflicts with file content {inferred_client_id!r} in {path}"
+            )
+        client_id = explicit_client_id or inferred_client_id
+        series_fragments.setdefault(client_id, []).append(daily)
 
+    series_by_client = {
+        client_id: _merge_client_daily_series(fragments)
+        for client_id, fragments in series_fragments.items()
+    }
     merged_frame = _build_interpolated_merged_frame(series_by_client)
     split_by_client = _split_merged_frame_by_client(merged_frame)
     for client_id, (train, val, test) in split_by_client.items():
@@ -154,6 +218,8 @@ def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int
     summary_payload = {
         "source": "raw_data",
         "input_dir": str(raw_dir),
+        "input_files": [str(path.relative_to(raw_dir)) for path in raw_files],
+        "input_layout": "raw_data/<client_id>/*.xls[x]",
         "split_strategy": "chronological_8_1_1",
         "rows": summary,
     }

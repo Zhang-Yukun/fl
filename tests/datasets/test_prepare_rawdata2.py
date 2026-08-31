@@ -16,6 +16,8 @@ def _load_prepare_rawdata2_module():
 prepare_rawdata2_module = _load_prepare_rawdata2_module()
 _build_interpolated_merged_frame = prepare_rawdata2_module._build_interpolated_merged_frame
 _split_merged_frame_by_client = prepare_rawdata2_module._split_merged_frame_by_client
+_merge_client_daily_series = prepare_rawdata2_module._merge_client_daily_series
+_client_id_from_path = prepare_rawdata2_module._client_id_from_path
 reset_output_dir = prepare_rawdata2_module.reset_output_dir
 
 
@@ -65,6 +67,26 @@ def test_split_merged_frame_by_client_uses_interpolated_dense_series():
     assert ce_train["value"].tolist() == [10.0, 11.0]
     assert ce_val["value"].tolist() == [12.0]
     assert ce_test["value"].tolist() == [13.0]
+
+
+def test_merge_client_daily_series_averages_overlapping_dates():
+    fragments = [
+        pd.DataFrame({"date": ["2020-01-01", "2020-01-02"], "value": [1.0, 2.0]}),
+        pd.DataFrame({"date": ["2020-01-02", "2020-01-03"], "value": [4.0, 6.0]}),
+    ]
+
+    merged = _merge_client_daily_series(fragments)
+
+    assert merged["date"].tolist() == ["2020-01-01", "2020-01-02", "2020-01-03"]
+    assert merged["value"].tolist() == [1.0, 3.0, 6.0]
+
+
+def test_client_id_from_path_supports_split_raw_data_layout(tmp_path):
+    path = tmp_path / "raw_data" / "Nd2O3" / "part1.xls"
+    path.parent.mkdir(parents=True)
+    path.write_text("placeholder", encoding="utf-8")
+
+    assert _client_id_from_path(path, tmp_path / "raw_data") == "Nd2O3"
 
 
 def test_reset_output_dir_removes_stale_generated_artifacts(tmp_path):
