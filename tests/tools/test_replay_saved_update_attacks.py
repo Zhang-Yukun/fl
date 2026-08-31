@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from fedlab.attack.artifacts import load_captured_update_records
+from fedlab.replay_capture.artifacts import load_captured_update_records
 from fedlab.federated.algorithms import run_federated
 from fedlab.utils.config import load_config
 

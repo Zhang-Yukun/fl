@@ -20,19 +20,17 @@ from fedlab.modeling.forecasting import build_model
 from fedlab.utils.serialization import compress_topk, decompress_topk, dequantize_qsgd_state_update, dequantize_state_update, serialize_model
 from fedlab.utils.transport import auxiliary_payload_num_bytes, auxiliary_payload_num_parameters, estimate_download_transport_bytes
 
+from fedlab.attack.runner import resolve_attack_device
+from fedlab.attack.tasks import build_update_attack_round_task
 from fedlab.federated.algorithms import (
-    AsyncAttackManager,
-    AttackRoundResult,
-    AttackRoundTask,
-    _round_attack_payload,
     _round_history_communication_summary,
     _wandb_cumulative_communication_payload,
     run_centralized,
     run_federated,
 )
+from fedlab.replay_capture.artifacts import load_captured_update_records
 from fedlab.utils.config import load_config
 from fedlab.utils.consistency import compare_fedavg_runs
-from fedlab.security.registry import register_attack_tracking_metric
 
 
 def test_one_round_federated_run(tmp_path):
@@ -666,7 +664,7 @@ def test_federated_run_saves_update_captures_for_offline_replay(tmp_path):
     config["experiment"]["output_dir"] = str(tmp_path)
 
     result = run_federated(config)
-    captures = algorithms_module.load_captured_update_records(tmp_path)
+    captures = load_captured_update_records(tmp_path)
 
     assert 'attack_evaluations' not in result
     assert len(captures) == 3
@@ -748,7 +746,7 @@ def test_attack_task_uses_uploaded_protocol_payload():
         round_context={},
         max_rounds=1,
     )
-    task = algorithms_module.build_update_attack_round_task(
+    task = build_update_attack_round_task(
         config,
         records,
         round_index=0,
@@ -1094,75 +1092,10 @@ def test_client_prefers_local_steps_over_training_epochs(monkeypatch):
     assert result.loss == 1.25
 
 
-def test_select_attack_clients_defaults_to_all_clients():
-    config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", [])
-    clients = [
-        SimpleNamespace(client_id="Nd2O3"),
-        SimpleNamespace(client_id="CeO2"),
-        SimpleNamespace(client_id="La2O3"),
-    ]
-
-    selected = algorithms_module._select_attack_clients(clients, config, round_index=7)
-
-    assert [client.client_id for client in selected] == ["Nd2O3", "CeO2", "La2O3"]
-
-
-def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
-    sync_dir = tmp_path / "sync"
-    async_dir = tmp_path / "async"
-    overrides = [
-        "federated.algorithm=fedavg",
-        "federated.rounds=1",
-        "training.patience=1",
-        "attack.enabled=true",
-        "attack.target_type=update_payload",
-        "replay_capture.frequency_rounds=1",
-        "replay_capture.max_samples=1",
-        "attack.clients_per_round=1",
-        "attack.client_selection=first",
-        "attack.steps=1",
-        "attack.optimizer=adam",
-        "attack.local_optimizer=adam",
-        "tracking.enabled=false",
-        "runtime.device=cpu",
-        "runtime.seed=2026",
-        "runtime.deterministic=true",
-        "data.shuffle_train=false",
-        "model.dropout=0.0",
-    ]
-    sync_config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["experiment.output_dir=" + str(sync_dir), *overrides])
-    async_config = load_config(
-        Path(__file__).parents[2] / "configs" / "test.yaml",
-        [
-            "experiment.output_dir=" + str(async_dir),
-            *overrides,
-            "attack.async_enabled=true",
-            "attack.async_workers=1",
-            "attack.device=cpu",
-        ],
-    )
-
-    sync_summary = run_federated(sync_config)
-    async_summary = run_federated(async_config)
-
-    sync_artifacts = sorted((sync_dir / "saved_updates").rglob("round_*.pt"))
-    async_artifacts = sorted((async_dir / "saved_updates").rglob("round_*.pt"))
-
-    assert sync_artifacts
-    assert async_artifacts
-    assert sync_summary["test"]["mse"] == pytest.approx(async_summary["test"]["mse"])
-    assert "attack_overall_avg_primary_metric_value" not in sync_summary
-    assert "attack_success_rate" not in sync_summary
-    assert "attack_overall_avg_primary_metric_value" not in async_summary
-    assert "attack_success_rate" not in async_summary
-    assert compare_fedavg_runs(sync_dir, async_dir) == []
-
-
-class _TrackerStub:
+class _PredictionTrackerStub:
     def __init__(self):
         self.logs = []
         self.prediction_logs = []
-        self.attack_images = []
 
     def log(self, data, step=None):
         self.logs.append((step, data))
@@ -1170,153 +1103,9 @@ class _TrackerStub:
     def log_prediction_plot(self, key, input_series, prediction, target, step=None, title=None, scaler=None):
         self.prediction_logs.append((key, step, title, scaler))
 
-    def log_attack_reconstruction(self, key, result, step=None):
-        self.attack_images.append((key, step, getattr(result, "client_id", None), getattr(result, "name", None)))
-
-
-def _attack_result_stub(name: str, mse: float = 0.5, client_id: str = "Nd2O3"):
-    return SimpleNamespace(
-        name=name,
-        mse=mse,
-        iterations=1,
-        time_seconds=0.01,
-        gradient_mse=0.02,
-        success=False,
-        client_id=client_id,
-        metric_name="budget_recovered_fraction",
-    )
-
-
-def test_async_attack_manager_preserves_sync_mode(monkeypatch):
-    tracker = _TrackerStub()
-    config = {"attack": {"enabled": True, "async_enabled": False}}
-    task = AttackRoundTask(round_index=0, clients_this_round=1, evaluations_per_client=1, samples=[])
-
-    def fake_execute(config, task, attack_device):
-        return AttackRoundResult(
-            round_index=task.round_index,
-            time_seconds=0.1,
-            clients_this_round=task.clients_this_round,
-            evaluations_per_client=task.evaluations_per_client,
-            attacks=[_attack_result_stub("DLG", client_id="Nd2O3")],
-        )
-
-    monkeypatch.setattr(algorithms_module, "execute_attack_round_task", fake_execute)
-
-    manager = AsyncAttackManager(config, tracker)
-    manager.submit(task)
-
-    assert manager.executor is None
-    assert len(manager.attack_results) == 1
-    assert tracker.logs[0][0] == 0
-    assert ("attack/DLG/reconstruction", 0, "Nd2O3", "DLG") in tracker.attack_images
-    assert ("attack/client/Nd2O3/DLG/reconstruction", 0, "Nd2O3", "DLG") in tracker.attack_images
-
-
-def test_async_attack_manager_applies_pending_round_backpressure(monkeypatch):
-    tracker = _TrackerStub()
-    config = {
-        "attack": {
-            "enabled": True,
-            "async_enabled": True,
-            "async_workers": 1,
-            "async_max_pending_rounds": 1,
-        }
-    }
-
-    class FakeFuture:
-        def __init__(self, result):
-            self._result = result
-            self._done = False
-
-        def done(self):
-            return self._done
-
-        def result(self):
-            self._done = True
-            return self._result
-
-    futures = [
-        FakeFuture(AttackRoundResult(0, 0.1, 1, 1, [_attack_result_stub("DLG", mse=0.4)])),
-        FakeFuture(AttackRoundResult(1, 0.1, 1, 1, [_attack_result_stub("DLG", mse=0.6)])),
-    ]
-
-    class FakeExecutor:
-        def __init__(self, *args, **kwargs):
-            self.submit_calls = 0
-
-        def submit(self, fn, config, task, attack_device):
-            future = futures[self.submit_calls]
-            self.submit_calls += 1
-            return future
-
-        def shutdown(self, wait=True):
-            return None
-
-    def fake_wait(pending, return_when=None):
-        futures[0]._done = True
-        return {futures[0]}, set()
-
-    monkeypatch.setattr(algorithms_module, "ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr(algorithms_module, "wait", fake_wait)
-
-    manager = AsyncAttackManager(config, tracker)
-    manager.submit(AttackRoundTask(round_index=0, clients_this_round=1, evaluations_per_client=1, samples=[]))
-    assert len(manager.pending_round_order) == 1
-    manager.submit(AttackRoundTask(round_index=1, clients_this_round=1, evaluations_per_client=1, samples=[]))
-
-    assert tracker.logs[0][0] == 0
-    assert manager.pending_round_order == [1]
-    manager.finalize()
-    assert [step for step, _ in tracker.logs] == [0, 1]
-    assert len(manager.attack_results) == 2
-
-
-def test_round_attack_payload_uses_registered_tracking_metrics(monkeypatch):
-    import fedlab.security.registry as registry_module
-
-    snapshot = dict(registry_module._ATTACK_TRACKING_METRICS)
-    order = list(registry_module._ATTACK_TRACKING_METRIC_ORDER)
-    monkeypatch.setattr(registry_module, '_ATTACK_TRACKING_METRICS', dict(snapshot))
-    monkeypatch.setattr(registry_module, '_ATTACK_TRACKING_METRIC_ORDER', list(order))
-    monkeypatch.setattr(registry_module, '_BUILTIN_ATTACK_TRACKING_METRICS_LOADED', True)
-
-    register_attack_tracking_metric('custom_track', lambda result: getattr(result, 'custom_track', None), current_key='custom_track', cumulative_key='cumulative_avg_custom_track')
-    attack = _attack_result_stub('DLG', mse=0.4, client_id='Nd2O3')
-    attack.custom_track = 0.75
-    round_result = AttackRoundResult(
-        round_index=3,
-        time_seconds=0.2,
-        clients_this_round=1,
-        evaluations_per_client=1,
-        attacks=[attack],
-    )
-
-    payload = _round_attack_payload(round_result, round_result.attacks)
-
-    assert payload['attack/DLG/custom_track'] == 0.75
-    assert payload['attack/DLG/cumulative_avg_custom_track'] == 0.75
-
-
-def test_round_attack_payload_includes_explicit_round_index():
-    round_result = AttackRoundResult(
-        round_index=3,
-        time_seconds=0.2,
-        clients_this_round=1,
-        evaluations_per_client=1,
-        attacks=[_attack_result_stub("DLG", mse=0.4, client_id="Nd2O3")],
-    )
-
-    payload = _round_attack_payload(round_result, round_result.attacks)
-
-    assert payload["attack/round_index"] == 3.0
-    assert payload["attack/client/Nd2O3/primary_metric_name"] == "budget_recovered_fraction"
-    assert "attack/client/Nd2O3/primary_metric_value" in payload
-    assert payload["attack/client/Nd2O3/DLG/primary_metric_value"] == 0.4
-
 
 def test_log_prediction_views_adds_client_specific_keys(monkeypatch):
-    tracker = _TrackerStub()
+    tracker = _PredictionTrackerStub()
     loader_a = SimpleNamespace(scaler="scale_a")
     loader_b = SimpleNamespace(scaler="scale_b")
     merged_loader = SimpleNamespace(loaders=[loader_a, loader_b], scaler="scale_merged")
@@ -1514,7 +1303,7 @@ def test_client_train_returns_aggregation_payload():
 def test_attack_device_defaults_to_runtime_device():
     config = {"runtime": {"device": "cpu"}, "attack": {}}
 
-    assert str(algorithms_module.resolve_attack_device(config)) == "cpu"
+    assert str(resolve_attack_device(config)) == "cpu"
 
 
 def test_one_round_federated_run_with_sgd_optimizer(tmp_path):

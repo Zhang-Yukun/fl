@@ -5,7 +5,8 @@ import pytest
 import torch
 
 import fedlab.federated.methods.encoded as encoded_methods
-from fedlab.federated.algorithms import load_captured_update_records, run_centralized, run_federated
+from fedlab.federated.algorithms import run_centralized, run_federated
+from fedlab.replay_capture.artifacts import load_captured_update_records
 
 
 def _write_split(root: Path, client_id: str, split: str, images: torch.Tensor, labels: torch.Tensor) -> None:

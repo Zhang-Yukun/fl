@@ -10,7 +10,7 @@ from typing import Sequence
 
 from loguru import logger
 
-from fedlab.attack.artifacts import load_captured_update_records
+from fedlab.replay_capture.artifacts import load_captured_update_records
 from fedlab.attack.runner import execute_attack_round_task, resolve_attack_device
 from fedlab.attack.tasks import build_update_attack_round_task
 from fedlab.federated.algorithms import configure_random_seed, configure_torch_runtime

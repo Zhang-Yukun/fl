@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import random
 import time
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -21,15 +19,7 @@ except ImportError:  # pragma: no cover - numpy is expected in the training env
 from loguru import logger
 
 from fedlab.utils.artifacts import save_experiment_config, save_federated_snapshot, should_save_periodic_artifacts
-from fedlab.attack.artifacts import load_captured_update_records, save_captured_update_records
-from fedlab.attack.runner import execute_attack_round_task, resolve_attack_device
-from fedlab.attack.tasks import AttackRoundResult, AttackRoundTask, build_update_attack_round_task
-from fedlab.security.attack_common import attack_success_rate
-from fedlab.security.registry import (
-    compute_recovery_metric_matrix,
-    list_registered_attack_tracking_metrics,
-    resolve_recovery_objective,
-)
+from fedlab.replay_capture.artifacts import save_captured_update_records
 from fedlab.federated.client import FederatedClient
 from fedlab.federated.methods import build_method, is_registered_compressed
 from fedlab.datasets import build_federated_loaders
@@ -153,29 +143,6 @@ def _should_capture_update_payload(config: dict[str, Any], round_index: int, max
         return False
     frequency = int(capture_cfg.get("frequency_rounds", 30))
     return round_index == 0 or round_index == max_rounds - 1 or (frequency > 0 and round_index % frequency == 0)
-
-
-def _should_run_attack(config: dict[str, Any], round_index: int, max_rounds: int) -> bool:
-    """Return whether attack evaluation should run on this round."""
-
-    attack_cfg = config.get("attack", {})
-    if not attack_cfg.get("enabled", True):
-        return False
-    return _should_capture_update_payload(config, round_index, max_rounds)
-
-
-def _select_attack_clients(clients: list[FederatedClient], config: dict[str, Any], round_index: int) -> list[FederatedClient]:
-    """Select which clients should be attacked on the current round."""
-
-    attack_cfg = config.get("attack", {})
-    selection = str(attack_cfg.get("client_selection", "all")).lower()
-    count = max(1, int(attack_cfg.get("clients_per_round", 1)))
-    if selection == "all":
-        return clients
-    if selection == "first":
-        return clients[:count]
-    start = round_index % len(clients)
-    return [clients[(start + offset) % len(clients)] for offset in range(min(count, len(clients)))]
 
 
 def _wandb_round_payload(record: RoundRecord) -> dict[str, Any]:
@@ -470,21 +437,6 @@ def _torch_dtype_name(dtype: torch.dtype) -> str:
     return str(dtype).replace("torch.", "")
 
 
-def _resolve_torch_dtype(name: str) -> torch.dtype:
-    """Resolve one saved dtype name back into a torch dtype."""
-
-    dtype = getattr(torch, str(name), None)
-    if not isinstance(dtype, torch.dtype):
-        raise ValueError(f"Unknown torch dtype name in saved attack template: {name}")
-    return dtype
-
-
-def _materialize_attack_template(shape: tuple[int, ...], dtype_name: str) -> torch.Tensor:
-    """Create one zero-valued template tensor used only for shape and dtype."""
-
-    return torch.zeros(shape, dtype=_resolve_torch_dtype(dtype_name))
-
-
 def _client_attack_available_samples(client: FederatedClient) -> int | None:
     """Best-effort training-sample count used by attack sampling defaults."""
 
@@ -618,197 +570,6 @@ def _mean_finite(values: list[float]) -> float | None:
     return sum(float(value) for value in finite) / len(finite)
 
 
-def _attack_payload_metrics(subset: list[Any], cumulative_subset: list[Any], prefix: str) -> dict[str, float | str]:
-    """Return one attack-metric payload block for one subset prefix."""
-
-    if not subset:
-        return {}
-    payload: dict[str, float | str | None] = {}
-    payload[f"{prefix}/primary_metric_name"] = getattr(subset[0], "metric_name", "budget_recovered_fraction")
-    payload[f"{prefix}/primary_metric_value"] = sum(result.mse for result in subset) / len(subset)
-    payload[f"{prefix}/cumulative_avg_primary_metric_value"] = 0.0 if not cumulative_subset else sum(result.mse for result in cumulative_subset) / len(cumulative_subset)
-    for spec in list_registered_attack_tracking_metrics():
-        values = [spec.value_getter(result) for result in subset if spec.value_getter(result) is not None]
-        if values:
-            payload[f"{prefix}/{spec.current_key}"] = _mean_finite(values)
-        if spec.cumulative_key is not None:
-            cumulative_values = [spec.value_getter(result) for result in cumulative_subset if spec.value_getter(result) is not None]
-            if cumulative_values:
-                payload[f"{prefix}/{spec.cumulative_key}"] = _mean_finite(cumulative_values)
-    payload[f"{prefix}/success_fraction"] = sum(float(result.success) for result in subset) / len(subset)
-    payload[f"{prefix}/cumulative_success_rate"] = attack_success_rate(cumulative_subset)
-    return payload
-
-
-def _round_attack_payload(round_result: AttackRoundResult, cumulative_results: list[Any]) -> dict[str, float | str]:
-    """Build per-round and cumulative attack metrics for tracking/logging."""
-
-    round_attacks = round_result.attacks
-    primary_metric_name = "budget_recovered_fraction" if not round_attacks else getattr(round_attacks[0], "metric_name", "budget_recovered_fraction")
-    overall_avg_primary_metric = 0.0 if not cumulative_results else sum(result.mse for result in cumulative_results) / len(cumulative_results)
-    payload: dict[str, float | str | None] = {
-        "attack/round_index": float(round_result.round_index),
-        "attack/time_seconds": round_result.time_seconds,
-        "attack/evaluations_this_round": float(len(round_attacks)),
-        "attack/clients_this_round": float(round_result.clients_this_round),
-        "attack/evaluations_per_client_this_round": float(round_result.evaluations_per_client),
-        "attack/primary_metric_name": primary_metric_name,
-        "attack/cumulative_avg_primary_metric_value": overall_avg_primary_metric,
-        "attack/cumulative_success_rate": attack_success_rate(cumulative_results),
-    }
-    for name in sorted({result.name for result in round_attacks}):
-        subset = [result for result in round_attacks if result.name == name]
-        cumulative_subset = [result for result in cumulative_results if result.name == name]
-        payload.update(_attack_payload_metrics(subset, cumulative_subset, f"attack/{name}"))
-    for client_id in sorted({str(result.client_id) for result in round_attacks if getattr(result, "client_id", None) is not None}):
-        client_subset = [result for result in round_attacks if result.client_id == client_id]
-        cumulative_client_subset = [result for result in cumulative_results if result.client_id == client_id]
-        client_prefix = f"attack/client/{client_id}"
-        payload.update(_attack_payload_metrics(client_subset, cumulative_client_subset, client_prefix))
-        for name in sorted({result.name for result in client_subset}):
-            method_subset = [result for result in client_subset if result.name == name]
-            cumulative_method_subset = [result for result in cumulative_client_subset if result.name == name]
-            payload.update(_attack_payload_metrics(method_subset, cumulative_method_subset, f"{client_prefix}/{name}"))
-    return payload
-
-
-def _attack_plot_data_range(config: dict[str, Any]) -> float:
-    """Return the positive data range used by recovery metric helpers."""
-
-    value = float(config.get("attack", {}).get("data_range", 1.0))
-    return value if value > 0 else 1.0
-
-
-def _attack_result_batch_size(result: Any) -> int | None:
-    """Return the batch size for one attack result payload when available."""
-
-    for field in ("reconstructed_x", "plot_reconstructed_x", "reference_x", "plot_reference_x"):
-        tensor = getattr(result, field, None)
-        if isinstance(tensor, torch.Tensor) and tensor.ndim >= 1:
-            return int(tensor.shape[0])
-    return None
-
-
-def _slice_attack_tensor(tensor: Any, row_index: int, batch_size: int | None) -> Any:
-    """Return one batch row for visualization-only attack payloads."""
-
-    if not isinstance(tensor, torch.Tensor) or batch_size is None or batch_size <= 1 or tensor.ndim == 0:
-        return tensor
-    if int(tensor.shape[0]) != batch_size:
-        return tensor
-    row = max(0, min(int(row_index), batch_size - 1))
-    return tensor[row:row + 1].detach().cpu().clone()
-
-
-def _attack_result_row_metrics(result: Any, config: dict[str, Any]) -> tuple[list[float] | None, str | None]:
-    """Return one per-row matched metric list for a result when available."""
-
-    metric_name = getattr(result, "matched_reference_metric_name", None)
-    reconstructed_x = getattr(result, "reconstructed_x", None)
-    reference_x = getattr(result, "reference_x", None)
-    if metric_name is None or not isinstance(reconstructed_x, torch.Tensor) or not isinstance(reference_x, torch.Tensor):
-        return None, None
-    if reconstructed_x.ndim == 0 or reference_x.ndim == 0:
-        return None, None
-    if reconstructed_x.shape[0] == 0 or reconstructed_x.shape[0] != reference_x.shape[0]:
-        return None, None
-    metric_matrix = compute_recovery_metric_matrix(
-        reconstructed_x.detach().cpu(),
-        reference_x.detach().cpu(),
-        str(metric_name),
-        _attack_plot_data_range(config),
-    )
-    diagonal = metric_matrix.diagonal()
-    return [float(value) for value in diagonal.tolist()], resolve_recovery_objective(None, str(metric_name))
-
-
-def _select_attack_visualization_result(results: list[Any], config: dict[str, Any]) -> Any:
-    """Choose one best-matched sample and return a sliced visualization payload."""
-
-    if not results:
-        return None
-    best_result = results[0]
-    best_row_index = 0
-    best_score: float | None = None
-    best_objective: str | None = None
-    for result in results:
-        row_metrics, objective = _attack_result_row_metrics(result, config)
-        if not row_metrics or objective not in {"min", "max"}:
-            continue
-        candidate_score = min(row_metrics) if objective == "min" else max(row_metrics)
-        candidate_row_index = row_metrics.index(candidate_score)
-        if best_score is None:
-            best_result = result
-            best_row_index = candidate_row_index
-            best_score = float(candidate_score)
-            best_objective = objective
-            continue
-        if best_objective != objective:
-            continue
-        is_better = candidate_score < best_score if objective == "min" else candidate_score > best_score
-        if is_better:
-            best_result = result
-            best_row_index = candidate_row_index
-            best_score = float(candidate_score)
-            best_objective = objective
-    visualization_result = copy.copy(best_result)
-    batch_size = _attack_result_batch_size(best_result)
-    for field in (
-        "reference_x",
-        "reference_y",
-        "reconstructed_x",
-        "reconstructed_y",
-        "plot_reference_x",
-        "plot_reference_y",
-        "plot_reconstructed_x",
-        "plot_reconstructed_y",
-    ):
-        setattr(
-            visualization_result,
-            field,
-            _slice_attack_tensor(getattr(best_result, field, None), best_row_index, batch_size),
-        )
-    matched_indices = getattr(best_result, "matched_reference_indices", None)
-    if matched_indices is not None:
-        if 0 <= best_row_index < len(matched_indices):
-            visualization_result.matched_reference_indices = [int(matched_indices[best_row_index])]
-        else:
-            visualization_result.matched_reference_indices = None
-    if best_score is not None:
-        visualization_result.matched_reference_metric_value = float(best_score)
-        visualization_result.matched_reference_metric_min_value = float(best_score)
-    return visualization_result
-
-
-def _log_attack_reconstruction_views(tracker: Tracker, results: list[Any], step: int, config: dict[str, Any]) -> None:
-    """Log one best-match reconstruction figure per method and per client."""
-
-    if not hasattr(tracker, "log_attack_reconstruction"):
-        return
-    method_groups: dict[str, list[Any]] = {}
-    client_method_groups: dict[tuple[str, str], list[Any]] = {}
-    for result in results:
-        method = str(result.name)
-        method_groups.setdefault(method, []).append(result)
-        client_id = getattr(result, "client_id", None)
-        if client_id is not None:
-            client_method_groups.setdefault((str(client_id), method), []).append(result)
-    for method, subset in method_groups.items():
-        visualization_result = _select_attack_visualization_result(subset, config)
-        if visualization_result is None:
-            continue
-        tracker.log_attack_reconstruction(f"attack/{method}/reconstruction", visualization_result, step=step)
-    for (client_id, method), subset in client_method_groups.items():
-        visualization_result = _select_attack_visualization_result(subset, config)
-        if visualization_result is None:
-            continue
-        tracker.log_attack_reconstruction(
-            f"attack/client/{client_id}/{method}/reconstruction",
-            visualization_result,
-            step=step,
-        )
-
-
 def _iter_client_prediction_loaders(loader: Any, client_ids: list[str] | None) -> list[tuple[str, Any]]:
     """Return ordered client-specific subloaders when the loader is concatenated."""
 
@@ -875,115 +636,6 @@ def _log_prediction_views(
             title=f"{title} client={client_id}",
             scaler=getattr(client_loader, "scaler", getattr(loader, "scaler", None)),
         )
-
-
-class AsyncAttackManager:
-    """Queue attack evaluations away from the training hot path and drain them in order."""
-
-    def __init__(self, config: dict[str, Any], tracker: Tracker):
-        """Initialize attack workers and result buffers from config."""
-
-        self.config = config
-        self.tracker = tracker
-        self.attack_results: list[Any] = []
-        self.attack_device = resolve_attack_device(config)
-        attack_cfg = config.get("attack", {})
-        self.async_enabled = bool(attack_cfg.get("async_enabled", False))
-        self.pending_round_order: list[int] = []
-        self.pending_futures: dict[int, Future] = {}
-        self.completed_rounds: dict[int, AttackRoundResult] = {}
-        self.executor: ThreadPoolExecutor | None = None
-        self.async_workers = max(1, int(attack_cfg.get("async_workers", 1)))
-        configured_pending = attack_cfg.get("async_max_pending_rounds", 5)
-        self.max_pending_rounds = max(self.async_workers, int(configured_pending))
-        if attack_cfg.get("enabled", True) and self.async_enabled:
-            self.executor = ThreadPoolExecutor(max_workers=self.async_workers, thread_name_prefix="attack")
-            logger.info(
-                "Async attack manager enabled with workers={} max_pending_rounds={} device={}",
-                self.async_workers,
-                self.max_pending_rounds,
-                self.attack_device,
-            )
-
-    def _inflight_rounds(self) -> int:
-        """Return the number of attack rounds that still occupy queue capacity."""
-
-        return len(self.pending_round_order)
-
-    def _wait_for_capacity(self) -> None:
-        """Block only when the bounded async queue is full."""
-
-        if self.executor is None:
-            return
-        while self._inflight_rounds() >= self.max_pending_rounds:
-            logger.info(
-                "Async attack queue full inflight_rounds={}/{}; waiting for one round to finish",
-                self._inflight_rounds(),
-                self.max_pending_rounds,
-            )
-            if self.pending_futures:
-                done, _ = wait(tuple(self.pending_futures.values()), return_when=FIRST_COMPLETED)
-                if not done:
-                    break
-            self.drain_completed(wait=False)
-
-    def submit(self, task: AttackRoundTask | None) -> None:
-        """Run or enqueue one round of attack work."""
-
-        if task is None:
-            return
-        if self.executor is not None:
-            self._wait_for_capacity()
-        self.pending_round_order.append(task.round_index)
-        if self.executor is None:
-            self.completed_rounds[task.round_index] = execute_attack_round_task(self.config, task, self.attack_device)
-        else:
-            self.pending_futures[task.round_index] = self.executor.submit(
-                execute_attack_round_task,
-                self.config,
-                task,
-                self.attack_device,
-            )
-            logger.info(
-                "Round {} submitted async attack job with {} evaluations on {} queue_depth={}/{}",
-                task.round_index,
-                len(task.samples) * 2,
-                self.attack_device,
-                self._inflight_rounds(),
-                self.max_pending_rounds,
-            )
-        self.drain_completed(wait=False)
-
-    def drain_completed(self, wait: bool = False) -> None:
-        """Collect finished futures and log any now-complete rounds in round order."""
-
-        if wait:
-            for round_index, future in list(self.pending_futures.items()):
-                self.completed_rounds[round_index] = future.result()
-                del self.pending_futures[round_index]
-        else:
-            for round_index, future in list(self.pending_futures.items()):
-                if future.done():
-                    self.completed_rounds[round_index] = future.result()
-                    del self.pending_futures[round_index]
-        while self.pending_round_order and self.pending_round_order[0] in self.completed_rounds:
-            round_index = self.pending_round_order.pop(0)
-            round_result = self.completed_rounds.pop(round_index)
-            self.attack_results.extend(round_result.attacks)
-            payload = _round_attack_payload(round_result, self.attack_results)
-            self.tracker.log(payload, step=round_index)
-            _log_attack_reconstruction_views(self.tracker, round_result.attacks, round_index, self.config)
-            logger.info("Round {} attack metrics {}", round_index, payload)
-
-    def finalize(self) -> None:
-        """Wait for outstanding attack work and shut down the executor."""
-
-        if self.pending_futures:
-            logger.info("Waiting for {} async attack rounds to finish", len(self.pending_futures))
-        self.drain_completed(wait=True)
-        if self.executor is not None:
-            self.executor.shutdown(wait=True)
-            self.executor = None
 
 
 def run_centralized(config: dict[str, Any]) -> dict[str, float]:

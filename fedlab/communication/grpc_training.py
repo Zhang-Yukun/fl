@@ -24,7 +24,6 @@ from fedlab.datasets import build_federated_loaders
 from fedlab.datasets.image_classification import build_client_image_classification_train_loader
 from fedlab.datasets.rare_earth import build_client_rare_earth_train_loader
 from fedlab.federated.algorithms import (
-    AsyncAttackManager,
     _build_federated_resume_state,
     _build_federated_summary,
     _capture_round_update_records,
@@ -41,11 +40,11 @@ from fedlab.federated.algorithms import (
     configure_torch_runtime,
     resolve_device,
     is_compressed_algorithm,
-    save_captured_update_records,
 )
 from fedlab.federated.client import ClientResult, FederatedClient
 from fedlab.federated.server import EarlyStopper, FederatedServer
 from fedlab.federated.protocol import validate_transport_modes
+from fedlab.replay_capture.artifacts import save_captured_update_records
 from fedlab.tasks.registry import task_type
 from fedlab.utils.logging import setup_logging
 from fedlab.utils.artifacts import save_experiment_config, should_save_periodic_artifacts

@@ -14,6 +14,7 @@ import fedlab.communication.grpc_training as grpc_training_module
 from fedlab.communication.grpc_training import GrpcFederatedCoordinator, _apply_transport_metrics, run_client, serve
 from fedlab.datasets import build_federated_loaders
 import fedlab.federated.algorithms as algorithms_module
+from fedlab.replay_capture.artifacts import load_captured_update_records
 import fedlab.federated.methods.encoded as encoded_methods
 from fedlab.federated.algorithms import resolve_device, run_federated
 from fedlab.federated.client import ClientResult, FederatedClient
@@ -396,7 +397,7 @@ def test_grpc_coordinator_saves_update_captures_when_attacks_disabled(tmp_path):
     response = _submit_one_round(coordinator, config)
 
     assert response["stop"] is True
-    captures = algorithms_module.load_captured_update_records(tmp_path)
+    captures = load_captured_update_records(tmp_path)
     assert len(captures) == 3
     assert {record["client_id"] for record in captures} == {"Nd2O3", "CeO2", "La2O3"}
     assert (tmp_path / "saved_updates" / "index.json").exists()
@@ -516,7 +517,7 @@ def test_grpc_coordinator_supports_classification_task(tmp_path, monkeypatch, al
     assert response['stop'] is True
     summary = json.loads((Path(config['experiment']['output_dir']) / 'summary.json').read_text(encoding='utf-8'))
     metrics = json.loads((Path(config['experiment']['output_dir']) / 'metrics.json').read_text(encoding='utf-8'))
-    captures = algorithms_module.load_captured_update_records(Path(config['experiment']['output_dir']))
+    captures = load_captured_update_records(Path(config['experiment']['output_dir']))
 
     assert summary['transport'] == 'grpc'
     assert 'accuracy' in summary['test']
