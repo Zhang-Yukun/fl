@@ -35,8 +35,8 @@ def _deterministic_overrides(output_dir: Path) -> list[str]:
     return [
         f"experiment.output_dir={output_dir}",
         "attack.target_type=update_payload",
-        "attack.frequency_rounds=1",
-        "attack.max_samples=1",
+        "replay_capture.frequency_rounds=1",
+        "replay_capture.max_samples=1",
         "attack.clients_per_round=1",
         "attack.client_selection=first",
         "attack.steps=1",

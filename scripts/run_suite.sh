@@ -20,13 +20,9 @@ ROUNDS="${ROUNDS:-}"
 PATIENCE="${PATIENCE:-500}"
 LOSS_NAME="${LOSS_NAME:-mse}"
 LOSS_TAG="${LOSS_TAG:-${LOSS_NAME}}"
-ATTACK_ENABLED="${ATTACK_ENABLED:-}"
-ATTACK_ASYNC_ENABLED="${ATTACK_ASYNC_ENABLED:-}"
-ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-}"
-ATTACK_CLIENT_SELECTION="${ATTACK_CLIENT_SELECTION:-}"
-ATTACK_CLIENTS_PER_ROUND="${ATTACK_CLIENTS_PER_ROUND:-}"
-ATTACK_MAX_SAMPLES="${ATTACK_MAX_SAMPLES:-}"
-ATTACK_SEED="${ATTACK_SEED:-}"
+CAPTURE_FREQUENCY_ROUNDS="${CAPTURE_FREQUENCY_ROUNDS:-}"
+CAPTURE_MAX_SAMPLES="${CAPTURE_MAX_SAMPLES:-}"
+CAPTURE_MAX_SAMPLES_CAP="${CAPTURE_MAX_SAMPLES_CAP:-}"
 TRAIN_LR="${TRAIN_LR:-}"
 TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-}"
 TRAIN_MOMENTUM="${TRAIN_MOMENTUM:-}"
@@ -34,8 +30,6 @@ TRAIN_WEIGHT_DECAY="${TRAIN_WEIGHT_DECAY:-}"
 TRAIN_OPTIMIZER_EPS="${TRAIN_OPTIMIZER_EPS:-}"
 SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-}"
 MODEL_DROPOUT="${MODEL_DROPOUT:-}"
-ATTACK_LR="${ATTACK_LR:-}"
-ATTACK_OPTIMIZER="${ATTACK_OPTIMIZER:-}"
 FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"
 TASK_SET="${TASK_SET:-rare}"
 TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"
@@ -551,15 +545,9 @@ federated_common_args() {
   printf -- '--override
 experiment.mode=federated
 '
-  emit_optional_override 'attack.enabled' "${ATTACK_ENABLED}"
-  emit_optional_override 'attack.async_enabled' "${ATTACK_ASYNC_ENABLED}"
-  emit_optional_override 'attack.frequency_rounds' "${ATTACK_FREQUENCY_ROUNDS}"
-  emit_optional_override 'attack.client_selection' "${ATTACK_CLIENT_SELECTION}"
-  emit_optional_override 'attack.clients_per_round' "${ATTACK_CLIENTS_PER_ROUND}"
-  emit_optional_override 'attack.max_samples' "${ATTACK_MAX_SAMPLES}"
-  emit_optional_override 'attack.seed' "${ATTACK_SEED}"
-  emit_optional_override 'attack.lr' "${ATTACK_LR}"
-  emit_optional_override 'attack.optimizer' "${ATTACK_OPTIMIZER}"
+  emit_optional_override 'replay_capture.frequency_rounds' "${CAPTURE_FREQUENCY_ROUNDS}"
+  emit_optional_override 'replay_capture.max_samples' "${CAPTURE_MAX_SAMPLES}"
+  emit_optional_override 'replay_capture.max_samples_cap' "${CAPTURE_MAX_SAMPLES_CAP}"
   if [[ -n "${ROUNDS}" ]]; then
     printf -- '--override
 federated.rounds=%s
@@ -831,17 +819,10 @@ main() {
           port=$((port + 1))
         fi
       else
-        local async_flag=false
-        local -a async_workers=()
-        if [[ "${mode}" == "single_async" ]]; then
-          async_flag=true
-          async_workers=(--override attack.async_workers=1)
-        fi
-
         if algo_enabled fedavg; then
           local -a fedavg_override_args=()
           mapfile -t fedavg_override_args < <(fedavg_args)
-          run_single "${task}" "fedavg_${mode}_${RUN_TAG}" "fedavg-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${fedavg_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+          run_single "${task}" "fedavg_${mode}_${RUN_TAG}" "fedavg-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${fedavg_override_args[@]}"
         fi
 
         if algo_enabled ega; then
@@ -850,43 +831,43 @@ main() {
           local ega_tracking_label="${ega_label//_/-}"
           local -a ega_override_args=()
           mapfile -t ega_override_args < <(ega_args)
-          run_single "${task}" "${ega_run_name}" "${ega_tracking_label}-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" ega)" "${ega_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+          run_single "${task}" "${ega_run_name}" "${ega_tracking_label}-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" ega)" "${ega_override_args[@]}"
         fi
 
         if algo_enabled topk; then
           local -a topk_override_args=()
           mapfile -t topk_override_args < <(topk_args)
-          run_single "${task}" "topk_${mode}_${RUN_TAG}" "topk-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" topk)" "${topk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+          run_single "${task}" "topk_${mode}_${RUN_TAG}" "topk-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" topk)" "${topk_override_args[@]}"
         fi
 
         if algo_enabled qsgd; then
           local -a qsgd_override_args=()
           mapfile -t qsgd_override_args < <(qsgd_args)
-          run_single "${task}" "qsgd_${mode}_${RUN_TAG}" "qsgd-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${qsgd_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+          run_single "${task}" "qsgd_${mode}_${RUN_TAG}" "qsgd-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${qsgd_override_args[@]}"
         fi
 
         if algo_enabled randomk; then
           local -a randomk_override_args=()
           mapfile -t randomk_override_args < <(randomk_args)
-          run_single "${task}" "randomk_${mode}_${RUN_TAG}" "randomk-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${randomk_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+          run_single "${task}" "randomk_${mode}_${RUN_TAG}" "randomk-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${randomk_override_args[@]}"
         fi
 
         if algo_enabled sign; then
           local -a sign_override_args=()
           mapfile -t sign_override_args < <(sign_args)
-          run_single "${task}" "sign_${mode}_${RUN_TAG}" "sign-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${sign_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+          run_single "${task}" "sign_${mode}_${RUN_TAG}" "sign-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${sign_override_args[@]}"
         fi
 
         if algo_enabled adaptive; then
           local -a adaptive_override_args=()
           mapfile -t adaptive_override_args < <(adaptive_args)
-          run_single "${task}" "adaptive_${mode}_${RUN_TAG}" "adaptive-rdp-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${adaptive_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+          run_single "${task}" "adaptive_${mode}_${RUN_TAG}" "adaptive-rdp-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${adaptive_override_args[@]}"
         fi
 
         if algo_enabled qint8; then
           local -a qint8_override_args=()
           mapfile -t qint8_override_args < <(qint8_args)
-          run_single "${task}" "qint8_${mode}_${RUN_TAG}" "secure-quantized-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${qint8_override_args[@]}" --override attack.async_enabled=${async_flag} "${async_workers[@]}"
+          run_single "${task}" "qint8_${mode}_${RUN_TAG}" "secure-quantized-${mode}-${TRACKING_TAG}" "$(task_config_path "${task}" fedavg)" "${qint8_override_args[@]}"
         fi
       fi
     done

@@ -123,10 +123,8 @@ def test_run_suite_supports_task_matrix_and_default_four_algorithms():
         'list_named_values "${clients_raw}"',
     ):
         assert marker in content
-    assert 'ATTACK_ENABLED="${ATTACK_ENABLED:-}"' in content
-    assert 'ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-}"' in content
-    assert "emit_optional_override 'attack.enabled' \"${ATTACK_ENABLED}\"" in content
-    assert "emit_optional_override 'attack.frequency_rounds' \"${ATTACK_FREQUENCY_ROUNDS}\"" in content
+    assert 'CAPTURE_FREQUENCY_ROUNDS="${CAPTURE_FREQUENCY_ROUNDS:-}"' in content
+    assert "emit_optional_override 'replay_capture.frequency_rounds' \"${CAPTURE_FREQUENCY_ROUNDS}\"" in content
 
 
 def test_run_suite_keeps_loss_override_only_for_rare_forecasting():
@@ -138,15 +136,15 @@ def test_run_suite_keeps_loss_override_only_for_rare_forecasting():
 def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
     content = _assert_executable("run_controlled_suite.sh")
     for marker in (
-        'ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-}"',
+        'CAPTURE_FREQUENCY_ROUNDS="${CAPTURE_FREQUENCY_ROUNDS:-}"',
         'TASK_SET="${TASK_SET:-rare}"',
         'TASK_SET=task1,task2|all',
         'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"',
         'TASK_CLIENT_IDS="${TASK_CLIENT_IDS:-rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3}"',
         'TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS:-rare}"',
-        'PROFILE=noattack runs centralized + fedavg/topk/ega for the selected tasks.',
+        '训练脚本只负责 centralized + fedavg/topk/ega 训练与离线 replay 所需更新采集。',
         'TASK_IN_BASE_OUTPUT=true',
-        'PROFILE=attack runs centralized + fedavg/topk/ega with attack enabled for the selected tasks.',
+        '攻击执行由独立 replay 脚本完成，不再区分 noattack/attack profile。',
         'STARTUP_WAIT_SECONDS=60',
         'EGA_ARTIFACT_PATH=artifacts/ega/ega_h240_v1.pt',
         'EGA_PRETRAIN_DEVICE=same',
@@ -165,9 +163,9 @@ def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
         'bash scripts/run_suite.sh --modes "${SUITE_MODES}" --tasks "${TASK_SET}"',
     ):
         assert marker in content
-    assert 'RUN_TAG="${RUN_TAG:-attackfreq${ATTACK_FREQUENCY_ROUNDS}}"' in content
-    assert 'RUN_TAG="${RUN_TAG:-attack}"' in content
-    assert 'TRACKING_TAG="${TRACKING_TAG:-attack}"' in content
+    assert 'RUN_TAG="${RUN_TAG:-capturefreq${CAPTURE_FREQUENCY_ROUNDS}}"' in content
+    assert 'RUN_TAG="${RUN_TAG:-suite}"' in content
+    assert 'TRACKING_TAG="${TRACKING_TAG:-suite}"' in content
     assert 'run_ega_matrix' not in content
     assert 'EVAL_MODE=' not in content
     assert content.count('bash scripts/run_suite.sh --modes') == 1
@@ -182,16 +180,8 @@ def test_seed_wrappers_delegate_to_controlled_suite():
         if '_part' in path.name:
             assert 'LOSSES=(mse)' in content
         if '_part1.sh' in path.name:
-            assert 'PROFILE="noattack"' in content
             assert 'MODE="single_sync"' in content
         if '_part2.sh' in path.name:
-            assert 'PROFILE="noattack"' in content
-            assert 'MODE="multi_sync"' in content
-        if '_part3.sh' in path.name:
-            assert 'PROFILE="attack"' in content
-            assert 'MODE="single_sync"' in content
-        if '_part4.sh' in path.name:
-            assert 'PROFILE="attack"' in content
             assert 'MODE="multi_sync"' in content
 
 
@@ -208,7 +198,6 @@ def test_batch_analysis_wrapper_supports_task_scoped_single_seed_and_multiseed_o
         'TASKS_RAW="${TASKS:-rare mnist cifar10}"',
         'TASK_LOSS_MAP="${TASK_LOSS_MAP:-rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy}"',
         'MODE="${MODE:-single_sync}"',
-        'PROFILE="${PROFILE:-noattack}"',
         'SEEDS_RAW="${SEEDS:-42 4096 2026 8192}"',
         'ALGORITHMS_RAW="${ALGORITHMS:-centralized fedavg topk ega}"',
         'INCLUDE_OLD="${INCLUDE_OLD:-false}"',
@@ -217,18 +206,18 @@ def test_batch_analysis_wrapper_supports_task_scoped_single_seed_and_multiseed_o
         '--tasks "rare mnist cifar10" | rare,mnist,cifar10',
         '--task-loss-map "rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy"',
         '--mode NAME',
-        '--profile noattack|attack',
         '--seeds "42 4096 2026 8192" | 42,4096,2026,8192',
         '--algorithms "centralized fedavg topk ega" | centralized,fedavg,topk,ega',
         'lookup_named_map_value() {',
         'task_losses() {',
         'read -r -a TASK_LIST <<< "$(parse_list "${TASKS_RAW}")"',
         'losses_raw="$(lookup_named_map_value "${TASK_LOSS_MAP}" "${task}")"',
-        'local input_dir="${INPUT_ROOT}/${task}/${MODE}/${seed}/${PROFILE}_${loss}"',
-        'local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/${seed}/${PROFILE}_${loss}"',
-        'local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/multiseed/${PROFILE}_${loss}"',
+        'resolve_input_dir() {',
+        'local input_dir',
+        'input_dir="$(resolve_input_dir "${task}" "${seed}" "${loss}")"',
+        'local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/${seed}/${loss}"',
+        'local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/multiseed/${loss}"',
         'cmd+=("${input_dir}")',
-        'if [[ ! -d "${input_dir}" ]]; then',
         'if [[ ${found_inputs} -eq 0 ]]; then',
         'cmd+=("${ALGORITHM_LIST[@]}")',
         'PYTHONPATH=. "${cmd[@]}"',

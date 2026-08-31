@@ -150,8 +150,10 @@ def is_compressed_algorithm(config: dict[str, Any]) -> bool:
 def _should_capture_update_payload(config: dict[str, Any], round_index: int, max_rounds: int) -> bool:
     """Return whether this round should persist server-visible client updates."""
 
-    attack_cfg = config.get("attack", {})
-    frequency = int(attack_cfg.get("frequency_rounds", 1))
+    capture_cfg = config.get("replay_capture", {})
+    if not capture_cfg.get("enabled", True):
+        return False
+    frequency = int(capture_cfg.get("frequency_rounds", 30))
     return round_index == 0 or round_index == max_rounds - 1 or (frequency > 0 and round_index % frequency == 0)
 
 
@@ -439,15 +441,6 @@ def _update_best_checkpoint(
     return _clone_state(best_state), dict(best_metrics), int(best_index), False
 
 
-def _attack_target_type(config: dict[str, Any]) -> str:
-    """Return the only supported interception target for reconstruction attacks."""
-
-    configured = str(config.get("attack", {}).get("target_type", "update_payload")).lower()
-    if configured not in {"", "update_payload"}:
-        logger.warning("Ignoring unsupported attack.target_type=%s and using update_payload", configured)
-    return "update_payload"
-
-
 def _extract_attack_payload(
     config: dict[str, Any],
     result,
@@ -584,15 +577,15 @@ def _client_attack_available_samples(client: FederatedClient) -> int | None:
         return None
 
 
-def _resolve_attack_max_samples(attack_cfg: dict[str, Any], available_samples: int | None) -> int | None:
-    """Resolve how many samples each attack reconstruction should include."""
+def _resolve_capture_max_samples(capture_cfg: dict[str, Any], available_samples: int | None) -> int | None:
+    """Resolve how many training samples each saved replay template should include."""
 
-    configured = attack_cfg.get("max_samples", 1)
+    configured = capture_cfg.get("max_samples", 1)
     if configured is None:
         return None
     if str(configured).strip().lower() == "auto":
         count = None if available_samples is None else max(1, int(available_samples))
-        cap = attack_cfg.get("max_samples_cap")
+        cap = capture_cfg.get("max_samples_cap")
         if count is not None and cap is not None:
             count = min(count, max(1, int(cap)))
         return count
@@ -627,7 +620,7 @@ def _capture_round_update_records(
 
     if not _should_capture_update_payload(config, round_index, max_rounds):
         return []
-    attack_cfg = config.get("attack", {})
+    capture_cfg = config.get("replay_capture", {})
     round_context = round_context or {}
     results_by_client = {result.client_id: result for result in results}
     records: list[dict[str, Any]] = []
@@ -647,7 +640,7 @@ def _capture_round_update_records(
         reference_target_getter = getattr(client, "train_reference_targets", None)
         reference_targets = reference_target_getter() if callable(reference_target_getter) else None
         samples = []
-        max_samples = _resolve_attack_max_samples(attack_cfg, _client_attack_available_samples(client))
+        max_samples = _resolve_capture_max_samples(capture_cfg, _client_attack_available_samples(client))
         sample_x, sample_y = client.sample_batch(max_samples=max_samples, batch_index=0)
         samples.append(
             {

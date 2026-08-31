@@ -9,7 +9,6 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/analysis/exp}"
 TASKS_RAW="${TASKS:-rare mnist cifar10}"
 TASK_LOSS_MAP="${TASK_LOSS_MAP:-rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy}"
 MODE="${MODE:-single_sync}"
-PROFILE="${PROFILE:-noattack}"
 SEEDS_RAW="${SEEDS:-42 4096 2026 8192}"
 ALGORITHMS_RAW="${ALGORITHMS:-centralized fedavg topk ega}"
 INCLUDE_OLD="${INCLUDE_OLD:-false}"
@@ -22,7 +21,6 @@ Usage:
   TASKS="rare mnist cifar10" \
   TASK_LOSS_MAP="rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy" \
   MODE=single_sync \
-  PROFILE=noattack \
   SEEDS="42 4096 2026 8192" \
   ALGORITHMS="centralized fedavg topk ega" \
   bash scripts/run_analyze_experiment_suite_batch.sh
@@ -33,7 +31,6 @@ Optional flags:
   --tasks "rare mnist cifar10" | rare,mnist,cifar10
   --task-loss-map "rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy"
   --mode NAME
-  --profile noattack|attack
   --seeds "42 4096 2026 8192" | 42,4096,2026,8192
   --algorithms "centralized fedavg topk ega" | centralized,fedavg,topk,ega
   --include-old
@@ -88,10 +85,6 @@ while [[ $# -gt 0 ]]; do
       MODE="$2"
       shift 2
       ;;
-    --profile)
-      PROFILE="$2"
-      shift 2
-      ;;
     --seeds)
       SEEDS_RAW="$2"
       shift 2
@@ -116,14 +109,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "${PROFILE}" in
-  noattack|attack) ;;
-  *)
-    echo "Unsupported PROFILE=${PROFILE}. Use noattack or attack." >&2
-    exit 1
-    ;;
-esac
-
 read -r -a TASK_LIST <<< "$(parse_list "${TASKS_RAW}")"
 read -r -a SEED_LIST <<< "$(parse_list "${SEEDS_RAW}")"
 read -r -a ALGORITHM_LIST <<< "$(parse_list "${ALGORITHMS_RAW}")"
@@ -132,6 +117,23 @@ if [[ ${#TASK_LIST[@]} -eq 0 || ${#SEED_LIST[@]} -eq 0 || ${#ALGORITHM_LIST[@]} 
   echo "Tasks, seeds, and algorithms must not be empty." >&2
   exit 1
 fi
+
+resolve_input_dir() {
+  local task="$1"
+  local seed="$2"
+  local loss="$3"
+  local candidate
+  for candidate in \
+    "${INPUT_ROOT}/${task}/${MODE}/${seed}/${loss}" \
+    "${INPUT_ROOT}/${task}/${MODE}/${seed}/noattack_${loss}" \
+    "${INPUT_ROOT}/${task}/${MODE}/${seed}/attack_${loss}"; do
+    if [[ -d "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
 
 task_losses() {
   local task="$1"
@@ -147,12 +149,12 @@ run_single_seed() {
   local task="$1"
   local seed="$2"
   local loss="$3"
-  local input_dir="${INPUT_ROOT}/${task}/${MODE}/${seed}/${PROFILE}_${loss}"
-  local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/${seed}/${PROFILE}_${loss}"
-  if [[ ! -d "${input_dir}" ]]; then
-    echo "[skip] task=${task} seed=${seed} loss=${loss} profile=${PROFILE} mode=${MODE} missing=${input_dir}"
+  local input_dir
+  input_dir="$(resolve_input_dir "${task}" "${seed}" "${loss}")" || {
+    echo "[skip] task=${task} seed=${seed} loss=${loss} mode=${MODE} missing=${INPUT_ROOT}/${task}/${MODE}/${seed}/${loss}"
     return 0
-  fi
+  }
+  local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/${seed}/${loss}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.tools.analyze_experiment_suite
     "${input_dir}"
@@ -164,28 +166,28 @@ run_single_seed() {
   if [[ "${INCLUDE_OLD}" == "true" ]]; then
     cmd+=(--include-old)
   fi
-  echo "[analyze] task=${task} seed=${seed} loss=${loss} profile=${PROFILE} mode=${MODE}"
+  echo "[analyze] task=${task} seed=${seed} loss=${loss} mode=${MODE}"
   PYTHONPATH=. "${cmd[@]}"
 }
 
 run_multi_seed() {
   local task="$1"
   local loss="$2"
-  local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/multiseed/${PROFILE}_${loss}"
+  local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/multiseed/${loss}"
   local -a cmd=(
     "${PYTHON_BIN}" -m fedlab.tools.analyze_experiment_suite
   )
   local found_inputs=0
   local seed
   for seed in "${SEED_LIST[@]}"; do
-    local input_dir="${INPUT_ROOT}/${task}/${MODE}/${seed}/${PROFILE}_${loss}"
-    if [[ -d "${input_dir}" ]]; then
+    local input_dir
+    if input_dir="$(resolve_input_dir "${task}" "${seed}" "${loss}")"; then
       cmd+=("${input_dir}")
       found_inputs=1
     fi
   done
   if [[ ${found_inputs} -eq 0 ]]; then
-    echo "[skip] task=${task} multiseed loss=${loss} profile=${PROFILE} mode=${MODE} no-inputs-found"
+    echo "[skip] task=${task} multiseed loss=${loss} mode=${MODE} no-inputs-found"
     return 0
   fi
   cmd+=(
@@ -197,7 +199,7 @@ run_multi_seed() {
   if [[ "${INCLUDE_OLD}" == "true" ]]; then
     cmd+=(--include-old)
   fi
-  echo "[analyze] task=${task} multiseed loss=${loss} profile=${PROFILE} mode=${MODE} seeds=${SEED_LIST[*]}"
+  echo "[analyze] task=${task} multiseed loss=${loss} mode=${MODE} seeds=${SEED_LIST[*]}"
   PYTHONPATH=. "${cmd[@]}"
 }
 

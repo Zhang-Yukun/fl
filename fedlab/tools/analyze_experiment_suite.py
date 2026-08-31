@@ -107,8 +107,11 @@ def load_json(path: Path) -> Any:
 def resolve_suite_dir(root_dir: Path, loss: str | None) -> Path:
     if loss is None:
         return root_dir
-    candidate = root_dir / f'noattack_{loss}'
-    return candidate if candidate.is_dir() else root_dir
+    for name in (loss, f'noattack_{loss}', f'attack_{loss}'):
+        candidate = root_dir / name
+        if candidate.is_dir():
+            return candidate
+    return root_dir
 def default_output_dir(root_dir: Path, loss: str | None) -> Path:
     suffix = loss or 'all'
     return root_dir.parent / f'{root_dir.name}_analysis_{suffix}'

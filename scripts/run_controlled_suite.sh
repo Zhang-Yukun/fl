@@ -3,7 +3,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-PROFILE="${PROFILE:-noattack}"
 LOSS_NAME="${LOSS_NAME:-mse}"
 LOSS_TAG="${LOSS_TAG:-${LOSS_NAME}}"
 MODE_SET="${MODE_SET:-all}"
@@ -19,24 +18,24 @@ ROUNDS="${ROUNDS:-}"
 PATIENCE="${PATIENCE:-}"
 BASE_PORT="${BASE_PORT:-58000}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-5}"
-ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS:-}"
+CAPTURE_FREQUENCY_ROUNDS="${CAPTURE_FREQUENCY_ROUNDS:-}"
 TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER:-}"
 EGA_ARTIFACT_PATH="${EGA_ARTIFACT_PATH:-}"
 EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE:-}"
 EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS:-}"
 SHUFFLE_TRAIN="${SHUFFLE_TRAIN:-}"
 MODEL_DROPOUT="${MODEL_DROPOUT:-}"
-BASE_OUTPUT_ROOT="${BASE_OUTPUT_ROOT:-outputs/suite_${PROFILE}_${LOSS_NAME}_seed${SUITE_SEED}_$(date +%Y%m%d_%H%M%S)}"
-PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-suite-${PROFILE}-${LOSS_NAME}}"
+BASE_OUTPUT_ROOT="${BASE_OUTPUT_ROOT:-outputs/suite_${LOSS_NAME}_seed${SUITE_SEED}_$(date +%Y%m%d_%H%M%S)}"
+PROJECT_NAME="${PROJECT_NAME:-rare-earth-fl-suite-${LOSS_NAME}}"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  PROFILE=noattack|attack   LOSS_NAME=mse|mae|cross_entropy   TASK_SET=task1,task2|all   TASK_CONFIG_DIRS="rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10"   TASK_CLIENT_IDS="rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3"   TASK_LOSS_OVERRIDE_TASKS=rare   TASK_IN_BASE_OUTPUT=true   MODE_SET=all|single_sync|single_async|multi_sync|multi_async|centralized|comma,list   SUITE_SEED=2026   RUNTIME_DEVICE=cuda:0   ROUNDS=10   PATIENCE=500   BASE_PORT=58000   STARTUP_WAIT_SECONDS=60   EGA_ARTIFACT_PATH=artifacts/ega/ega_h240_v1.pt   EGA_PRETRAIN_DEVICE=same   EGA_PRETRAIN_EPOCHS=220   BASE_OUTPUT_ROOT=outputs/my_suite   PROJECT_NAME=my-wandb-project   bash scripts/run_controlled_suite.sh
+  LOSS_NAME=mse|mae|cross_entropy   TASK_SET=task1,task2|all   TASK_CONFIG_DIRS="rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10"   TASK_CLIENT_IDS="rare=Nd2O3,CeO2,La2O3;mnist=m1,m2,m3;cifar10=c1,c2,c3"   TASK_LOSS_OVERRIDE_TASKS=rare   TASK_IN_BASE_OUTPUT=true   MODE_SET=all|single_sync|single_async|multi_sync|multi_async|centralized|comma,list   SUITE_SEED=2026   RUNTIME_DEVICE=cuda:0   ROUNDS=10   PATIENCE=500   BASE_PORT=58000   STARTUP_WAIT_SECONDS=60   CAPTURE_FREQUENCY_ROUNDS=30   EGA_ARTIFACT_PATH=artifacts/ega/ega_h240_v1.pt   EGA_PRETRAIN_DEVICE=same   EGA_PRETRAIN_EPOCHS=220   BASE_OUTPUT_ROOT=outputs/my_suite   PROJECT_NAME=my-wandb-project   bash scripts/run_controlled_suite.sh
 
 Notes:
-  - PROFILE=noattack runs centralized + fedavg/topk/ega for the selected tasks.
-  - PROFILE=attack runs centralized + fedavg/topk/ega with attack enabled for the selected tasks.
+  - 训练脚本只负责 centralized + fedavg/topk/ega 训练与离线 replay 所需更新采集。
+  - 攻击执行由独立 replay 脚本完成，不再区分 noattack/attack profile。
   - TASK_SET uses keys from TASK_CONFIG_DIRS. all expands to every mapped task.
   - MODE_SET uses user-facing names. multi_sync -> grpc_sync, multi_async -> grpc_async.
   - Set RUN_CENTRALIZED=false if you want to skip centralized.
@@ -47,14 +46,6 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
   exit 0
 fi
-
-case "${PROFILE}" in
-  noattack|attack) ;;
-  *)
-    echo "Unsupported PROFILE=${PROFILE}. Use noattack or attack." >&2
-    exit 1
-    ;;
-esac
 
 case "${LOSS_NAME}" in
   mse|mae|cross_entropy) ;;
@@ -142,24 +133,16 @@ suite_modes() {
 MAPPED_MODES="$(map_modes "${MODE_SET}")"
 SUITE_MODES="$(suite_modes "${MAPPED_MODES}")"
 
-if [[ "${PROFILE}" == "noattack" ]]; then
-  RUN_TAG="${RUN_TAG:-noattack}"
-  TRACKING_TAG="${TRACKING_TAG:-noattack}"
-  ATTACK_ENABLED=false
-  BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"
+if [[ -n "${CAPTURE_FREQUENCY_ROUNDS}" ]]; then
+  RUN_TAG="${RUN_TAG:-capturefreq${CAPTURE_FREQUENCY_ROUNDS}}"
+  TRACKING_TAG="${TRACKING_TAG:-capturefreq${CAPTURE_FREQUENCY_ROUNDS}}"
 else
-  if [[ -n "${ATTACK_FREQUENCY_ROUNDS}" ]]; then
-    RUN_TAG="${RUN_TAG:-attackfreq${ATTACK_FREQUENCY_ROUNDS}}"
-    TRACKING_TAG="${TRACKING_TAG:-attackfreq${ATTACK_FREQUENCY_ROUNDS}}"
-  else
-    RUN_TAG="${RUN_TAG:-attack}"
-    TRACKING_TAG="${TRACKING_TAG:-attack}"
-  fi
-  ATTACK_ENABLED=true
-  BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"
+  RUN_TAG="${RUN_TAG:-suite}"
+  TRACKING_TAG="${TRACKING_TAG:-suite}"
 fi
+BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"
 
-COMMON_BASE_OUTPUT="${BASE_OUTPUT_ROOT}/${PROFILE}_${LOSS_NAME}"
+COMMON_BASE_OUTPUT="${BASE_OUTPUT_ROOT}/${LOSS_NAME}"
 
 env \
   BASE_OUTPUT="${COMMON_BASE_OUTPUT}" \
@@ -173,8 +156,7 @@ env \
   RUN_TAG="${RUN_TAG}" \
   TRACKING_TAG="${TRACKING_TAG}" \
   RUN_CENTRALIZED="${RUN_CENTRALIZED}" \
-  ATTACK_ENABLED="${ATTACK_ENABLED}" \
-  ATTACK_FREQUENCY_ROUNDS="${ATTACK_FREQUENCY_ROUNDS}" \
+  CAPTURE_FREQUENCY_ROUNDS="${CAPTURE_FREQUENCY_ROUNDS}" \
   LOSS_NAME="${LOSS_NAME}" \
   LOSS_TAG="${LOSS_TAG}" \
   TRAIN_OPTIMIZER="${TRAIN_OPTIMIZER}" \

@@ -682,8 +682,8 @@ def test_federated_run_ignores_online_attack_execution_flags(tmp_path):
             "attack.enabled=true",
             "attack.methods=dlg",
             "attack.target_type=update_payload",
-            "attack.frequency_rounds=1",
-            "attack.max_samples=1",
+            "replay_capture.frequency_rounds=1",
+            "replay_capture.max_samples=1",
             "attack.steps=1",
             "federated.algorithm=fedavg",
             "federated.rounds=1",
@@ -697,26 +697,29 @@ def test_federated_run_ignores_online_attack_execution_flags(tmp_path):
     assert not (tmp_path / 'attack_results.json').exists()
 
 
-def test_attack_max_samples_auto_defaults_to_capped_training_set_size():
-    attack_cfg = {
+def test_replay_capture_max_samples_auto_defaults_to_capped_training_set_size():
+    capture_cfg = {
         "max_samples": "auto",
         "max_samples_cap": 8,
     }
 
-    assert algorithms_module._resolve_attack_max_samples(attack_cfg, available_samples=18000) == 8
-    assert algorithms_module._resolve_attack_max_samples({"max_samples": "auto", "max_samples_cap": 32}, available_samples=20) == 20
-    assert algorithms_module._resolve_attack_max_samples({"max_samples": 3}, available_samples=18000) == 3
+    assert algorithms_module._resolve_capture_max_samples(capture_cfg, available_samples=18000) == 8
+    assert algorithms_module._resolve_capture_max_samples({"max_samples": "auto", "max_samples_cap": 32}, available_samples=20) == 20
+    assert algorithms_module._resolve_capture_max_samples({"max_samples": 3}, available_samples=18000) == 3
 
 
 
 def test_attack_task_uses_uploaded_protocol_payload():
     config = {
         "federated": {"algorithm": "sparse_fedavg", "topk_fraction": 0.5},
+        "replay_capture": {
+            "enabled": True,
+            "frequency_rounds": 1,
+            "max_samples": 1,
+        },
         "attack": {
             "enabled": True,
             "target_type": "update_payload",
-            "frequency_rounds": 1,
-            "max_samples": 1,
             "client_selection": "all",
         },
     }
@@ -1113,8 +1116,8 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
         "training.patience=1",
         "attack.enabled=true",
         "attack.target_type=update_payload",
-        "attack.frequency_rounds=1",
-        "attack.max_samples=1",
+        "replay_capture.frequency_rounds=1",
+        "replay_capture.max_samples=1",
         "attack.clients_per_round=1",
         "attack.client_selection=first",
         "attack.steps=1",
