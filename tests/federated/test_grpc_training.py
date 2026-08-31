@@ -22,10 +22,19 @@ from fedlab.utils.serialization import compress_topk, serialize_model
 from fedlab.utils.consistency import compare_fedavg_runs
 
 
+def _register_loaded_clients(coordinator: GrpcFederatedCoordinator, train_loaders: dict[str, object]) -> None:
+    """Register in-process test clients with their local sample counts."""
+
+    for client_id, loader in train_loaders.items():
+        response = coordinator.register_client({'client_id': client_id, 'local_train_samples': len(loader.dataset)})
+        assert response['accepted'] is True
+
+
 def _submit_one_round(coordinator: GrpcFederatedCoordinator, config: dict[str, object]) -> dict[str, object]:
     """Submit one full gRPC round using in-process clients for tests."""
 
     train_loaders, _, _ = build_federated_loaders(config)
+    _register_loaded_clients(coordinator, train_loaders)
     device = resolve_device(config)
     global_payload = coordinator.get_global()
     response = None
@@ -294,9 +303,9 @@ def test_grpc_coordinator_aggregates_one_round_and_saves_summary(tmp_path):
     assert metrics[0]["total_transport_upload_bytes"] >= metrics[0]["total_parameter_upload_bytes"]
     assert summary["transport"] == "grpc"
     assert summary["rounds"] == 1
-    assert summary["last_parameter_download_compression_ratio"] == 1.0
+    assert summary["last_parameter_download_compression_ratio"] < 1.0
     assert summary["last_parameter_upload_compression_ratio"] == 1.0
-    assert metrics[0]["parameter_download_compression_ratio"] == 1.0
+    assert metrics[0]["parameter_download_compression_ratio"] < 1.0
     assert metrics[0]["parameter_upload_compression_ratio"] == 1.0
     assert summary["total_parameter_bytes"] == metrics[0]["total_parameter_bytes"]
     assert summary["total_transport_bytes"] == metrics[0]["total_transport_bytes"]
@@ -412,6 +421,8 @@ def test_grpc_coordinator_defers_ega_runtime_until_explicit_start(tmp_path, monk
     monkeypatch.setattr(encoded_methods, 'load_ega_codec', _delayed_load_ega_codec)
 
     coordinator = GrpcFederatedCoordinator(config)
+    train_loaders, _, _ = build_federated_loaders(config)
+    _register_loaded_clients(coordinator, train_loaders)
     initial_payload = coordinator.get_global()
     assert initial_payload['ready'] is False
     assert initial_payload['round_context'] == {}
@@ -431,6 +442,22 @@ def test_grpc_coordinator_defers_ega_runtime_until_explicit_start(tmp_path, monk
         time.sleep(0.01)
     else:  # pragma: no cover - defensive timeout path
         pytest.fail('deferred EGA runtime initialization did not complete in time')
+
+
+def test_grpc_round_context_broadcasts_registered_global_training_stats(tmp_path):
+    config = _classification_grpc_config(tmp_path, algorithm='fedavg')
+
+    coordinator = GrpcFederatedCoordinator(config)
+    train_loaders, _, _ = build_federated_loaders(config)
+    _register_loaded_clients(coordinator, train_loaders)
+
+    payload = coordinator.get_global()
+
+    assert payload['ready'] is True
+    assert payload['registration_ready'] is True
+    assert payload['round_context']['total_clients'] == 3
+    assert payload['round_context']['total_train_samples'] == 18
+
 
 
 @pytest.mark.parametrize('algorithm', ['fedavg', 'sparse_fedavg', 'ega_fedavg'])
@@ -645,8 +672,8 @@ def test_run_client_classification_only_needs_local_train_split(tmp_path, monkey
         def __init__(self, client_id, train_loader, _config, _device, total_train_samples=None, total_clients=None, allow_ega_pretrain=False):
             captured['client_id'] = client_id
             captured['local_train_samples'] = len(train_loader.dataset)
-            captured['total_train_samples'] = total_train_samples
-            captured['total_clients'] = total_clients
+            captured['initial_total_train_samples'] = total_train_samples
+            captured['initial_total_clients'] = total_clients
             captured['allow_ega_pretrain'] = allow_ega_pretrain
 
     class _FakeRpcClient:
@@ -655,6 +682,10 @@ def test_run_client_classification_only_needs_local_train_split(tmp_path, monkey
 
         def snapshot_counters(self):
             return {'sent_bytes': 0, 'received_bytes': 0}
+
+        def register_client(self, payload):
+            captured['registration_payload'] = payload
+            return {'accepted': True, 'registered_clients': 1, 'expected_clients': 3, 'registration_ready': False}
 
         def get_global(self):
             return {'stop': True}
@@ -669,14 +700,14 @@ def test_run_client_classification_only_needs_local_train_split(tmp_path, monkey
 
     assert captured['client_id'] == 'm1'
     assert captured['local_train_samples'] == 6
-    assert captured['total_train_samples'] == 18
-    assert captured['total_clients'] == 3
+    assert captured['initial_total_train_samples'] == 6
+    assert captured['initial_total_clients'] == 1
+    assert captured['registration_payload'] == {'client_id': 'm1', 'local_train_samples': 6}
     assert captured['allow_ega_pretrain'] is False
 
 
 def test_run_client_forecasting_only_needs_local_train_split(tmp_path, monkeypatch):
     split_dir = tmp_path / 'rare_split'
-    summary_rows = {}
     for client in ['Nd2O3', 'CeO2', 'La2O3']:
         client_dir = split_dir / 'clients' / client
         client_dir.mkdir(parents=True, exist_ok=True)
@@ -685,8 +716,6 @@ def test_run_client_forecasting_only_needs_local_train_split(tmp_path, monkeypat
             values = torch.arange(start, start + length, dtype=torch.float32).tolist()
             rows = 'date,value\n' + '\n'.join(f'{date},{value}' for date, value in zip(dates, values)) + '\n'
             (client_dir / f'{split}.csv').write_text(rows, encoding='utf-8')
-        summary_rows[client] = {'total': 80, 'train': 40, 'val': 20, 'test': 20}
-    (split_dir / 'summary.json').write_text(json.dumps({'rows': summary_rows}, ensure_ascii=False, indent=2), encoding='utf-8')
     for missing_client in ['CeO2', 'La2O3']:
         client_dir = split_dir / 'clients' / missing_client
         for path in client_dir.glob('*'):
@@ -722,8 +751,8 @@ def test_run_client_forecasting_only_needs_local_train_split(tmp_path, monkeypat
         def __init__(self, client_id, train_loader, _config, _device, total_train_samples=None, total_clients=None, allow_ega_pretrain=False):
             captured['client_id'] = client_id
             captured['local_train_samples'] = len(train_loader.dataset)
-            captured['total_train_samples'] = total_train_samples
-            captured['total_clients'] = total_clients
+            captured['initial_total_train_samples'] = total_train_samples
+            captured['initial_total_clients'] = total_clients
             captured['allow_ega_pretrain'] = allow_ega_pretrain
 
     class _FakeRpcClient:
@@ -732,6 +761,10 @@ def test_run_client_forecasting_only_needs_local_train_split(tmp_path, monkeypat
 
         def snapshot_counters(self):
             return {'sent_bytes': 0, 'received_bytes': 0}
+
+        def register_client(self, payload):
+            captured['registration_payload'] = payload
+            return {'accepted': True, 'registered_clients': 1, 'expected_clients': 3, 'registration_ready': False}
 
         def get_global(self):
             return {'stop': True}
@@ -746,8 +779,9 @@ def test_run_client_forecasting_only_needs_local_train_split(tmp_path, monkeypat
 
     assert captured['client_id'] == 'Nd2O3'
     assert captured['local_train_samples'] == 35
-    assert captured['total_train_samples'] == 105
-    assert captured['total_clients'] == 3
+    assert captured['initial_total_train_samples'] == 35
+    assert captured['initial_total_clients'] == 1
+    assert captured['registration_payload'] == {'client_id': 'Nd2O3', 'local_train_samples': 35}
     assert captured['allow_ega_pretrain'] is False
 
 
@@ -767,6 +801,7 @@ def test_grpc_finalization_does_not_block_last_submit_response(tmp_path, monkeyp
     )
     coordinator = GrpcFederatedCoordinator(config)
     train_loaders, _, _ = build_federated_loaders(config)
+    _register_loaded_clients(coordinator, train_loaders)
     device = resolve_device(config)
     global_payload = coordinator.get_global()
     finalized = Event()
@@ -863,6 +898,7 @@ def test_grpc_coordinator_restores_best_validation_checkpoint(tmp_path, monkeypa
     monkeypatch.setattr(server_module, "evaluate", fake_evaluate)
 
     coordinator = GrpcFederatedCoordinator(config)
+    _register_loaded_clients(coordinator, {client_id: minimal_loader for client_id in coordinator.expected_clients})
     response = None
     for _round in range(2):
         payload = coordinator.get_global()

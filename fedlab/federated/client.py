@@ -160,6 +160,19 @@ class FederatedClient:
         return generator
 
 
+    def apply_global_training_context(self, round_context: dict[str, Any] | None = None) -> None:
+        """Update cached global training statistics from one round context payload."""
+
+        if not round_context:
+            return
+        total_train_samples = round_context.get('total_train_samples')
+        total_clients = round_context.get('total_clients')
+        if total_train_samples is not None:
+            self.total_train_samples = int(total_train_samples)
+        if total_clients is not None:
+            self.total_clients = int(total_clients)
+
+
     def prepare_round_state(
         self,
         global_state: StateDict,
@@ -200,6 +213,7 @@ class FederatedClient:
         """
 
         algorithm = str(self.config["federated"].get("algorithm", "fedavg")).lower()
+        self.apply_global_training_context(round_context)
         if prepared_state is None:
             prepared_state = self.prepare_round_state(global_state, round_index=round_index, round_context=round_context)
         download_state = prepared_state.download_state

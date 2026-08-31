@@ -194,6 +194,8 @@ class FederatedServer:
     last_privacy_step: AdaptiveRdpStep | None = field(init=False, default=None)
     ega_codec: Any | None = field(init=False, default=None)
     ega_normalization: float | None = field(init=False, default=None)
+    total_clients: int | None = field(init=False, default=None)
+    total_train_samples: int | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         """Build the initial global model after dataclass initialization."""
@@ -222,7 +224,12 @@ class FederatedServer:
     def build_round_context(self) -> dict[str, Any]:
         """Return server-controlled per-round context forwarded to clients."""
 
-        return self.method.build_round_context(self)
+        context = dict(self.method.build_round_context(self))
+        if self.total_clients is not None:
+            context['total_clients'] = int(self.total_clients)
+        if self.total_train_samples is not None:
+            context['total_train_samples'] = int(self.total_train_samples)
+        return context
 
     def decode_ega_attack_view(self, payloads: list[EncodedStatePayload], target_index: int) -> StateDict:
         """Return the honest-but-curious server attack view for one EGA client."""

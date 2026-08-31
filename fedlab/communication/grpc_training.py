@@ -21,14 +21,8 @@ from loguru import logger
 
 from fedlab.communication.grpc_service import FederatedRpcClient, FederatedRpcServer
 from fedlab.datasets import build_federated_loaders
-from fedlab.datasets.image_classification import (
-    build_client_image_classification_train_loader,
-    summarize_image_classification_training,
-)
-from fedlab.datasets.rare_earth import (
-    build_client_rare_earth_train_loader,
-    summarize_rare_earth_training,
-)
+from fedlab.datasets.image_classification import build_client_image_classification_train_loader
+from fedlab.datasets.rare_earth import build_client_rare_earth_train_loader
 from fedlab.federated.algorithms import (
     AsyncAttackManager,
     _build_federated_resume_state,
@@ -90,22 +84,21 @@ def _loader_num_samples(loader: Any) -> int:
 
 
 
-def _build_grpc_client_training_state(config: dict[str, Any], client_id: str) -> tuple[Any, int, int]:
-    """Build one client's local training loader plus global training metadata."""
+def _build_grpc_client_training_state(config: dict[str, Any], client_id: str) -> tuple[Any, int]:
+    """Build one client's local training loader plus its local sample count."""
 
     resolved_task_type = task_type(config)
     if resolved_task_type == 'classification' and 'split_dir' in config.get('data', {}):
         loader = build_client_image_classification_train_loader(config, client_id)
-        summary = summarize_image_classification_training(config)
-        return loader, int(summary['total_train_samples']), int(summary['total_clients'])
+        return loader, _loader_num_samples(loader)
     if resolved_task_type == 'forecasting':
         loader = build_client_rare_earth_train_loader(config, client_id)
-        summary = summarize_rare_earth_training(config)
-        return loader, int(summary['total_train_samples']), int(summary['total_clients'])
+        return loader, _loader_num_samples(loader)
     train_loaders, _, _ = build_federated_loaders(config)
     if client_id not in train_loaders:
         raise ValueError(f'Unknown client_id {client_id}; expected one of {sorted(train_loaders)}')
-    return train_loaders[client_id], sum(_loader_num_samples(loader) for loader in train_loaders.values()), len(train_loaders)
+    loader = train_loaders[client_id]
+    return loader, _loader_num_samples(loader)
 
 def _apply_transport_metrics(
     result: ClientResult,
@@ -151,6 +144,10 @@ class GrpcFederatedCoordinator:
         self.expected_clients = tuple(train_loaders.keys())
         self.server = FederatedServer(config, val_loader, test_loader, self.device)
         total_train_samples = sum(_loader_num_samples(loader) for loader in train_loaders.values())
+        self.server.total_clients = len(train_loaders)
+        self.server.total_train_samples = total_train_samples
+        self.registered_client_samples: dict[str, int] = {}
+        self.registration_ready = False
         self.attack_clients = [
             FederatedClient(
                 client_id,
@@ -232,6 +229,50 @@ class GrpcFederatedCoordinator:
             self.runtime_ready = True
         logger.info('Deferred gRPC server runtime initialization finished')
 
+    def register_client(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Register one client and its local training-sample count before round-0."""
+
+        client_id = str(payload.get('client_id', ''))
+        local_train_samples = int(payload.get('local_train_samples', 0) or 0)
+        with self.lock:
+            if client_id not in self.expected_clients:
+                return {
+                    'accepted': False,
+                    'error': f'Unknown client_id {client_id}',
+                    'registered_clients': len(self.registered_client_samples),
+                    'expected_clients': len(self.expected_clients),
+                    'registration_ready': self.registration_ready,
+                    'stop': self.stopped,
+                }
+            previous = self.registered_client_samples.get(client_id)
+            self.registered_client_samples[client_id] = local_train_samples
+            self.registration_ready = set(self.expected_clients).issubset(self.registered_client_samples)
+            if previous is None:
+                logger.info(
+                    'Registered client {} with local_train_samples={} ({}/{})',
+                    client_id,
+                    local_train_samples,
+                    len(self.registered_client_samples),
+                    len(self.expected_clients),
+                )
+            elif previous != local_train_samples:
+                logger.warning('Updated client {} registration local_train_samples {} -> {}', client_id, previous, local_train_samples)
+            if self.registration_ready:
+                self.server.total_train_samples = sum(self.registered_client_samples[registered_id] for registered_id in self.expected_clients)
+                logger.info(
+                    'All clients registered for gRPC training: total_clients={} total_train_samples={}',
+                    self.server.total_clients,
+                    self.server.total_train_samples,
+                )
+            return {
+                'accepted': True,
+                'error': None,
+                'registered_clients': len(self.registered_client_samples),
+                'expected_clients': len(self.expected_clients),
+                'registration_ready': self.registration_ready,
+                'stop': self.stopped,
+            }
+
     def ack_stop(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Record that one client received the stop signal."""
 
@@ -278,13 +319,18 @@ class GrpcFederatedCoordinator:
         """Return the current global payload for remote clients."""
 
         with self.lock:
+            ready = self.runtime_ready and self.registration_ready
             return {
                 'round': self.round_index,
                 'state': self.server.global_state,
                 'compressed': self.compressed,
-                'round_context': self.server.build_round_context() if self.runtime_ready else {},
+                'round_context': self.server.build_round_context() if ready else {},
                 'stop': self.stopped,
-                'ready': self.runtime_ready,
+                'ready': ready,
+                'runtime_ready': self.runtime_ready,
+                'registration_ready': self.registration_ready,
+                'registered_clients': len(self.registered_client_samples),
+                'expected_clients': len(self.expected_clients),
                 'runtime_error': self.runtime_error,
             }
 
@@ -456,7 +502,7 @@ class GrpcFederatedCoordinator:
         with self.lock:
             if self.stopped:
                 return {'accepted': False, 'stop': True, 'round': self.round_index}
-            if not self.runtime_ready:
+            if not (self.runtime_ready and self.registration_ready):
                 return {'accepted': False, 'stop': False, 'round': self.round_index}
             if payload['round'] != self.round_index:
                 return {'accepted': False, 'stop': False, 'round': self.round_index}
@@ -576,6 +622,7 @@ def serve(config: dict[str, Any]) -> None:
         coordinator.get_global,
         coordinator.submit_update,
         coordinator.ack_stop,
+        coordinator.register_client,
         max_message_length=max_message_length,
     )
     rpc_server.start()
@@ -616,14 +663,14 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
     device = resolve_device(config)
     configure_random_seed(config, device=device)
     validate_transport_modes(config)
-    train_loader, total_train_samples, total_clients = _build_grpc_client_training_state(config, client_id)
+    train_loader, local_train_samples = _build_grpc_client_training_state(config, client_id)
     client = FederatedClient(
         client_id,
         train_loader,
         config,
         device,
-        total_train_samples=total_train_samples,
-        total_clients=total_clients,
+        total_train_samples=local_train_samples,
+        total_clients=1,
         allow_ega_pretrain=False,
     )
     rpc = FederatedRpcClient(address, max_message_length=max_message_length)
@@ -634,6 +681,26 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
             rpc.ack_stop({'client_id': client_id})
         except Exception as exc:
             logger.warning('Client {} could not acknowledge stop to {}: {}', client_id, address, exc)
+
+    while True:
+        try:
+            registration = rpc.register_client({'client_id': client_id, 'local_train_samples': local_train_samples})
+        except Exception as exc:
+            logger.warning('Client {} could not register with {}: {}', client_id, address, exc)
+            time.sleep(poll_seconds)
+            continue
+        if registration.get('accepted'):
+            logger.info(
+                'Client {} registered local_train_samples={} ({}/{}) registration_ready={}',
+                client_id,
+                local_train_samples,
+                registration.get('registered_clients'),
+                registration.get('expected_clients'),
+                registration.get('registration_ready'),
+            )
+            break
+        error = registration.get('error') or 'registration rejected'
+        raise ValueError(f'Client {client_id} registration failed: {error}')
 
     last_submitted = -1
     last_waiting_ready_log = -1
@@ -656,7 +723,15 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
                 time.sleep(poll_seconds)
                 continue
             if last_waiting_ready_log != global_payload['round']:
-                logger.info('Client {} waiting for server runtime readiness before round {}', client_id, global_payload['round'])
+                logger.info(
+                    'Client {} waiting for server readiness before round {} runtime_ready={} registration_ready={} registered={}/{}',
+                    client_id,
+                    global_payload['round'],
+                    global_payload.get('runtime_ready'),
+                    global_payload.get('registration_ready'),
+                    global_payload.get('registered_clients'),
+                    global_payload.get('expected_clients'),
+                )
                 last_waiting_ready_log = global_payload['round']
             time.sleep(poll_seconds)
             continue

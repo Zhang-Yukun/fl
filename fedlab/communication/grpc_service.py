@@ -44,7 +44,7 @@ def _loads(value: bytes) -> Any:
 
 
 class FederatedRpcServer:
-    """Minimal gRPC server exposing ``GetGlobal`` and ``SubmitUpdate``."""
+    """Minimal gRPC server exposing federated coordination RPCs."""
 
     def __init__(
         self,
@@ -52,6 +52,7 @@ class FederatedRpcServer:
         get_global: Callable[[], Any],
         submit_update: Callable[[Any], Any],
         ack_stop: Callable[[Any], Any],
+        register_client: Callable[[Any], Any],
         max_message_length: int = 256 * 1024 * 1024,
     ):
         """Create a generic gRPC server around coordinator callbacks."""
@@ -62,6 +63,7 @@ class FederatedRpcServer:
         self.get_global = get_global
         self.submit_update = submit_update
         self.ack_stop = ack_stop
+        self.register_client = register_client
         self.server = grpc.server(
             futures.ThreadPoolExecutor(max_workers=8),
             options=[
@@ -82,6 +84,11 @@ class FederatedRpcServer:
             ),
             "AckStop": grpc.unary_unary_rpc_method_handler(
                 lambda request, context: _dumps(self.ack_stop(_loads(request))),
+                request_deserializer=lambda raw: raw,
+                response_serializer=lambda raw: raw,
+            ),
+            "RegisterClient": grpc.unary_unary_rpc_method_handler(
+                lambda request, context: _dumps(self.register_client(_loads(request))),
                 request_deserializer=lambda raw: raw,
                 response_serializer=lambda raw: raw,
             ),
@@ -124,6 +131,7 @@ class FederatedRpcClient:
         self.get_global_rpc = self.channel.unary_unary("/FederatedService/GetGlobal")
         self.submit_update_rpc = self.channel.unary_unary("/FederatedService/SubmitUpdate")
         self.ack_stop_rpc = self.channel.unary_unary("/FederatedService/AckStop")
+        self.register_client_rpc = self.channel.unary_unary("/FederatedService/RegisterClient")
         self.stats = RpcTransportStats()
 
     def _record_exchange(self, request_bytes: bytes, response_bytes: bytes) -> None:
@@ -152,6 +160,14 @@ class FederatedRpcClient:
 
         request_bytes = _dumps(payload)
         response_bytes = self.ack_stop_rpc(request_bytes)
+        self._record_exchange(request_bytes, response_bytes)
+        return _loads(response_bytes)
+
+    def register_client(self, payload: Any) -> Any:
+        """Register one client and its local training-sample count with the server."""
+
+        request_bytes = _dumps(payload)
+        response_bytes = self.register_client_rpc(request_bytes)
         self._record_exchange(request_bytes, response_bytes)
         return _loads(response_bytes)
 

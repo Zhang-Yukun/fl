@@ -1445,6 +1445,8 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     client_ids = list(train_loaders.keys())
     server = FederatedServer(config, val_loader, test_loader, device)
     total_train_samples = sum(_loader_num_samples(loader) for loader in train_loaders.values())
+    server.total_clients = len(train_loaders)
+    server.total_train_samples = total_train_samples
     clients = [
         FederatedClient(
             client_id,
