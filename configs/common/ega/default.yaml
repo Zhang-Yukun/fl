@@ -2,7 +2,7 @@ ega:
   artifact_path: artifacts/ega/ega_h240_v1.pt
   num_clients: auto
   block_size: 256
-  encoded_dim: 124
+  encoded_dim: 128
   hidden_dim: 2048
   residual_blocks: 4
   quantization_level: 159
@@ -19,7 +19,7 @@ ega:
   error_feedback: true
   pretrain:
     epochs: 220
-    patience: 44
+    patience: 50
     min_delta: 0.0
     batch_size: 128
     lr: 0.0002

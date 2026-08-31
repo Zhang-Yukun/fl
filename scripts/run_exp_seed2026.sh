@@ -10,6 +10,7 @@ OUTPUT_PREFIX="${OUTPUT_PREFIX:-outputs/exp}"
 TASKS_RAW="${TASKS:-rare mnist cifar10}"
 read -r -a TASKS <<< "${TASKS_RAW}"
 MODES=(single_sync multi_sync)
+BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"
 
 for task in "${TASKS[@]}"; do
   case "${task}" in
@@ -27,7 +28,7 @@ for task in "${TASKS[@]}"; do
       if [[ "${mode}" == "multi_sync" ]]; then
         mode_base_port="$((BASE_PORT + 100))"
       fi
-      BASE_ALGOS=fedavg,topk,ega       LOSS_NAME="${loss}"       MODE_SET="${mode}"       TASK_SET="${task}"       TASK_IN_BASE_OUTPUT=true       SUITE_SEED="${SUITE_SEED}"       RUNTIME_DEVICE="${RUNTIME_DEVICE}"       BASE_PORT="${mode_base_port}"       BASE_OUTPUT_ROOT="${OUTPUT_PREFIX}/${task}/${mode}/${SUITE_SEED}"       PROJECT_NAME="fl-${task}-${mode}"       bash scripts/run_controlled_suite.sh
+      BASE_ALGOS="${BASE_ALGOS}"       LOSS_NAME="${loss}"       MODE_SET="${mode}"       TASK_SET="${task}"       TASK_IN_BASE_OUTPUT=true       SUITE_SEED="${SUITE_SEED}"       RUNTIME_DEVICE="${RUNTIME_DEVICE}"       BASE_PORT="${mode_base_port}"       BASE_OUTPUT_ROOT="${OUTPUT_PREFIX}/${task}/${mode}/${SUITE_SEED}"       PROJECT_NAME="fl-${task}-${mode}"       bash scripts/run_controlled_suite.sh "$@"
     done
   done
 done

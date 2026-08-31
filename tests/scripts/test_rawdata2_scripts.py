@@ -99,6 +99,13 @@ def test_run_suite_supports_task_matrix_and_default_four_algorithms():
     for marker in (
         'RUN_TAG="${RUN_TAG:-suite}"',
         'TRACKING_TAG="${TRACKING_TAG:-suite}"',
+        'RUNTIME_SEED="${RUNTIME_SEED:-${SUITE_SEED}}"',
+        'QSGD_SEED="${QSGD_SEED:-${SUITE_SEED}}"',
+        'RANDOMK_SEED="${RANDOMK_SEED:-${SUITE_SEED}}"',
+        'ADAPTIVE_RDP_SEED="${ADAPTIVE_RDP_SEED:-${SUITE_SEED}}"',
+        'QINT8_SEED="${QINT8_SEED:-${SUITE_SEED}}"',
+        'EGA_QUANTIZATION_SEED="${EGA_QUANTIZATION_SEED:-${SUITE_SEED}}"',
+        'EGA_PRETRAIN_SEED="${EGA_PRETRAIN_SEED:-${SUITE_SEED}}"',
         'FEDERATED_ALGORITHMS="${FEDERATED_ALGORITHMS:-fedavg,topk,ega}"',
         'TASK_SET="${TASK_SET:-rare}"',
         'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS:-rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10}"',
@@ -151,23 +158,36 @@ def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
         'TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS:-rare}"',
         '训练脚本只负责 centralized + fedavg/topk/ega 训练与离线 replay 所需更新采集。',
         'TASK_IN_BASE_OUTPUT=true',
+        'RUNTIME_SEED="${RUNTIME_SEED:-${SUITE_SEED}}"',
+        'QSGD_SEED="${QSGD_SEED:-${SUITE_SEED}}"',
+        'RANDOMK_SEED="${RANDOMK_SEED:-${SUITE_SEED}}"',
+        'ADAPTIVE_RDP_SEED="${ADAPTIVE_RDP_SEED:-${SUITE_SEED}}"',
+        'QINT8_SEED="${QINT8_SEED:-${SUITE_SEED}}"',
+        'EGA_QUANTIZATION_SEED="${EGA_QUANTIZATION_SEED:-${SUITE_SEED}}"',
+        'EGA_PRETRAIN_SEED="${EGA_PRETRAIN_SEED:-${SUITE_SEED}}"',
         '攻击执行由独立 replay 脚本完成，不再区分 noattack/attack profile。',
         'STARTUP_WAIT_SECONDS=60',
         'EGA_ARTIFACT_PATH=artifacts/ega/ega_h240_v1.pt',
         'EGA_PRETRAIN_DEVICE=same',
         'EGA_PRETRAIN_EPOCHS=220',
-        'BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"',
         'TASK_SET="${TASK_SET}"',
         'TASK_CONFIG_DIRS="${TASK_CONFIG_DIRS}"',
         'TASK_CLIENT_IDS="${TASK_CLIENT_IDS}"',
         'TASK_LOSS_OVERRIDE_TASKS="${TASK_LOSS_OVERRIDE_TASKS}"',
         'TASK_IN_BASE_OUTPUT="${TASK_IN_BASE_OUTPUT}"',
         'STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS}"',
+        'RUNTIME_SEED="${RUNTIME_SEED}"',
+        'QSGD_SEED="${QSGD_SEED}"',
+        'RANDOMK_SEED="${RANDOMK_SEED}"',
+        'ADAPTIVE_RDP_SEED="${ADAPTIVE_RDP_SEED}"',
+        'QINT8_SEED="${QINT8_SEED}"',
+        'EGA_QUANTIZATION_SEED="${EGA_QUANTIZATION_SEED}"',
+        'EGA_PRETRAIN_SEED="${EGA_PRETRAIN_SEED}"',
         'EGA_ARTIFACT_PATH="${EGA_ARTIFACT_PATH}"',
         'EGA_PRETRAIN_DEVICE="${EGA_PRETRAIN_DEVICE}"',
         'EGA_PRETRAIN_EPOCHS="${EGA_PRETRAIN_EPOCHS}"',
         'FEDERATED_ALGORITHMS="${BASE_ALGOS}"',
-        'bash scripts/run_suite.sh --modes "${SUITE_MODES}" --tasks "${TASK_SET}"',
+        'bash scripts/run_suite.sh --modes "${SUITE_MODES}" --tasks "${TASK_SET}" "${PASSTHROUGH_ARGS[@]}"',
     ):
         assert marker in content
     assert 'RUN_TAG="${RUN_TAG:-capturefreq${CAPTURE_FREQUENCY_ROUNDS}}"' in content
@@ -175,6 +195,7 @@ def test_controlled_suite_forwards_tasks_and_runs_single_base_suite():
     assert 'TRACKING_TAG="${TRACKING_TAG:-suite}"' in content
     assert 'run_ega_matrix' not in content
     assert 'EVAL_MODE=' not in content
+    assert 'PASSTHROUGH_ARGS=("$@")' in content
     assert content.count('bash scripts/run_suite.sh --modes') == 1
 
 
@@ -182,7 +203,8 @@ def test_seed_wrappers_delegate_to_controlled_suite():
     for path in sorted(SCRIPT_DIR.glob('run_exp_seed*.sh')):
         content = _assert_executable(path.name)
         assert 'bash scripts/run_controlled_suite.sh' in content
-        assert 'BASE_ALGOS=fedavg,topk,ega' in content
+        assert 'BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"' in content
+        assert 'bash scripts/run_controlled_suite.sh "$@"' in content
         assert 'RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"' in content
         if '_part' in path.name:
             assert 'LOSSES=(mse)' in content
