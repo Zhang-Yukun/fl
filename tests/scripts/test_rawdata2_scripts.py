@@ -200,29 +200,36 @@ def test_removed_scripts_are_absent():
         assert not (SCRIPT_DIR / name).exists(), name
 
 
-def test_batch_analysis_wrapper_supports_single_seed_and_multiseed_outputs():
+def test_batch_analysis_wrapper_supports_task_scoped_single_seed_and_multiseed_outputs():
     content = _assert_executable("run_analyze_experiment_suite_batch.sh")
     for marker in (
-        'INPUT_ROOT="${INPUT_ROOT:-outputs/output/exp}"',
+        'INPUT_ROOT="${INPUT_ROOT:-outputs/exp}"',
         'OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/analysis/exp}"',
+        'TASKS_RAW="${TASKS:-rare mnist cifar10}"',
+        'TASK_LOSS_MAP="${TASK_LOSS_MAP:-rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy}"',
         'MODE="${MODE:-single_sync}"',
         'PROFILE="${PROFILE:-noattack}"',
         'SEEDS_RAW="${SEEDS:-42 4096 2026 8192}"',
-        'LOSSES_RAW="${LOSSES:-mse mae}"',
         'ALGORITHMS_RAW="${ALGORITHMS:-centralized fedavg topk ega}"',
         'INCLUDE_OLD="${INCLUDE_OLD:-false}"',
         '--input-root PATH',
         '--output-root PATH',
+        '--tasks "rare mnist cifar10" | rare,mnist,cifar10',
+        '--task-loss-map "rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy"',
         '--mode NAME',
         '--profile noattack|attack',
         '--seeds "42 4096 2026 8192" | 42,4096,2026,8192',
-        '--losses "mse mae" | mse,mae',
         '--algorithms "centralized fedavg topk ega" | centralized,fedavg,topk,ega',
-        'fedlab.tools.analyze_experiment_suite',
-        'local input_dir="${INPUT_ROOT}/${MODE}/${seed}/${PROFILE}_${loss}"',
-        'local output_dir="${OUTPUT_ROOT}/${MODE}/${seed}/${PROFILE}_${loss}"',
-        'local output_dir="${OUTPUT_ROOT}/${MODE}/multiseed/${PROFILE}_${loss}"',
-        'cmd+=("${INPUT_ROOT}/${MODE}/${seed}/${PROFILE}_${loss}")',
+        'lookup_named_map_value() {',
+        'task_losses() {',
+        'read -r -a TASK_LIST <<< "$(parse_list "${TASKS_RAW}")"',
+        'losses_raw="$(lookup_named_map_value "${TASK_LOSS_MAP}" "${task}")"',
+        'local input_dir="${INPUT_ROOT}/${task}/${MODE}/${seed}/${PROFILE}_${loss}"',
+        'local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/${seed}/${PROFILE}_${loss}"',
+        'local output_dir="${OUTPUT_ROOT}/${task}/${MODE}/multiseed/${PROFILE}_${loss}"',
+        'cmd+=("${input_dir}")',
+        'if [[ ! -d "${input_dir}" ]]; then',
+        'if [[ ${found_inputs} -eq 0 ]]; then',
         'cmd+=("${ALGORITHM_LIST[@]}")',
         'PYTHONPATH=. "${cmd[@]}"',
     ):

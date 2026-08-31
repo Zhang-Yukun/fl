@@ -72,6 +72,11 @@ def _create_seed_suite(root: Path, seed_name: str, *, fedavg_test: float, topk_t
     return suite_dir
 
 
+def test_best_so_far_values_use_min_for_losses_and_max_for_accuracy():
+    assert module._best_so_far_values([1.2, 1.0, 1.1, 0.9], 'mse') == [1.2, 1.0, 1.0, 0.9]
+    assert module._best_so_far_values([0.55, 0.50, 0.66, 0.63], 'accuracy') == [0.55, 0.55, 0.66, 0.66]
+
+
 def test_analyze_experiment_suite_discovers_rows_outputs_plots_and_supports_old(tmp_path):
     suite_dir = tmp_path / 'suite' / 'attack_mse'
     suite_dir.mkdir(parents=True)
@@ -126,8 +131,8 @@ def test_analyze_experiment_suite_discovers_rows_outputs_plots_and_supports_old(
     assert rows[1]['fedavg_upload_compression_ratio'] == 1.0
     assert rows[2]['fedavg_upload_compression_ratio'] == 220 / 70
     assert rows[3]['fedavg_upload_compression_ratio'] == 220 / 45
-    assert rows[3]['mse_loss_ratio_percent'] == (0.74 - 0.75) / 0.75 * 100.0
-    assert rows[3]['mae_relative_percent_vs_fedavg'] == (0.074 - 0.075) / 0.075 * 100.0
+    assert rows[3]['mse_loss_ratio_percent'] == (0.74 - 0.8) / 0.8 * 100.0
+    assert rows[3]['mae_relative_percent_vs_centralized'] == (0.074 - 0.4) / 0.4 * 100.0
     assert rows[1]['attack_primary_metric_name'] == 'budget_recovered_fraction'
     assert rows[1]['attack_overall_avg_primary_metric_value'] == 0.81
     assert rows[1]['attack_success_rate'] == 0.15
@@ -138,20 +143,26 @@ def test_analyze_experiment_suite_discovers_rows_outputs_plots_and_supports_old(
     csv_path = module.write_summary_csv(rows, output_dir / 'summary.csv', metrics=('mse', 'mae'))
     md_path = module.write_summary_markdown(rows, output_dir / 'summary.md', metrics=('mse', 'mae'))
     round_plot = module.plot_validation_metric_vs_round(records, 'mse', output_dir / 'val_mse_vs_round.png')
+    best_round_plot = module.plot_validation_metric_best_vs_round(records, 'mse', output_dir / 'val_mse_best_so_far_vs_round.png')
     upload_plot = module.plot_validation_metric_vs_upload(records, 'mse', output_dir / 'val_mse_vs_cumulative_upload.png')
+    best_upload_plot = module.plot_validation_metric_best_vs_upload(records, 'mse', output_dir / 'val_mse_best_so_far_vs_cumulative_upload.png')
     test_plot = module.plot_test_metric_bar(rows, 'mse', output_dir / 'test_mse_bar.png')
     bubble_plot = module.plot_test_metric_vs_upload_bubble(rows, 'mse', output_dir / 'test_mse_vs_upload_bubble.png')
 
     assert csv_path.exists()
     assert md_path.exists()
     assert round_plot.exists()
+    assert best_round_plot.exists()
     assert upload_plot.exists()
+    assert best_upload_plot.exists()
     assert test_plot.exists()
     assert bubble_plot.exists()
     csv_rows = list(csv.DictReader(csv_path.open('r', encoding='utf-8')))
     assert [row['label'] for row in csv_rows] == labels
     assert csv_rows[1]['attack_primary_metric_name'] == 'budget_recovered_fraction'
-    assert 'Test MAE' in md_path.read_text(encoding='utf-8')
+    md_text = md_path.read_text(encoding='utf-8')
+    assert 'Test $MAE$' in md_text
+    assert '$\\Delta$ MAE vs Centralized $(\\%)$' in md_text
     assert module.default_output_dir(suite_dir, 'mse').name == 'attack_mse_analysis_mse'
 
 
@@ -176,7 +187,7 @@ def test_analyze_experiment_suite_aggregates_multiple_seeds_with_std_outputs(tmp
     assert fedavg_row['attack_overall_avg_primary_metric_value_std'] is not None and fedavg_row['attack_overall_avg_primary_metric_value_std'] > 0.0
     assert math.isclose(fedavg_row['attack_success_rate_mean'], 0.20)
     assert math.isclose(fedavg_row['attack_evaluations_mean'], 27.0)
-    assert math.isclose(fedavg_row['mae_relative_percent_vs_fedavg_mean'], 0.0)
+    assert math.isclose(fedavg_row['mae_relative_percent_vs_centralized_mean'], (0.076 - 0.4) / 0.4 * 100.0)
 
     fedavg_curve = next(curve for curve in curves if curve.label == 'fedavg')
     assert fedavg_curve.rounds == [0, 1]
@@ -187,22 +198,37 @@ def test_analyze_experiment_suite_aggregates_multiple_seeds_with_std_outputs(tmp
     csv_path = module.write_aggregated_summary_csv(rows, output_dir / 'summary.csv', metrics=('mse', 'mae'))
     md_path = module.write_aggregated_summary_markdown(rows, output_dir / 'summary.md', metrics=('mse', 'mae'))
     round_plot = module.plot_aggregated_validation_metric_vs_round(curves, 'mse', output_dir / 'val_mse_vs_round.png')
+    best_round_plot = module.plot_aggregated_validation_metric_best_vs_round(curves, 'mse', output_dir / 'val_mse_best_so_far_vs_round.png')
     upload_plot = module.plot_aggregated_validation_metric_vs_upload(curves, 'mse', output_dir / 'val_mse_vs_cumulative_upload.png')
+    best_upload_plot = module.plot_aggregated_validation_metric_best_vs_upload(curves, 'mse', output_dir / 'val_mse_best_so_far_vs_cumulative_upload.png')
     test_plot = module.plot_aggregated_test_metric_bar(rows, 'mse', output_dir / 'test_mse_bar.png')
     bubble_plot = module.plot_aggregated_test_metric_vs_upload_bubble(rows, 'mse', output_dir / 'test_mse_vs_upload_bubble.png')
 
     assert csv_path.exists()
     assert md_path.exists()
     assert round_plot.exists()
+    assert best_round_plot.exists()
     assert upload_plot.exists()
+    assert best_upload_plot.exists()
     assert test_plot.exists()
     assert bubble_plot.exists()
     csv_rows = list(csv.DictReader(csv_path.open('r', encoding='utf-8')))
     assert [row['label'] for row in csv_rows] == ['centralized', 'fedavg', 'topk', 'ega_ed160_hd1024_rb2_q159_ema095_pt150']
     assert csv_rows[1]['test_mse_mean'] == '0.76'
     assert csv_rows[1]['attack_primary_metric_name'] == 'budget_recovered_fraction'
-    assert 'Test MAE' in md_path.read_text(encoding='utf-8')
+    md_text = md_path.read_text(encoding='utf-8')
+    assert 'Test $MAE$' in md_text
+    assert '$\\Delta$ MAE vs Centralized $(\\%)$' in md_text
+    assert '\\pm' in md_text
+    assert '\\pm' in md_text
     assert module.default_multi_output_dir([seed_a, seed_b], 'mse').name == 'multiseed_analysis_mse'
+
+
+def test_analyze_experiment_suite_argparser_accepts_cross_entropy_loss():
+    parser = module.build_argparser()
+    args = parser.parse_args(['dummy_root', '--loss', 'cross_entropy'])
+
+    assert args.loss == 'cross_entropy'
 
 
 def test_analyze_experiment_suite_supports_accuracy_only_runs(tmp_path):
@@ -237,18 +263,22 @@ def test_analyze_experiment_suite_supports_accuracy_only_runs(tmp_path):
     rows = module.build_rows(records)
     fedavg_row = next(row for row in rows if row['label'] == 'fedavg')
     assert fedavg_row['test_accuracy'] == 0.90
-    assert fedavg_row['accuracy_relative_percent_vs_fedavg'] == 0.0
+    assert fedavg_row['accuracy_relative_percent_vs_centralized'] == (0.90 - 0.88) / 0.88 * 100.0
 
     output_dir = tmp_path / 'analysis_accuracy'
     csv_path = module.write_summary_csv(rows, output_dir / 'summary.csv')
     md_path = module.write_summary_markdown(rows, output_dir / 'summary.md')
     round_plot = module.plot_validation_metric_vs_round(records, 'accuracy', output_dir / 'val_accuracy_vs_round.png')
+    best_round_plot = module.plot_validation_metric_best_vs_round(records, 'accuracy', output_dir / 'val_accuracy_best_so_far_vs_round.png')
+    best_upload_plot = module.plot_validation_metric_best_vs_upload(records, 'accuracy', output_dir / 'val_accuracy_best_so_far_vs_cumulative_upload.png')
     test_plot = module.plot_test_metric_bar(rows, 'accuracy', output_dir / 'test_accuracy_bar.png')
     assert csv_path.exists()
     assert md_path.exists()
     assert round_plot.exists()
+    assert best_round_plot.exists()
+    assert best_upload_plot.exists()
     assert test_plot.exists()
-    assert 'Test Accuracy' in md_path.read_text(encoding='utf-8')
+    assert 'Test $Accuracy$' in md_path.read_text(encoding='utf-8')
 
 
 def test_analyze_experiment_suite_script_exists_and_is_executable():

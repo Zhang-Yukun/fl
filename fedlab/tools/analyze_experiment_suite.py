@@ -46,6 +46,26 @@ METRIC_TITLES = {
     'mape': 'MAPE',
     'accuracy': 'Accuracy',
 }
+METRIC_OPTIMIZATION_OBJECTIVES = {
+    'accuracy': 'max',
+}
+
+def _metric_optimization_objective(metric: str) -> str:
+    return METRIC_OPTIMIZATION_OBJECTIVES.get(metric, 'min')
+
+def _best_so_far_values(values: list[float], metric: str) -> list[float]:
+    if not values:
+        return []
+    objective = _metric_optimization_objective(metric)
+    best_values: list[float] = []
+    best = values[0]
+    for value in values:
+        if objective == 'max':
+            best = max(best, value)
+        else:
+            best = min(best, value)
+        best_values.append(best)
+    return best_values
 @dataclass
 class RunRecord:
     label: str
@@ -190,15 +210,15 @@ def _relative_percent(value: float | None, baseline: float | None) -> float | No
 def _metric_key(metric: str) -> str:
     return f'test_{metric}'
 def _metric_relative_key(metric: str) -> str:
-    return f'{metric}_relative_percent_vs_fedavg'
+    return f'{metric}_relative_percent_vs_centralized'
 def _metric_mean_key(metric: str) -> str:
     return f'test_{metric}_mean'
 def _metric_std_key(metric: str) -> str:
     return f'test_{metric}_std'
 def _metric_relative_mean_key(metric: str) -> str:
-    return f'{metric}_relative_percent_vs_fedavg_mean'
+    return f'{metric}_relative_percent_vs_centralized_mean'
 def _metric_relative_std_key(metric: str) -> str:
-    return f'{metric}_relative_percent_vs_fedavg_std'
+    return f'{metric}_relative_percent_vs_centralized_std'
 def _resolve_attack_info(summary: dict[str, Any]) -> dict[str, Any]:
     attack_summary = summary.get('attack_summary') or {}
     target_type = summary.get('attack_target_type')
@@ -297,8 +317,11 @@ def _resolve_metrics(records: list[RunRecord], metrics: tuple[str, ...] | list[s
 def build_rows(records: list[RunRecord], metrics: tuple[str, ...] | list[str] | None = None) -> list[dict[str, Any]]:
     selected_metrics = _resolve_metrics(records, metrics)
     fedavg = next((record for record in records if record.label == 'fedavg'), None)
+    centralized = next((record for record in records if record.label == 'centralized'), None)
     if fedavg is None:
-        raise ValueError('FedAvg run is required to compute compression and loss ratios')
+        raise ValueError('FedAvg run is required to compute compression ratios')
+    if centralized is None:
+        raise ValueError('Centralized run is required to compute performance loss ratios')
     rows = []
     for record in records:
         compression_ratio = None
@@ -318,7 +341,7 @@ def build_rows(records: list[RunRecord], metrics: tuple[str, ...] | list[str] | 
         }
         for metric in selected_metrics:
             value = record.test_metrics.get(metric)
-            baseline = fedavg.test_metrics.get(metric)
+            baseline = centralized.test_metrics.get(metric)
             row[_metric_key(metric)] = value
             row[_metric_relative_key(metric)] = _relative_percent(value, baseline)
         if 'mse' in selected_metrics:
@@ -435,12 +458,69 @@ def aggregate_metric_curves(records_by_seed: list[list[RunRecord]], metric: str)
             upload_std=upload_std,
         ))
     return curves
+def aggregate_best_metric_curves(records_by_seed: list[list[RunRecord]], metric: str) -> list[AggregatedCurve]:
+    grouped: dict[str, list[RunRecord]] = defaultdict(list)
+    label_order: list[str] = []
+    for records in records_by_seed:
+        for record in records:
+            if record.label not in grouped:
+                label_order.append(record.label)
+            grouped[record.label].append(record)
+    curves: list[AggregatedCurve] = []
+    for label in label_order:
+        round_to_val: dict[int, list[float]] = defaultdict(list)
+        round_to_upload: dict[int, list[float]] = defaultdict(list)
+        for record in grouped[label]:
+            rounds, values, uploads = _validation_series(record, metric)
+            best_values = _best_so_far_values(values, metric)
+            for round_id, value, upload in zip(rounds, best_values, uploads):
+                round_to_val[round_id].append(value)
+                round_to_upload[round_id].append(float(upload))
+        rounds = sorted(round_to_val.keys())
+        round_mean: list[float] = []
+        round_std: list[float] = []
+        upload_mean: list[float] = []
+        upload_std: list[float] = []
+        kept_rounds: list[int] = []
+        for round_id in rounds:
+            value_mean, value_std = _mean_std(round_to_val[round_id])
+            upload_mean_value, upload_std_value = _mean_std(round_to_upload[round_id])
+            if value_mean is None or value_std is None or upload_mean_value is None or upload_std_value is None:
+                continue
+            kept_rounds.append(round_id)
+            round_mean.append(value_mean)
+            round_std.append(value_std)
+            upload_mean.append(upload_mean_value)
+            upload_std.append(upload_std_value)
+        curves.append(AggregatedCurve(
+            label=label,
+            rounds=kept_rounds,
+            round_mean=round_mean,
+            round_std=round_std,
+            upload_mean=upload_mean,
+            upload_std=upload_std,
+        ))
+    return curves
+
 def aggregate_curves(records_by_seed: list[list[RunRecord]]) -> list[AggregatedCurve]:
     return aggregate_metric_curves(records_by_seed, 'mse')
 def format_float(value: float | None, digits: int = 6) -> str:
     if value is None:
         return 'n/a'
     return f'{value:.{digits}f}'
+
+def format_latex_float(value: float | None, digits: int = 6, *, signed: bool = False, suffix: str = '') -> str:
+    if value is None:
+        return 'n/a'
+    spec = '+' if signed else ''
+    return f'${value:{spec}.{digits}f}{suffix}$'
+
+def format_latex_pm(mean_value: float | None, std_value: float | None, digits: int = 6, *, suffix: str = '') -> str:
+    if mean_value is None:
+        return 'n/a'
+    if std_value is None:
+        return format_latex_float(mean_value, digits=digits, suffix=suffix)
+    return f'${mean_value:.{digits}f} \\pm {std_value:.{digits}f}{suffix}$'
 def format_bytes(value: int) -> str:
     units = ['B', 'KB', 'MB', 'GB', 'TB']
     current = float(value)
@@ -520,7 +600,7 @@ def write_summary_markdown(rows: list[dict[str, Any]], output_path: Path, metric
     headers = ['Label', 'Upload', 'FedAvg/F']
     for metric in selected_metrics:
         title = METRIC_TITLES[metric]
-        headers.extend([f'Test {title}', f'{title} vs FedAvg %'])
+        headers.extend([f'Test ${title}$', f'$\\Delta$ {title} vs Centralized $(\\%)$'])
     headers.extend(['Attack Metric', 'Attack Avg', 'Attack Success', 'Attack Evals'])
     lines = [
         '| ' + ' | '.join(headers) + ' |',
@@ -530,21 +610,21 @@ def write_summary_markdown(rows: list[dict[str, Any]], output_path: Path, metric
         values = [
             str(row['label']),
             f"{row['total_upload_bytes']} ({format_bytes(int(row['total_upload_bytes']))})",
-            format_float(row['fedavg_upload_compression_ratio']),
+            format_latex_float(row['fedavg_upload_compression_ratio']),
         ]
         for metric in selected_metrics:
             values.extend([
-                format_float(row.get(_metric_key(metric))),
-                format_float(row.get(_metric_relative_key(metric))),
+                format_latex_float(row.get(_metric_key(metric))),
+                format_latex_float(row.get(_metric_relative_key(metric)), signed=True, suffix='\\%'),
             ])
         values.extend([
             row['attack_primary_metric_name'] or 'n/a',
-            format_float(row['attack_overall_avg_primary_metric_value']),
-            format_float(row['attack_success_rate']),
-            str(row['attack_evaluations']) if row['attack_evaluations'] is not None else 'n/a',
+            format_latex_float(row['attack_overall_avg_primary_metric_value']),
+            format_latex_float(row['attack_success_rate']),
+            format_latex_float(float(row['attack_evaluations'])) if row['attack_evaluations'] is not None else 'n/a',
         ])
         lines.append('| ' + ' | '.join(values) + ' |')
-    output_path.write_text('\\n'.join(lines) + '\\n', encoding='utf-8')
+    output_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return output_path
 def write_aggregated_summary_markdown(rows: list[dict[str, Any]], output_path: Path, metrics: tuple[str, ...] | list[str] | None = None) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -552,7 +632,7 @@ def write_aggregated_summary_markdown(rows: list[dict[str, Any]], output_path: P
     headers = ['Label', 'Seeds', 'Upload', 'FedAvg/F']
     for metric in selected_metrics:
         title = METRIC_TITLES[metric]
-        headers.extend([f'Test {title}', f'{title} vs FedAvg %'])
+        headers.extend([f'Test ${title}$', f'$\\Delta$ {title} vs Centralized $(\\%)$'])
     headers.extend(['Attack Metric', 'Attack Seeds', 'Attack Avg', 'Attack Success', 'Attack Evals'])
     lines = [
         '| ' + ' | '.join(headers) + ' |',
@@ -563,23 +643,23 @@ def write_aggregated_summary_markdown(rows: list[dict[str, Any]], output_path: P
         values = [
             str(row['label']),
             str(row['seed_count']),
-            (f"{upload_mean} ({format_bytes(upload_mean)}) +- {format_float(row['total_upload_bytes_std'])}" if upload_mean is not None else 'n/a'),
-            f"{format_float(row['fedavg_upload_compression_ratio_mean'])} +- {format_float(row['fedavg_upload_compression_ratio_std'])}",
+            (f"{upload_mean} ({format_bytes(upload_mean)}), $\\pm {format_float(row['total_upload_bytes_std'])}$" if upload_mean is not None else 'n/a'),
+            format_latex_pm(row['fedavg_upload_compression_ratio_mean'], row['fedavg_upload_compression_ratio_std']),
         ]
         for metric in selected_metrics:
             values.extend([
-                f"{format_float(row.get(_metric_mean_key(metric)))} +- {format_float(row.get(_metric_std_key(metric)))}",
-                f"{format_float(row.get(_metric_relative_mean_key(metric)))} +- {format_float(row.get(_metric_relative_std_key(metric)))}",
+                format_latex_pm(row.get(_metric_mean_key(metric)), row.get(_metric_std_key(metric))),
+                format_latex_pm(row.get(_metric_relative_mean_key(metric)), row.get(_metric_relative_std_key(metric)), suffix='\\%'),
             ])
         values.extend([
             row['attack_primary_metric_name'] or 'n/a',
             str(row['attack_seed_count']),
-            f"{format_float(row['attack_overall_avg_primary_metric_value_mean'])} +- {format_float(row['attack_overall_avg_primary_metric_value_std'])}",
-            f"{format_float(row['attack_success_rate_mean'])} +- {format_float(row['attack_success_rate_std'])}",
-            f"{format_float(row['attack_evaluations_mean'])} +- {format_float(row['attack_evaluations_std'])}",
+            format_latex_pm(row['attack_overall_avg_primary_metric_value_mean'], row['attack_overall_avg_primary_metric_value_std']),
+            format_latex_pm(row['attack_success_rate_mean'], row['attack_success_rate_std']),
+            format_latex_pm(row['attack_evaluations_mean'], row['attack_evaluations_std']),
         ])
         lines.append('| ' + ' | '.join(values) + ' |')
-    output_path.write_text('\\n'.join(lines) + '\\n', encoding='utf-8')
+    output_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     return output_path
 def _validation_series(record: RunRecord, metric: str) -> tuple[list[int], list[float], list[int]]:
     series = record.val_series.get(metric, [])
@@ -605,6 +685,56 @@ def plot_validation_metric_vs_round(records: list[RunRecord], metric: str, outpu
     plt.title(f'Validation {METRIC_TITLES[metric]} vs Round')
     plt.grid(True, alpha=0.25)
     if plotted:
+        plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180)
+    plt.close()
+    return output_path
+def plot_validation_metric_best_vs_round(records: list[RunRecord], metric: str, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(12, 6))
+    plotted = False
+    objective = _metric_optimization_objective(metric)
+    for record in records:
+        rounds, values, _uploads = _validation_series(record, metric)
+        best_values = _best_so_far_values(values, metric)
+        if not rounds or not best_values:
+            continue
+        plt.plot(rounds, best_values, linewidth=1.8, label=record.label)
+        plotted = True
+    if not plotted:
+        plt.text(0.5, 0.5, f'No runs with validation {METRIC_TITLES[metric]}', ha='center', va='center', transform=plt.gca().transAxes)
+    plt.xlabel('Round')
+    plt.ylabel(f'Best-so-far Validation {METRIC_TITLES[metric]}')
+    plt.title(f'Best-so-far Validation {METRIC_TITLES[metric]} vs Round ({objective})')
+    plt.grid(True, alpha=0.25)
+    if plotted:
+        plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180)
+    plt.close()
+    return output_path
+def plot_validation_metric_best_vs_upload(records: list[RunRecord], metric: str, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(12, 6))
+    plotted_any = False
+    objective = _metric_optimization_objective(metric)
+    for record in records:
+        _rounds, values, uploads = _validation_series(record, metric)
+        best_values = _best_so_far_values(values, metric)
+        if not uploads or not best_values:
+            continue
+        if max(uploads, default=0) == 0:
+            continue
+        plt.plot(uploads, best_values, linewidth=1.8, label=record.label)
+        plotted_any = True
+    if not plotted_any:
+        plt.text(0.5, 0.5, 'No runs with upload communication history', ha='center', va='center', transform=plt.gca().transAxes)
+    plt.xlabel('Cumulative Upload Bytes')
+    plt.ylabel(f'Best-so-far Validation {METRIC_TITLES[metric]}')
+    plt.title(f'Best-so-far Validation {METRIC_TITLES[metric]} vs Cumulative Upload Bytes ({objective})')
+    plt.grid(True, alpha=0.25)
+    if plotted_any:
         plt.legend()
     plt.tight_layout()
     plt.savefig(output_path, dpi=180)
@@ -704,6 +834,58 @@ def plot_aggregated_validation_metric_vs_round(curves: list[AggregatedCurve], me
     plt.title(f'Validation {METRIC_TITLES[metric]} vs Round (mean +- std)')
     plt.grid(True, alpha=0.25)
     if plotted:
+        plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180)
+    plt.close()
+    return output_path
+def plot_aggregated_validation_metric_best_vs_round(curves: list[AggregatedCurve], metric: str, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(12, 6))
+    plotted = False
+    objective = _metric_optimization_objective(metric)
+    for curve in curves:
+        if not curve.rounds or not curve.round_mean:
+            continue
+        lower = [avg - std for avg, std in zip(curve.round_mean, curve.round_std)]
+        upper = [avg + std for avg, std in zip(curve.round_mean, curve.round_std)]
+        plt.plot(curve.rounds, curve.round_mean, linewidth=1.8, label=curve.label)
+        plt.fill_between(curve.rounds, lower, upper, alpha=0.18)
+        plotted = True
+    if not plotted:
+        plt.text(0.5, 0.5, f'No runs with validation {METRIC_TITLES[metric]}', ha='center', va='center', transform=plt.gca().transAxes)
+    plt.xlabel('Round')
+    plt.ylabel(f'Best-so-far Validation {METRIC_TITLES[metric]}')
+    plt.title(f'Best-so-far Validation {METRIC_TITLES[metric]} vs Round (mean +- std, {objective})')
+    plt.grid(True, alpha=0.25)
+    if plotted:
+        plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=180)
+    plt.close()
+    return output_path
+def plot_aggregated_validation_metric_best_vs_upload(curves: list[AggregatedCurve], metric: str, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(12, 6))
+    plotted_any = False
+    objective = _metric_optimization_objective(metric)
+    for curve in curves:
+        if not curve.upload_mean or not curve.round_mean:
+            continue
+        if max(curve.upload_mean, default=0.0) == 0.0:
+            continue
+        lower = [avg - std for avg, std in zip(curve.round_mean, curve.round_std)]
+        upper = [avg + std for avg, std in zip(curve.round_mean, curve.round_std)]
+        plt.plot(curve.upload_mean, curve.round_mean, linewidth=1.8, label=curve.label)
+        plt.fill_between(curve.upload_mean, lower, upper, alpha=0.18)
+        plotted_any = True
+    if not plotted_any:
+        plt.text(0.5, 0.5, 'No runs with upload communication history', ha='center', va='center', transform=plt.gca().transAxes)
+    plt.xlabel('Cumulative Upload Bytes')
+    plt.ylabel(f'Best-so-far Validation {METRIC_TITLES[metric]}')
+    plt.title(f'Best-so-far Validation {METRIC_TITLES[metric]} vs Cumulative Upload Bytes (mean +- std, {objective})')
+    plt.grid(True, alpha=0.25)
+    if plotted_any:
         plt.legend()
     plt.tight_layout()
     plt.savefig(output_path, dpi=180)
@@ -815,7 +997,7 @@ def plot_aggregated_test_mse_vs_upload_bubble(rows: list[dict[str, Any]], output
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='Summarize and plot selected experiment-suite results.')
     parser.add_argument('root_dir', nargs='+', type=Path, help='One or more suite root directories or one noattack_* subdirectory per seed')
-    parser.add_argument('--loss', choices=('mse', 'mae'), default='mse', help='Prefer one noattack_{loss} subdirectory when present')
+    parser.add_argument('--loss', default='mse', help='Prefer one noattack_{loss} subdirectory when present; also accepts classification losses such as cross_entropy')
     parser.add_argument('--output-dir', type=Path, default=None, help='Directory used to save summary tables and plots; default is a sibling analysis directory')
     parser.add_argument('--include-old', action='store_true', help='Include *_old run directories in the summary and plots')
     parser.add_argument('--algorithms', nargs='*', default=list(DEFAULT_ALGORITHMS), help='Algorithm-name tokens used to select experiment directories by substring matching')
@@ -844,11 +1026,15 @@ def summarize_single_suite(root_dir: Path, loss: str, algorithms: tuple[str, ...
     print(f'Saved {md_path}')
     for metric in selected_metrics:
         round_plot = plot_validation_metric_vs_round(records, metric, output_dir / f'val_{metric}_vs_round.png')
+        best_round_plot = plot_validation_metric_best_vs_round(records, metric, output_dir / f'val_{metric}_best_so_far_vs_round.png')
         upload_plot = plot_validation_metric_vs_upload(records, metric, output_dir / f'val_{metric}_vs_cumulative_upload.png')
+        best_upload_plot = plot_validation_metric_best_vs_upload(records, metric, output_dir / f'val_{metric}_best_so_far_vs_cumulative_upload.png')
         test_plot = plot_test_metric_bar(rows, metric, output_dir / f'test_{metric}_bar.png')
         bubble_plot = plot_test_metric_vs_upload_bubble(rows, metric, output_dir / f'test_{metric}_vs_upload_bubble.png')
         print(f'Saved {round_plot}')
+        print(f'Saved {best_round_plot}')
         print(f'Saved {upload_plot}')
+        print(f'Saved {best_upload_plot}')
         print(f'Saved {test_plot}')
         print(f'Saved {bubble_plot}')
     for row in rows:
@@ -880,12 +1066,17 @@ def summarize_multi_suite(root_dirs: list[Path], loss: str, algorithms: tuple[st
     print(f'Saved {md_path}')
     for metric in selected_metrics:
         curves = aggregate_metric_curves(records_by_seed, metric)
+        best_curves = aggregate_best_metric_curves(records_by_seed, metric)
         round_plot = plot_aggregated_validation_metric_vs_round(curves, metric, output_dir / f'val_{metric}_vs_round.png')
+        best_round_plot = plot_aggregated_validation_metric_best_vs_round(best_curves, metric, output_dir / f'val_{metric}_best_so_far_vs_round.png')
         upload_plot = plot_aggregated_validation_metric_vs_upload(curves, metric, output_dir / f'val_{metric}_vs_cumulative_upload.png')
+        best_upload_plot = plot_aggregated_validation_metric_best_vs_upload(best_curves, metric, output_dir / f'val_{metric}_best_so_far_vs_cumulative_upload.png')
         test_plot = plot_aggregated_test_metric_bar(rows, metric, output_dir / f'test_{metric}_bar.png')
         bubble_plot = plot_aggregated_test_metric_vs_upload_bubble(rows, metric, output_dir / f'test_{metric}_vs_upload_bubble.png')
         print(f'Saved {round_plot}')
+        print(f'Saved {best_round_plot}')
         print(f'Saved {upload_plot}')
+        print(f'Saved {best_upload_plot}')
         print(f'Saved {test_plot}')
         print(f'Saved {bubble_plot}')
     for row in rows:
