@@ -103,6 +103,13 @@ def replay_saved_update_attacks(
             "but optimization metrics may drift if the original online run consumed random numbers before attacking"
         )
     attack_device = resolve_attack_device(replay_config)
+    logger.info(
+        "Replay attack runtime configured with runtime.device={} attack.device={} resolved_attack_device={} attack.seed={}",
+        replay_config.get("runtime", {}).get("device", "cpu"),
+        replay_config.get("attack", {}).get("device", "same"),
+        attack_device,
+        replay_config.get("attack", {}).get("seed"),
+    )
     max_rounds = int(replay_config.get("federated", {}).get("rounds", 0) or (max(round_indices(records)) + 1))
     attack_results = []
     for round_index in round_indices(records):

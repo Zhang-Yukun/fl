@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from loguru import logger
 from scipy.optimize import linear_sum_assignment
 from torch import nn
 
@@ -397,10 +398,20 @@ def run_attack_loop(
     batch_size = int(real_x.shape[0])
     for restart in range(restarts):
         with _attack_rng_context(device):
+            local_seed = None
             if seed is not None:
                 local_seed = int(seed) + restart
                 torch.manual_seed(local_seed)
                 seed_cuda_device(local_seed, device)
+            logger.info(
+                "Starting attack {} restart={}/{} device={} attack.seed={} effective_seed={}",
+                name,
+                restart + 1,
+                restarts,
+                device,
+                seed,
+                local_seed,
+            )
             model = _prepare_attack_model(config, state, device)
             dummy_x = torch.randn_like(real_x, device=device, requires_grad=True)
             optimize_dummy_y = bool(optimize_y)
