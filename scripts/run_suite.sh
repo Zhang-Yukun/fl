@@ -15,6 +15,9 @@ RUN_NAME_SUFFIX="${RUN_NAME_SUFFIX:-}"
 BASE_PORT="${BASE_PORT:-58000}"
 STARTUP_WAIT_SECONDS="${STARTUP_WAIT_SECONDS:-5}"
 POLL_SECONDS="${POLL_SECONDS:-1.0}"
+MONITOR_GRPC_PORT_TRAFFIC="${MONITOR_GRPC_PORT_TRAFFIC:-false}"
+GRPC_MONITOR_INTERFACE="${GRPC_MONITOR_INTERFACE:-any}"
+GRPC_MONITOR_PID=""
 RUN_CENTRALIZED="${RUN_CENTRALIZED:-true}"
 ROUNDS="${ROUNDS:-}"
 PATIENCE="${PATIENCE:-500}"
@@ -83,6 +86,7 @@ Examples:
   TRAIN_OPTIMIZER=adam TRAIN_LR=0.001 bash SCRIPT --modes centralized,single_sync
   SUITE_SEED=42 bash SCRIPT --modes single_sync
   SHUFFLE_TRAIN=true MODEL_DROPOUT=0.1 bash SCRIPT --modes single_sync
+  MONITOR_GRPC_PORT_TRAFFIC=true bash SCRIPT --modes grpc_sync
   TASK_SET=rare,mnist,cifar10 bash SCRIPT --modes single_sync
   TASK_CONFIG_DIRS="rare=configs/rare;mnist=configs/mnist;cifar10=configs/cifar10" bash SCRIPT --modes single_sync
   FEDERATED_ALGORITHMS=fedavg,ega bash SCRIPT --modes single_sync
@@ -287,6 +291,42 @@ task_uses_loss_override() {
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+start_grpc_port_monitor() {
+  local address="$1"
+  local outdir="$2"
+  if [[ "${MONITOR_GRPC_PORT_TRAFFIC}" != "true" ]]; then
+    return 1
+  fi
+  local port="${address##*:}"
+  local monitor_dir="${outdir}/grpc_port_traffic"
+  mkdir -p "${monitor_dir}"
+  PYTHONPATH=. bash scripts/monitor_tcp_port_traffic.sh \
+    --port "${port}" \
+    --output-dir "${monitor_dir}" \
+    --interface "${GRPC_MONITOR_INTERFACE}" \
+    --python-bin "${PYTHON_BIN}" > "${monitor_dir}/monitor.log" 2>&1 &
+  local monitor_pid=$!
+  sleep 1
+  if ! kill -0 "${monitor_pid}" 2>/dev/null; then
+    GRPC_MONITOR_PID=""
+    log "grpc port monitor failed to start for ${address}; see ${monitor_dir}/monitor.log" >&2
+    return 1
+  fi
+  GRPC_MONITOR_PID="${monitor_pid}"
+  log "started grpc port monitor pid=${monitor_pid} address=${address} dir=${monitor_dir}" >&2
+}
+
+stop_grpc_port_monitor() {
+  local monitor_pid="$1"
+  if [[ -z "${monitor_pid}" ]]; then
+    return 0
+  fi
+  if kill -0 "${monitor_pid}" 2>/dev/null; then
+    kill "${monitor_pid}" 2>/dev/null || true
+    wait "${monitor_pid}" 2>/dev/null || true
+  fi
 }
 
 effective_run_name() {
@@ -617,6 +657,7 @@ run_grpc() {
   local address="127.0.0.1:${port}"
   local server_pid=""
   local client_pids=()
+  local monitor_pid=""
 
   mkdir -p "${outdir}"
 
@@ -640,6 +681,13 @@ run_grpc() {
     server_cmd+=("${line}")
   done < <(federated_common_args "${task}")
   server_cmd+=("$@")
+
+  GRPC_MONITOR_PID=""
+  if start_grpc_port_monitor "${address}" "${outdir}"; then
+    monitor_pid="${GRPC_MONITOR_PID}"
+  else
+    monitor_pid=""
+  fi
 
   log "starting ${run_name} on ${address}"
   PYTHONPATH=. "${server_cmd[@]}" > "${outdir}/server.log" 2>&1 &
@@ -687,6 +735,7 @@ run_grpc() {
     log "${run_name} failed in a client process, cleaning up"
     cleanup_pids "${server_pid}" "${client_pids[@]}"
     wait "${server_pid}" 2>/dev/null || true
+    stop_grpc_port_monitor "${monitor_pid}"
     return "${status}"
   fi
 
@@ -694,9 +743,11 @@ run_grpc() {
     status=$?
     log "${run_name} failed in the server process"
     cleanup_pids "${client_pids[@]}"
+    stop_grpc_port_monitor "${monitor_pid}"
     return "${status}"
   fi
 
+  stop_grpc_port_monitor "${monitor_pid}"
   log "finished ${run_name}"
 }
 

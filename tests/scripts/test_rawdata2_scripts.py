@@ -7,6 +7,7 @@ SCRIPT_DIR = Path(__file__).parents[2] / "scripts"
 CURRENT_SCRIPTS = (
     "run_analyze_experiment_suite_batch.sh",
     "run_replay_saved_update_batch.sh",
+    "monitor_tcp_port_traffic.sh",
     "run_controlled_suite.sh",
     "run_exp_seed42.sh",
     "run_exp_seed42_part1.sh",
@@ -109,6 +110,11 @@ def test_run_suite_supports_task_matrix_and_default_four_algorithms():
         'parse_named_map_keys() {',
         'lookup_named_map_value() {',
         'list_named_values() {',
+        'start_grpc_port_monitor() {',
+        'stop_grpc_port_monitor() {',
+        'bash scripts/monitor_tcp_port_traffic.sh',
+        'grpc_port_traffic',
+        'started grpc port monitor pid=${monitor_pid} address=${address} dir=${monitor_dir}" >&2',
         'selected_tasks() {',
         'task_config_path() {',
         'task_client_ids() {',
@@ -189,6 +195,25 @@ def test_seed_wrappers_delegate_to_controlled_suite():
 def test_removed_scripts_are_absent():
     for name in REMOVED_SCRIPTS:
         assert not (SCRIPT_DIR / name).exists(), name
+
+
+def test_port_traffic_monitor_script_captures_tcpdump_and_writes_summary():
+    content = _assert_executable("monitor_tcp_port_traffic.sh")
+    for marker in (
+        'TCPDUMP_BIN="${TCPDUMP_BIN:-tcpdump}"',
+        'INTERFACE="${INTERFACE:-any}"',
+        '--port PORT',
+        '--output-dir DIR',
+        'RAW_LOG_NAME="${RAW_LOG_NAME:-grpc_port_traffic.tcpdump.log}"',
+        'SUMMARY_NAME="${SUMMARY_NAME:-grpc_port_traffic.summary.json}"',
+        'summarize_capture() {',
+        'sent_payload_bytes',
+        'received_payload_bytes',
+        'tcpdump_stderr',
+        '"${TCPDUMP_BIN}" -n -l -tt -i "${INTERFACE}" "tcp port ${PORT}"',
+        'trap cleanup EXIT HUP INT TERM',
+    ):
+        assert marker in content
 
 
 def test_batch_replay_wrapper_scans_saved_update_runs_and_splits_dlg_idlg_outputs():
