@@ -10,13 +10,13 @@ from typing import Sequence
 
 from loguru import logger
 
+from fedlab.attack.artifacts import load_captured_update_records
+from fedlab.attack.tasks import build_update_attack_round_task
 from fedlab.federated.algorithms import (
     _execute_attack_round_task,
     _resolve_attack_device,
-    build_update_attack_round_task,
     configure_random_seed,
     configure_torch_runtime,
-    load_captured_update_records,
 )
 from fedlab.security.attack_common import save_attack_artifacts, summarize_attack_results
 from fedlab.utils.artifacts import save_experiment_config
