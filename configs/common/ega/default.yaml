@@ -1,11 +1,13 @@
 ega:
   artifact_path: artifacts/ega/ega_h240_v1.pt
+  num_clients: auto
   block_size: 256
-  encoded_dim: 168
+  encoded_dim: 124
   hidden_dim: 2048
   residual_blocks: 4
   quantization_level: 159
   encode_buffers: false
+  buffer_tolerance: 0.0
   normalization: 0.00025
   initial_normalization: 0.00025
   min_normalization: 0.000001

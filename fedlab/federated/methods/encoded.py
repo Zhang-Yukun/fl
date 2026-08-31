@@ -38,6 +38,16 @@ def _quantization_generator(config: dict[str, Any], round_index: int, client_id:
     return generator
 
 
+def _resolve_ega_total_clients(config: dict[str, Any]) -> int:
+    """Resolve the configured EGA client count, allowing an explicit auto mode."""
+
+    ega_cfg = config.get("ega", {})
+    configured = ega_cfg.get("num_clients", "auto")
+    if str(configured).strip().lower() == "auto":
+        return int(len(config.get("data", {}).get("clients", [])) or 1)
+    return max(1, int(configured))
+
+
 def _ensure_client_ega_codec(*, client: Any, round_context: dict[str, Any]) -> None:
     """Initialize one client-side EGA codec from the server bootstrap payload."""
 
@@ -79,7 +89,7 @@ class EGAFedAvgMethod(FederatedMethod):
         """Initialize the server-owned EGA bookkeeping and optionally defer codec loading."""
 
         ega_cfg = server.config.get("ega", {})
-        total_clients = int(ega_cfg.get("num_clients", len(server.config.get("data", {}).get("clients", [])) or 1))
+        total_clients = _resolve_ega_total_clients(server.config)
         server.ega_total_clients = total_clients
         server.ega_codec = None
         server.ega_codec_bootstrap_payload = None
