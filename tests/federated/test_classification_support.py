@@ -180,15 +180,15 @@ def test_federated_run_supports_classification_task(tmp_path, monkeypatch, algor
     captures = load_captured_update_records(output_dir)
 
     assert 'accuracy' in summary['test']
-    assert summary['attack_evaluations'] == 0
+    assert 'attack_evaluations' not in summary
     assert len(captures) == len(client_ids)
     assert {record['client_id'] for record in captures} == set(client_ids)
     assert (output_dir / 'saved_updates' / 'index.json').exists()
 
 
-def test_federated_run_supports_classification_attacks(tmp_path):
+def test_federated_run_supports_classification_update_capture_for_replay(tmp_path):
     _prepare_classification_split_dir(tmp_path, client_ids=['m1', 'm2', 'm3'], image_shape=(1, 4, 4), num_classes=3)
-    output_dir = tmp_path / 'output_attack'
+    output_dir = tmp_path / 'output_capture'
     config = _classification_config(
         tmp_path,
         output_dir,
@@ -197,24 +197,12 @@ def test_federated_run_supports_classification_attacks(tmp_path):
         num_classes=3,
         algorithm='fedavg',
     )
-    config['attack'].update({
-        'enabled': True,
-        'target_type': 'update_payload',
-        'frequency_rounds': 1,
-        'max_samples': 1,
-        'clients_per_round': 1,
-        'client_selection': 'first',
-        'steps': 1,
-        'optimizer': 'adam',
-        'local_optimizer': 'adam',
-        'async_enabled': False,
-        'device': 'cpu',
-    })
 
     summary = run_federated(config)
+    captures = load_captured_update_records(output_dir)
 
-    assert summary['attack_evaluations'] == 2
-    assert summary['attack_target_type'] == 'update_payload'
-    assert summary['attack_primary_metric_name'] == 'budget_recovered_fraction'
-    assert (output_dir / 'attack_results.json').exists()
-    assert sorted((output_dir / 'attack_artifacts').rglob('*.pt'))
+    assert 'attack_evaluations' not in summary
+    assert len(captures) == 3
+    assert {record['client_id'] for record in captures} == {'m1', 'm2', 'm3'}
+    assert (output_dir / 'saved_updates' / 'index.json').exists()
+    assert not (output_dir / 'attack_results.json').exists()

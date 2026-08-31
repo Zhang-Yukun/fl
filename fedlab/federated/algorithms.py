@@ -25,8 +25,6 @@ from fedlab.security.attack_common import (
     apply_set_recovery_metrics,
     attack_success_rate,
     attach_attack_metadata,
-    save_attack_artifacts,
-    summarize_attack_results,
 )
 from fedlab.security.registry import (
     compute_recovery_metric_matrix,
@@ -289,9 +287,6 @@ def _build_federated_summary(
     total_elapsed: float,
     best_round: int,
     best_metrics: dict[str, float],
-    attack_records: list[dict[str, Any]],
-    attack_summary: dict[str, Any],
-    attack_target_type: str,
     protocol_test_metrics: dict[str, float] | None = None,
     transport: str | None = None,
 ) -> dict[str, Any]:
@@ -312,14 +307,6 @@ def _build_federated_summary(
         "last_parameter_upload_compression_ratio": history[-1].parameter_upload_compression_ratio if history else 0.0,
         "last_parameter_total_communication_ratio": history[-1].parameter_total_communication_ratio if history else 0.0,
         **_round_history_communication_summary(history),
-        "attack_target_type": attack_summary.get("target_type", attack_target_type),
-        "attack_primary_metric_name": attack_summary["primary_metric_name"],
-        "attack_primary_metric_direction": attack_summary["primary_metric_direction"],
-        "attack_overall_avg_primary_metric_value": attack_summary["overall_avg_primary_metric_value"],
-        "attack_overall_best_primary_metric_value": attack_summary["overall_best_primary_metric_value"],
-        "attack_success_rate": attack_summary["overall_success_rate"],
-        "attack_evaluations": len(attack_records),
-        "attack_summary": attack_summary,
         "privacy_accountant": None if last_privacy is None else last_privacy.privacy_accountant,
         "privacy_epsilon": None if last_privacy is None else last_privacy.privacy_epsilon,
         "privacy_delta": None if last_privacy is None else last_privacy.privacy_delta,
@@ -368,8 +355,6 @@ def _save_periodic_federated_snapshot(
     best_global_state: StateDict,
     best_metrics: dict[str, float],
     best_round: int,
-    attack_results: list[Any],
-    attack_target_type: str,
     transport: str | None = None,
 ) -> None:
     """Persist a periodic round snapshot without waiting for unfinished async attacks."""
@@ -378,21 +363,13 @@ def _save_periodic_federated_snapshot(
         return
     test_metrics = server.test_global()
     protocol_test_metrics = test_metrics
-    attack_records = [result.to_record() for result in attack_results]
-    attack_summary = summarize_attack_results(
-        attack_results,
-        float(config.get("attack", {}).get("success_rate_threshold", 0.05)),
-        float(config.get("attack", {}).get("overall_success_rate_threshold", config.get("attack", {}).get("success_rate_threshold", 0.05))),
-    )
+    attack_records: list[dict[str, Any]] = []
     summary = _build_federated_summary(
         server=server,
         test_metrics=test_metrics,
         total_elapsed=time.perf_counter() - start_time,
         best_round=best_round,
         best_metrics=best_metrics,
-        attack_records=attack_records,
-        attack_summary=attack_summary,
-        attack_target_type=attack_target_type,
         protocol_test_metrics=protocol_test_metrics,
         transport=transport,
     )
@@ -1475,13 +1452,11 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     compressed = is_compressed_algorithm(config)
     method = build_method(str(config["federated"].get("algorithm", "fedavg")))
     algorithm = method.name
-    attack_target_type = _attack_target_type(config)
     logger.info(
-        "Starting federated run algorithm={} clients={} compressed_uploads={} attack_target_type={}",
+        "Starting federated run algorithm={} clients={} compressed_uploads={}",
         algorithm,
         [client.client_id for client in clients],
         compressed,
-        attack_target_type,
     )
     tracker.log({
         "run/algorithm": algorithm,
@@ -1494,7 +1469,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     primary_metric_mode = _configured_primary_metric_mode(config)
     stopper = EarlyStopper(int(config["training"].get("patience", 5)), float(config["training"].get("min_delta", 0.0)), mode=primary_metric_mode)
     max_rounds = int(config["federated"].get("rounds", 20))
-    attack_manager = AsyncAttackManager(config, tracker)
     best_global_state = _clone_state(server.global_state)
     best_metrics: dict[str, float] | None = None
     best_round = -1
@@ -1562,8 +1536,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             round_context=round_context,
         )
         save_captured_update_records(output_dir, captured_update_records)
-        attack_task = build_update_attack_round_task(config, captured_update_records, round_index, max_rounds)
-        attack_manager.submit(attack_task)
         _save_periodic_federated_snapshot(
             output_dir=output_dir,
             config=config,
@@ -1573,8 +1545,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
             best_global_state=best_global_state,
             best_metrics=best_metrics,
             best_round=best_round,
-            attack_results=attack_manager.attack_results,
-            attack_target_type=attack_target_type,
         )
         if stopper.update(metrics[primary_metric_name]):
             logger.info("Early stopping at round {}", round_index)
@@ -1584,7 +1554,6 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     test_metrics = server.test_global()
     protocol_test_metrics = test_metrics
     final_test_step = max(len(server.history), best_round + 1)
-    attack_manager.finalize()
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
     final_log_payload = {**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed}
@@ -1605,23 +1574,12 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
         )
     except Exception as exc:
         logger.debug("Skip federated prediction plot: {}", exc)
-    attack_records = save_attack_artifacts(output_dir, attack_manager.attack_results)
-    with (output_dir / "attack_results.json").open("w", encoding="utf-8") as handle:
-        json.dump(attack_records, handle, ensure_ascii=False, indent=2)
-    attack_summary = summarize_attack_results(
-        attack_manager.attack_results,
-        float(config.get("attack", {}).get("success_rate_threshold", 0.05)),
-        float(config.get("attack", {}).get("overall_success_rate_threshold", config.get("attack", {}).get("success_rate_threshold", 0.05))),
-    )
     summary = _build_federated_summary(
         server=server,
         test_metrics=test_metrics,
         total_elapsed=total_elapsed,
         best_round=best_round,
         best_metrics=best_metrics,
-        attack_records=attack_records,
-        attack_summary=attack_summary,
-        attack_target_type=attack_target_type,
         protocol_test_metrics=protocol_test_metrics,
     )
     tracker.log({

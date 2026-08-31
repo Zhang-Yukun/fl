@@ -251,8 +251,7 @@ def test_grpc_coordinator_waits_for_stop_acks(tmp_path):
             "experiment.output_dir=" + str(tmp_path),
             "federated.algorithm=fedavg",
             "federated.rounds=1",
-            "attack.enabled=false",
-            "tracking.enabled=false",
+                    "tracking.enabled=false",
             "runtime.device=cpu",
         ],
     )
@@ -336,8 +335,8 @@ def test_grpc_coordinator_saves_periodic_snapshot(tmp_path):
     assert (snapshot_dir / "resume_state.pt").exists()
 
 
-def test_grpc_coordinator_saves_attack_results(tmp_path):
-    """The gRPC coordinator should persist DLG/iDLG artifacts when attacks are enabled."""
+def test_grpc_coordinator_does_not_persist_online_attack_results(tmp_path):
+    """The gRPC coordinator should only persist update captures for offline replay."""
 
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
@@ -367,19 +366,14 @@ def test_grpc_coordinator_saves_attack_results(tmp_path):
     response = _submit_one_round(coordinator, config)
 
     assert response["stop"] is True
-    attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
-    artifacts = sorted((tmp_path / "attack_artifacts").rglob("*.pt"))
-    assert artifacts
-    assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
-    assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert summary["attack_evaluations"] == len(attack_results) == 6
-    assert summary["attack_target_type"] == "update_payload"
-    assert summary["attack_primary_metric_name"] == "budget_recovered_fraction"
+    assert 'attack_evaluations' not in summary
+    assert not (tmp_path / 'attack_results.json').exists()
+    assert not (tmp_path / 'attack_artifacts').exists()
 
 
 def test_grpc_coordinator_saves_update_captures_when_attacks_disabled(tmp_path):
-    """The gRPC server should persist per-client update captures even in noattack mode."""
+    """The gRPC server should persist per-client update captures for offline replay."""
 
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
@@ -597,12 +591,10 @@ def test_grpc_matches_single_process_fedavg_when_randomness_disabled(tmp_path):
 
     local_metrics = json.loads((local_dir / "metrics.json").read_text(encoding="utf-8"))
     grpc_metrics = json.loads((grpc_dir / "metrics.json").read_text(encoding="utf-8"))
-    local_attacks = json.loads((local_dir / "attack_results.json").read_text(encoding="utf-8"))
-    grpc_attacks = json.loads((grpc_dir / "attack_results.json").read_text(encoding="utf-8"))
     grpc_summary = json.loads((grpc_dir / "summary.json").read_text(encoding="utf-8"))
 
-    assert sorted((local_dir / "attack_artifacts").rglob("*.pt"))
-    assert sorted((grpc_dir / "attack_artifacts").rglob("*.pt"))
+    assert sorted((local_dir / "saved_updates").rglob("round_*.pt"))
+    assert sorted((grpc_dir / "saved_updates").rglob("round_*.pt"))
     assert local_metrics[0]["algorithm"] == grpc_metrics[0]["algorithm"] == "fedavg"
     assert local_metrics[0]["train_loss"] == pytest.approx(grpc_metrics[0]["train_loss"])
     assert local_metrics[0]["val_mse"] == pytest.approx(grpc_metrics[0]["val_mse"])
@@ -611,13 +603,8 @@ def test_grpc_matches_single_process_fedavg_when_randomness_disabled(tmp_path):
     assert local_summary["test"]["mse"] == pytest.approx(grpc_summary["test"]["mse"])
     assert local_summary["test"]["mae"] == pytest.approx(grpc_summary["test"]["mae"])
     assert local_summary["test"]["mape"] == pytest.approx(grpc_summary["test"]["mape"])
-    assert local_summary["attack_overall_avg_primary_metric_value"] == pytest.approx(grpc_summary["attack_overall_avg_primary_metric_value"])
-    assert local_summary["attack_success_rate"] == pytest.approx(grpc_summary["attack_success_rate"])
-    assert [entry["name"] for entry in local_attacks] == [entry["name"] for entry in grpc_attacks]
-    for local_entry, grpc_entry in zip(local_attacks, grpc_attacks):
-        assert local_entry["target_type"] == grpc_entry["target_type"]
-        assert local_entry["primary_metric_value"] == pytest.approx(grpc_entry["primary_metric_value"])
-        assert local_entry["objective_mse"] == pytest.approx(grpc_entry["objective_mse"])
+    assert 'attack_evaluations' not in local_summary
+    assert 'attack_evaluations' not in grpc_summary
 
 
 def test_real_grpc_sync_and_async_match_when_randomness_disabled(tmp_path):

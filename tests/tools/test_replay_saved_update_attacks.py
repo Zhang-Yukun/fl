@@ -31,10 +31,9 @@ dlg_module = _load_module(DLG_SCRIPT_PATH, "replay_saved_update_dlg")
 idlg_module = _load_module(IDLG_SCRIPT_PATH, "replay_saved_update_idlg")
 
 
-def _deterministic_overrides(output_dir: Path, attack_enabled: bool) -> list[str]:
+def _deterministic_overrides(output_dir: Path) -> list[str]:
     return [
         f"experiment.output_dir={output_dir}",
-        f"attack.enabled={'true' if attack_enabled else 'false'}",
         "attack.target_type=update_payload",
         "attack.frequency_rounds=1",
         "attack.max_samples=1",
@@ -70,16 +69,13 @@ def _run_script(entry_module, script_name: str, source_dir: Path, replay_dir: Pa
     return json.loads(stdout.getvalue())
 
 
-def test_replay_saved_update_attacks_matches_inline_results(tmp_path):
+def test_replay_saved_update_attacks_runs_from_saved_updates_only(tmp_path):
     base_config = Path(__file__).parents[2] / "configs" / "test.yaml"
-    online_dir = tmp_path / "online"
     source_dir = tmp_path / "source"
     replay_dir = tmp_path / "replay"
 
-    online_config = load_config(base_config, _deterministic_overrides(online_dir, attack_enabled=True))
-    source_config = load_config(base_config, _deterministic_overrides(source_dir, attack_enabled=False))
+    source_config = load_config(base_config, _deterministic_overrides(source_dir))
 
-    run_federated(online_config)
     run_federated(source_config)
 
     captures = load_captured_update_records(source_dir)
@@ -97,30 +93,14 @@ def test_replay_saved_update_attacks_matches_inline_results(tmp_path):
     assert payload["summary_path"] == str(replay_dir / "summary.json")
 
     source_summary = json.loads((source_dir / "summary.json").read_text(encoding="utf-8"))
-    online_results = json.loads((online_dir / "attack_results.json").read_text(encoding="utf-8"))
     replay_results = json.loads((replay_dir / "attack_results.json").read_text(encoding="utf-8"))
     replay_summary = json.loads((replay_dir / "attack_summary.json").read_text(encoding="utf-8"))
     replay_run_summary = json.loads((replay_dir / "summary.json").read_text(encoding="utf-8"))
 
-    assert len(online_results) == len(replay_results) == 2
-    for online, replay in zip(online_results, replay_results):
-        assert online["name"] == replay["name"]
-        assert online["client_id"] == replay["client_id"]
-        assert online["round_index"] == replay["round_index"]
-        assert online["sample_index"] == replay["sample_index"]
-        assert online["target_type"] == replay["target_type"] == "update_payload"
-        assert online["primary_metric_name"] == replay["primary_metric_name"]
-        assert online["primary_metric_value"] == pytest.approx(replay["primary_metric_value"])
-        assert online["matched_reference_metric_value"] == pytest.approx(replay["matched_reference_metric_value"])
-        assert online["matched_reference_metric_min_value"] == pytest.approx(replay["matched_reference_metric_min_value"])
-        assert online["budget_recovered_fraction"] == pytest.approx(replay["budget_recovered_fraction"])
-        assert online["objective_mse"] == pytest.approx(replay["objective_mse"])
-        assert online["artifact_path"] == replay["artifact_path"]
-
+    assert len(replay_results) == 2
+    assert {record["name"] for record in replay_results} == {"DLG", "iDLG"}
+    assert {record["target_type"] for record in replay_results} == {"update_payload"}
     assert replay_summary["primary_metric_name"] == "budget_recovered_fraction"
-    assert replay_summary["overall_avg_primary_metric_value"] == pytest.approx(
-        sum(record["primary_metric_value"] for record in online_results) / len(online_results)
-    )
     assert replay_run_summary["test"] == source_summary["test"]
     assert replay_run_summary["rounds"] == source_summary["rounds"]
     assert replay_run_summary["attack_primary_metric_name"] == replay_summary["primary_metric_name"]
@@ -143,7 +123,7 @@ def test_dedicated_replay_scripts_filter_methods(tmp_path):
     dlg_dir = tmp_path / "dlg"
     idlg_dir = tmp_path / "idlg"
 
-    source_config = load_config(base_config, _deterministic_overrides(source_dir, attack_enabled=False))
+    source_config = load_config(base_config, _deterministic_overrides(source_dir))
     run_federated(source_config)
 
     dlg_payload = _run_script(dlg_module, "replay_saved_update_dlg", source_dir, dlg_dir)

@@ -40,7 +40,7 @@ def test_one_round_federated_run(tmp_path):
     config["experiment"]["output_dir"] = str(tmp_path)
     result = run_federated(config)
     assert result["rounds"] == 1
-    assert result["last_parameter_download_compression_ratio"] == 1.0
+    assert 0.0 < result["last_parameter_download_compression_ratio"] < 1.0
     assert result["last_parameter_upload_compression_ratio"] == 1.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     assert metrics[0]["total_upload_bytes"] > 0
@@ -115,15 +115,20 @@ def test_standard_fedavg_uses_dense_updates(tmp_path):
     result = run_federated(config)
     assert result["last_parameter_upload_compression_ratio"] == 1.0
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
-    assert all(client["aggregation_payload_kind"] == "dense_update" for client in metrics[0]["clients"])
-    assert metrics[0]["total_download_bytes"] == metrics[0]["fedavg_reference_download_bytes"]
-    assert metrics[0]["total_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
-    assert metrics[0]["total_parameter_download_bytes"] == metrics[0]["fedavg_reference_download_bytes"]
-    assert metrics[0]["total_parameter_upload_bytes"] == metrics[0]["fedavg_reference_upload_bytes"]
-    assert metrics[0]["parameter_download_compression_ratio"] == 1.0
-    assert metrics[0]["parameter_upload_compression_ratio"] == 1.0
-    assert 0.0 < metrics[0]["transport_download_compression_ratio"] < 1.0
-    assert 0.0 < metrics[0]["transport_upload_compression_ratio"] < 1.0
+    round_metrics = metrics[0]
+    context_download_bytes = sum(
+        client["parameter_download_bytes"] - client["dense_download_reference_bytes"]
+        for client in round_metrics["clients"]
+    )
+    assert all(client["aggregation_payload_kind"] == "dense_update" for client in round_metrics["clients"])
+    assert round_metrics["total_upload_bytes"] == round_metrics["fedavg_reference_upload_bytes"]
+    assert round_metrics["total_parameter_upload_bytes"] == round_metrics["fedavg_reference_upload_bytes"]
+    assert round_metrics["total_download_bytes"] == round_metrics["fedavg_reference_download_bytes"] + context_download_bytes
+    assert round_metrics["total_parameter_download_bytes"] == round_metrics["fedavg_reference_download_bytes"] + context_download_bytes
+    assert 0.0 < round_metrics["parameter_download_compression_ratio"] < 1.0
+    assert round_metrics["parameter_upload_compression_ratio"] == 1.0
+    assert 0.0 < round_metrics["transport_download_compression_ratio"] < 1.0
+    assert 0.0 < round_metrics["transport_upload_compression_ratio"] < 1.0
 
 
 def test_fedavg_dense_update_bytes_remain_exact_after_first_round(tmp_path):
@@ -148,9 +153,13 @@ def test_fedavg_dense_update_bytes_remain_exact_after_first_round(tmp_path):
     assert result["last_parameter_upload_compression_ratio"] == 1.0
     assert len(metrics) == 2
     for round_metrics in metrics:
-        assert round_metrics["total_parameter_download_bytes"] == round_metrics["fedavg_reference_download_bytes"]
+        context_download_bytes = sum(
+            client["parameter_download_bytes"] - client["dense_download_reference_bytes"]
+            for client in round_metrics["clients"]
+        )
+        assert round_metrics["total_parameter_download_bytes"] == round_metrics["fedavg_reference_download_bytes"] + context_download_bytes
         assert round_metrics["total_parameter_upload_bytes"] == round_metrics["fedavg_reference_upload_bytes"]
-        assert round_metrics["parameter_download_compression_ratio"] == 1.0
+        assert 0.0 < round_metrics["parameter_download_compression_ratio"] < 1.0
         assert round_metrics["parameter_upload_compression_ratio"] == 1.0
         for client in round_metrics["clients"]:
             assert client["parameter_upload_bytes"] == client["dense_upload_reference_bytes"]
@@ -646,49 +655,27 @@ def test_federated_run_saves_periodic_snapshot(tmp_path):
     assert (snapshot_dir / "resume_state.pt").exists()
 
 
-def test_federated_run_saves_attack_results_for_update_payloads(tmp_path):
+def test_federated_run_saves_update_captures_for_offline_replay(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
-            "attack.enabled=true",
-            "attack.target_type=update_payload",
-            "attack.frequency_rounds=1",
-            "attack.max_samples=1",
-            "attack.max_samples_cap=8",
-            "attack.steps=1",
-            "attack.optimizer=adam",
-            "attack.local_optimizer=adam",
             "federated.algorithm=fedavg",
             "federated.rounds=1",
         ],
     )
     config["experiment"]["output_dir"] = str(tmp_path)
+
     result = run_federated(config)
-    attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
-    assert {entry["name"] for entry in attack_results} == {"DLG", "iDLG"}
-    assert {entry["target_type"] for entry in attack_results} == {"update_payload"}
-    assert {"primary_metric_name", "primary_metric_value", "iterations", "time_seconds", "objective_mse", "budget_recovered_fraction", "matched_reference_metric_value", "matched_reference_metric_min_value"} <= set(attack_results[0])
-    assert "mse" not in attack_results[0]
-    assert "metric_name" not in attack_results[0]
-    assert result["attack_evaluations"] == 6
-    assert result["attack_target_type"] == "update_payload"
-    assert result["attack_primary_metric_name"] == "budget_recovered_fraction"
-    assert result["attack_primary_metric_direction"] == "lower_is_more_private"
-    assert result["attack_overall_avg_primary_metric_value"] is not None
-    assert set(result["attack_summary"]["methods"]) == {"DLG", "iDLG"}
-    assert result["attack_summary"]["primary_metric_name"] == "budget_recovered_fraction"
-    assert result["attack_summary"]["target_type"] == "update_payload"
-    assert result["attack_summary"]["success_rate_threshold"] == 0.05
-    assert result["attack_summary"]["overall_success_rate_threshold"] == 0.05
-    assert result["attack_summary"]["overall_avg_budget_recovered_fraction"] is not None
-    assert "overall_avg_nearest_client_train_mse" not in result["attack_summary"]
-    assert result["attack_summary"]["methods"]["DLG"]["total_count"] == 3
-    assert set(result["attack_summary"]["clients"]) == {"Nd2O3", "CeO2", "La2O3"}
-    assert result["attack_summary"]["clients"]["Nd2O3"]["methods"]["DLG"]["total_count"] == 1
+    captures = algorithms_module.load_captured_update_records(tmp_path)
+
+    assert 'attack_evaluations' not in result
+    assert len(captures) == 3
+    assert {record['client_id'] for record in captures} == {'Nd2O3', 'CeO2', 'La2O3'}
+    assert (tmp_path / 'saved_updates' / 'index.json').exists()
+    assert not (tmp_path / 'attack_results.json').exists()
 
 
-
-def test_federated_run_supports_configured_attack_method_subset(tmp_path):
+def test_federated_run_ignores_online_attack_execution_flags(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
         [
@@ -706,10 +693,8 @@ def test_federated_run_supports_configured_attack_method_subset(tmp_path):
 
     result = run_federated(config)
 
-    attack_results = json.loads((tmp_path / "attack_results.json").read_text(encoding="utf-8"))
-    assert {entry["name"] for entry in attack_results} == {"DLG"}
-    assert result["attack_evaluations"] == 3
-    assert set(result["attack_summary"]["methods"]) == {"DLG"}
+    assert 'attack_evaluations' not in result
+    assert not (tmp_path / 'attack_results.json').exists()
 
 
 def test_attack_max_samples_auto_defaults_to_capped_training_set_size():
@@ -1157,14 +1142,16 @@ def test_async_attacks_match_sync_fedavg_when_randomness_disabled(tmp_path):
     sync_summary = run_federated(sync_config)
     async_summary = run_federated(async_config)
 
-    sync_artifacts = sorted((sync_dir / "attack_artifacts").rglob("*.pt"))
-    async_artifacts = sorted((async_dir / "attack_artifacts").rglob("*.pt"))
+    sync_artifacts = sorted((sync_dir / "saved_updates").rglob("round_*.pt"))
+    async_artifacts = sorted((async_dir / "saved_updates").rglob("round_*.pt"))
 
     assert sync_artifacts
     assert async_artifacts
     assert sync_summary["test"]["mse"] == pytest.approx(async_summary["test"]["mse"])
-    assert sync_summary["attack_overall_avg_primary_metric_value"] == pytest.approx(async_summary["attack_overall_avg_primary_metric_value"])
-    assert sync_summary["attack_success_rate"] == pytest.approx(async_summary["attack_success_rate"])
+    assert "attack_overall_avg_primary_metric_value" not in sync_summary
+    assert "attack_success_rate" not in sync_summary
+    assert "attack_overall_avg_primary_metric_value" not in async_summary
+    assert "attack_success_rate" not in async_summary
     assert compare_fedavg_runs(sync_dir, async_dir) == []
 
 
@@ -1454,7 +1441,7 @@ def test_federated_run_restores_best_validation_checkpoint(tmp_path, monkeypatch
 
     monkeypatch.setattr(server_module, "build_model", _build_zero_model)
 
-    def fake_client_train(self, global_state, compressed=False, round_index=0):
+    def fake_client_train(self, global_state, compressed=False, round_index=0, round_context=None, prepared_state=None):
         update = type(global_state)((name, torch.ones_like(tensor)) for name, tensor in global_state.items())
         return client_module.ClientResult(
             client_id=self.client_id,

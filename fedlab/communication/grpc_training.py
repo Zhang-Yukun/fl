@@ -37,7 +37,6 @@ from fedlab.federated.algorithms import (
     _log_prediction_views,
     _configured_primary_metric_name,
     _configured_primary_metric_mode,
-    build_update_attack_round_task,
     configure_random_seed,
     configure_torch_runtime,
     resolve_device,
@@ -48,7 +47,6 @@ from fedlab.federated.client import ClientResult, FederatedClient
 from fedlab.federated.server import EarlyStopper, FederatedServer
 from fedlab.federated.protocol import validate_transport_modes
 from fedlab.tasks.registry import task_type
-from fedlab.security.attack_common import save_attack_artifacts, summarize_attack_results
 from fedlab.utils.logging import setup_logging
 from fedlab.utils.artifacts import save_experiment_config, should_save_periodic_artifacts
 from fedlab.utils.serialization import state_num_bytes, state_num_parameters
@@ -182,9 +180,6 @@ class GrpcFederatedCoordinator:
         self.finalization_completed = False
         self.pending_final_round_thread: threading.Thread | None = None
         self.lock = threading.Lock()
-        self.attack_manager = AsyncAttackManager(config, self.tracker)
-        self.attack_results = self.attack_manager.attack_results
-        self.attack_target_type = 'update_payload'
         self.best_global_state = _clone_state(self.server.global_state)
         self.best_metrics: dict[str, float] | None = None
         self.best_round = -1
@@ -347,32 +342,6 @@ class GrpcFederatedCoordinator:
                 'runtime_error': self.runtime_error,
             }
 
-    def _run_attacks(
-        self,
-        round_index: int,
-        round_base_state: dict[str, Any],
-        results,
-        round_context: dict[str, Any] | None = None,
-        captured_update_records: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Queue server-side attack evaluation without blocking aggregation or validation."""
-
-        if self.attack_target_type == 'update_payload' and captured_update_records is not None:
-            task = build_update_attack_round_task(self.config, captured_update_records, round_index, self.max_rounds)
-        else:
-            task = _build_attack_round_task(
-                self.config,
-                self.attack_clients,
-                results,
-                round_index,
-                self.max_rounds,
-                round_base_state,
-                self.attack_target_type,
-                server=self.server,
-                round_context=round_context,
-            )
-        self.attack_manager.submit(task)
-
     def _finish_final_round_bookkeeping(self, round_index: int, results, aggregation_weights, round_base_state, round_context: dict[str, Any] | None = None) -> None:
         """Complete final-round validation and artifact bookkeeping off the submit hot path."""
 
@@ -425,7 +394,6 @@ class GrpcFederatedCoordinator:
             round_context=round_context,
         )
         save_captured_update_records(self.output_dir, captured_update_records)
-        self._run_attacks(round_index, round_base_state, results, round_context, captured_update_records=captured_update_records)
         if should_save_periodic_artifacts(self.config, round_index + 1):
             _save_periodic_federated_snapshot(
                 output_dir=self.output_dir,
@@ -436,8 +404,6 @@ class GrpcFederatedCoordinator:
                 best_global_state=self.best_global_state,
                 best_metrics=self.best_metrics,
                 best_round=self.best_round,
-                attack_results=self.attack_results,
-                attack_target_type=self.attack_target_type,
                 transport='grpc',
             )
 
@@ -450,25 +416,13 @@ class GrpcFederatedCoordinator:
         protocol_test_metrics = test_metrics
         self.server.save(self.output_dir, self.config)
         final_test_step = max(len(self.server.history), self.best_round + 1)
-        self.attack_manager.finalize()
         total_elapsed = time.perf_counter() - self.start_time
-        attack_records = save_attack_artifacts(self.output_dir, self.attack_results)
-        with (self.output_dir / 'attack_results.json').open('w', encoding='utf-8') as handle:
-            json.dump(attack_records, handle, ensure_ascii=False, indent=2)
-        attack_summary = summarize_attack_results(
-            self.attack_results,
-            float(self.config.get('attack', {}).get('success_rate_threshold', 0.05)),
-            float(self.config.get('attack', {}).get('overall_success_rate_threshold', self.config.get('attack', {}).get('success_rate_threshold', 0.05))),
-        )
         summary = _build_federated_summary(
             server=self.server,
             test_metrics=test_metrics,
             total_elapsed=total_elapsed,
             best_round=self.best_round,
             best_metrics=self.best_metrics,
-            attack_records=attack_records,
-            attack_summary=attack_summary,
-            attack_target_type=self.attack_target_type,
             protocol_test_metrics=protocol_test_metrics,
             transport='grpc',
         )
@@ -584,13 +538,6 @@ class GrpcFederatedCoordinator:
                         round_context=round_context,
                     )
                     save_captured_update_records(self.output_dir, captured_update_records)
-                    self._run_attacks(
-                        self.round_index,
-                        round_base_state,
-                        results,
-                        round_context,
-                        captured_update_records=captured_update_records,
-                    )
                     if (not will_stop) or should_save_periodic_artifacts(self.config, self.round_index + 1):
                         _save_periodic_federated_snapshot(
                             output_dir=self.output_dir,
@@ -601,8 +548,6 @@ class GrpcFederatedCoordinator:
                             best_global_state=self.best_global_state,
                                         best_metrics=self.best_metrics,
                             best_round=self.best_round,
-                            attack_results=self.attack_results,
-                            attack_target_type=self.attack_target_type,
                             transport='grpc',
                         )
                     self.pending = {}
