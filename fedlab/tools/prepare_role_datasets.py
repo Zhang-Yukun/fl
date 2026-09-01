@@ -99,16 +99,10 @@ def prepare_rare_role_dataset(
         )
         copied_test = _copy_optional(
             split_dir / 'clients' / client_id / 'test.csv',
-            output_dir / 'server' / 'clients' / client_id / 'test.csv',
+            output_dir / 'test' / 'clients' / client_id / 'test.csv',
         )
         if copied_test is not None:
-            copied['server']['files'].append(copied_test)
-            copied['test']['files'].append(
-                _copy_file(
-                    split_dir / 'clients' / client_id / 'test.csv',
-                    output_dir / 'test' / 'clients' / client_id / 'test.csv',
-                )
-            )
+            copied['test']['files'].append(copied_test)
 
     for client_id in selected_attack_clients:
         client_train = split_dir / 'clients' / client_id / 'train.csv'
@@ -151,7 +145,7 @@ def prepare_rare_role_dataset(
             'roles': copied,
             'notes': {
                 'client': 'Each client receives only its own train.csv.',
-                'server': 'Server receives all client val.csv and optional test.csv for online validation/testing.',
+                'server': 'Server receives all client val.csv only.',
                 'attack': 'Attack replay receives only selected clients train.csv.',
                 'test': 'Offline test receives all client test.csv; rare-earth offline test also needs evaluation_context.json.',
                 'evaluation_context_path': evaluation_context_target,
@@ -197,13 +191,6 @@ def prepare_classification_role_dataset(
     if not server_val.exists():
         raise FileNotFoundError(f'Missing server validation split: {server_val}')
     copied['server']['files'].append(_copy_file(server_val, output_dir / 'server' / 'server' / 'val.pt'))
-    copied_server_test = _copy_optional(
-        split_dir / 'server' / 'test.pt',
-        output_dir / 'server' / 'server' / 'test.pt',
-    )
-    if copied_server_test is not None:
-        copied['server']['files'].append(copied_server_test)
-
     for client_id in selected_attack_clients:
         train_path = split_dir / 'clients' / client_id / 'train.pt'
         copied['attack'][client_id] = {
@@ -250,7 +237,7 @@ def prepare_classification_role_dataset(
             'roles': copied,
             'notes': {
                 'client': 'Each client receives only its own train.pt.',
-                'server': 'Server receives shared val.pt and optional test.pt for online evaluation.',
+                'server': 'Server receives shared val.pt only.',
                 'attack': 'Attack replay receives only selected clients train.pt.',
                 'test': 'Offline test receives server/test.pt when available, otherwise each client test.pt.',
             },
