@@ -8,14 +8,16 @@
 
 如果你按本文档建议的 `workspace/data + workspace/src` 目录组织工程，仓库默认配置里的相对路径可以直接工作，无需额外修改 `data.split_dir`。
 
-如果你准备使用 gRPC 端口外部流量监控，建议在机器上提前确认以下 Linux 命令可用：
+如果你准备在 `tmux` 里长时间跑训练，或者使用 gRPC 端口外部流量监控，建议在机器上提前确认以下 Linux 命令可用：
 
+- `tmux`：推荐用于多节点部署、长时间训练和断线后恢复终端会话
 - `pkill`：通常由 `procps` 或 `procps-ng` 提供，用于清理残留监控进程
 - `tcpdump`：用于抓取指定 gRPC 端口的实际 TCP 流量
 
 最简单的自检方式：
 
 ```bash
+which tmux
 which pkill
 which tcpdump
 ```
@@ -27,7 +29,7 @@ which tcpdump
 ```bash
 mkdir -p workspace/data
 cd workspace
-git clone <your-repo-url> src
+git clone https://github.com/Zhang-Yukun/fl.git src
 ```
 
 推荐目录结构如下：
@@ -100,8 +102,9 @@ pip install -r src/requirements.txt
 pip install pytest
 ```
 
-如果你要启用 `MONITOR_GRPC_PORT_TRAFFIC=true` 的外部流量监控，除了 Python 依赖外，还需要系统层面提供：
+如果你要在 `tmux` 里管理多进程训练，或启用 `MONITOR_GRPC_PORT_TRAFFIC=true` 的外部流量监控，除了 Python 依赖外，还建议系统层面提供：
 
+- `tmux`
 - `tcpdump`
 - `pkill`
 
@@ -109,13 +112,13 @@ pip install pytest
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y tcpdump procps
+sudo apt-get install -y tmux tcpdump procps
 ```
 
 在常见 CentOS / Rocky / AlmaLinux 系统上通常对应：
 
 ```bash
-sudo yum install -y tcpdump procps-ng
+sudo yum install -y tmux tcpdump procps-ng
 ```
 
 ### 2.2 快速检查安装是否成功
@@ -132,6 +135,13 @@ python -m fedlab.tools.analyze_experiment_suite --help
 ### 3.1 框架最终期望的联邦数据布局
 
 框架不会在训练时动态切分数据，而是直接读取 `data.split_dir` 指向的预切分目录。
+
+如果你还没创建原始数据目录，推荐先执行一次：
+
+```bash
+cd workspace/src
+mkdir -p ../data/raw_data/rare ../data/raw_data/mnist ../data/raw_data/cifar10
+```
 
 `rare` 默认读取：
 
@@ -320,6 +330,7 @@ python -m fedlab.entrypoints.train   --config configs/mnist/ega.yaml   --mode fe
 
 - 服务端使用 `python -m fedlab.entrypoints.server`
 - 客户端使用 `python -m fedlab.entrypoints.client`
+- 推荐先启动服务端，确认 `grpc.address` 对应端口已经开始监听后，再依次启动各个客户端
 - 三端需要使用语义一致的配置
 - 服务端 `grpc.address` 需要监听一个实际可访问的地址
 - 客户端 `grpc.server_address` 需要指向服务器的实际 `IP:PORT`
@@ -408,6 +419,40 @@ pkill -f 'tcpdump -n -l -tt'
 
 ```bash
 pkill -f 'tcpdump -n -l -tt -i .* tcp port 58100'
+```
+
+#### 4.2.0.2 启动顺序与轮询间隔
+
+推荐启动顺序：
+
+1. 先启动服务端。
+2. 确认服务端日志已经显示监听地址，且端口可连通。
+3. 再启动全部客户端。
+
+`grpc.poll_seconds` 控制的是 gRPC 训练过程中客户端和服务端的轮询休眠间隔，也就是“多久重试一次注册、拉取全局模型、提交更新、等待关闭确认”；它不是服务器主动推送消息的频率。
+
+直接用 Python 入口时，可以这样改：
+
+```bash
+python -m fedlab.entrypoints.client \
+  --client-id Nd2O3 \
+  --config configs/rare/fedavg.yaml \
+  --override grpc.server_address=127.0.0.1:50051 \
+  --override grpc.poll_seconds=0.5
+```
+
+批量脚本里可以直接改环境变量：
+
+```bash
+cd workspace/src
+POLL_SECONDS=0.5 RUNTIME_DEVICE=cuda:0 bash scripts/run_exp_seed42_part2.sh
+```
+
+或者显式走 `run_suite.sh`：
+
+```bash
+cd workspace/src
+POLL_SECONDS=0.5 RUNTIME_DEVICE=cuda:0 bash scripts/run_suite.sh --modes grpc_sync
 ```
 
 #### 4.2.1 `rare` 的 FedAvg
@@ -843,6 +888,214 @@ bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp
 1. 先准备 `../data/rare_earth_rawdata2`、`../data/mnist`、`../data/cifar10`
 2. 再生成 `../outputs/exp/...` 实验目录
 3. 最后用 `scripts/run_analyze_experiment_suite_batch.sh` 做单 seed 与多 seed 汇总分析
+
+### 6.4 参数速查表
+
+下面这部分按“用户真正会传入或覆盖的参数”整理。为了避免 README 失控，这里优先列出当前脚本、训练入口和离线攻击入口实际会读取的参数；如果你要看更完整的配置块说明，再查 `docs/config_reference.md`。
+
+#### 6.4.1 批量脚本环境变量
+
+这些参数主要用于 `scripts/run_suite.sh`、`scripts/run_controlled_suite.sh`、`scripts/run_exp_seed*.sh`。
+
+| 参数 | 取值范围 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `TASK_SET` / `TASKS` | `rare`、`mnist`、`cifar10`、`all`、逗号分隔列表 | `all` | 选择跑哪些任务。 |
+| `MODE_SET` / `--modes` | `centralized`、`single_sync`、`grpc_sync`、`all`、逗号分隔列表 | `all` | 选择运行模式。当前批量实验里 `part1`/`part2` 主要对应 `single_sync` / `grpc_sync`。 |
+| `FEDERATED_ALGORITHMS` / `BASE_ALGOS` | `fedavg`、`topk`、`ega`、逗号分隔列表 | `fedavg,topk,ega` | 选择联邦算法集合。 |
+| `RUN_CENTRALIZED` | `true`、`false` | `true` | 是否同时跑 centralized 基线。 |
+| `SUITE_SEED` | 任意整数 | `2026`；各 `run_exp_seed*.sh` 会改成对应脚本 seed | 该套实验的主随机种子，也是多个子 seed 的回退来源。 |
+| `RUNTIME_SEED` | 任意整数 | 跟随 `SUITE_SEED` | 训练运行时随机种子，对应 `runtime.seed`。 |
+| `RUNTIME_DEVICE` | `cpu`、`cuda:0`、`cuda:1` 等 | 不显式设置时沿用配置或运行环境 | 训练设备。 |
+| `ROUNDS` | 正整数 | 不在脚本层硬编码；沿用配置文件 | 覆盖 `federated.rounds`。 |
+| `PATIENCE` | 非负整数 | 不在脚本层硬编码；沿用配置文件 | 覆盖 `training.patience`。 |
+| `POLL_SECONDS` | 正浮点数 | `1.0` | gRPC 训练轮询休眠间隔，脚本会覆盖到 `grpc.poll_seconds`。 |
+| `BASE_PORT` | 正整数端口号 | `58000`；各 `run_exp_seed*.sh` 会改成对应端口段 | gRPC 运行时的起始端口。 |
+| `BASE_OUTPUT_ROOT` / `OUTPUT_PREFIX` | 合法路径 | `outputs/...`；`run_exp_seed*.sh` 默认落到 `../outputs/exp/...` | 实验输出根目录。推荐设到 `../outputs`，避免污染 `src/`。 |
+| `PROJECT_NAME` | 任意字符串 | `fl-<task>-<mode>` 或脚本内部默认值 | `wandb` project 名。 |
+| `MONITOR_GRPC_PORT_TRAFFIC` | `true`、`false` | `false` | 是否启用 `tcpdump` 对 gRPC 端口做外部流量监控。 |
+| `GRPC_MONITOR_INTERFACE` | 网卡名，如 `lo`、`eth0`、`any` | `any` | 外部流量监控监听的网卡。 |
+| `CAPTURE_FREQUENCY_ROUNDS` | 正整数 | 不显式设置时沿用配置，当前代码运行时默认 `30` | 覆盖 `replay_capture.frequency_rounds`，控制保存 `saved_updates` 的轮次间隔。 |
+| `QSGD_SEED` | 任意整数 | 跟随 `SUITE_SEED` | QSGD 量化随机种子。 |
+| `RANDOMK_SEED` | 任意整数 | 跟随 `SUITE_SEED` | Random-k 稀疏采样种子。 |
+| `ADAPTIVE_RDP_SEED` | 任意整数 | 跟随 `SUITE_SEED` | `adaptive_clipped_rdp_fedavg` 的随机种子。 |
+| `QINT8_SEED` | 任意整数 | 跟随 `SUITE_SEED` | `secure_quantized_fedavg` 的量化随机种子。 |
+| `EGA_QUANTIZATION_SEED` | 任意整数 | 跟随 `SUITE_SEED` | EGA 编码量化随机种子。 |
+| `EGA_PRETRAIN_SEED` | 任意整数 | 跟随 `SUITE_SEED` | EGA codec 预训练随机种子。 |
+| `EGA_ARTIFACT_PATH` | 合法路径 | `artifacts/ega/ega_h240_v1.pt` | EGA codec 产物路径。 |
+| `EGA_PRETRAIN_DEVICE` | `same`、`cpu`、`cuda:*` | `same` | EGA 预训练设备。 |
+| `EGA_PRETRAIN_EPOCHS` | 正整数 | 不显式设置时沿用配置，公共默认配置里是 `220` | EGA codec 预训练轮数。 |
+
+#### 6.4.2 训练入口常用 `--override`
+
+这些参数可直接传给 `python -m fedlab.entrypoints.train/server/client`。
+
+| 参数 | 取值范围 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `experiment.output_dir` | 合法路径 | 无固定默认输出目录 | 当前实验输出目录。 |
+| `runtime.device` | `cpu`、`cuda:*` | `cpu` | 主训练设备。 |
+| `runtime.seed` | 任意整数 | 未显式设置时为空；脚本通常会覆盖 | 训练随机种子。 |
+| `runtime.deterministic` | `true`、`false` | `true` | 是否尽量启用确定性运行。 |
+| `training.epochs` | 正整数 | `1` | centralized 模式下表示总训练 epoch；federated 模式下表示每轮本地训练 epoch。 |
+| `training.lr` | 正浮点数 | `0.001` | 训练学习率。 |
+| `training.loss` | `mse`、`mae`、`smooth_l1`、`huber`、`cross_entropy`、`task_default` | `mse` | 训练损失。分类任务通常改成 `cross_entropy`。 |
+| `training.optimizer` | `adam`、`adamw`、`sgd` | `adam` | 训练优化器。 |
+| `training.weight_decay` | 非负浮点数 | `0.0` | 权重衰减。 |
+| `training.patience` | 非负整数 | `50` | 早停耐心轮数。 |
+| `training.min_delta` | 非负浮点数 | `0.0` | 早停最小改进阈值。 |
+| `evaluation.metrics` | 任务支持的指标列表 | forecasting 默认 `[mse,mae,mape]`；分类配置通常会覆盖 | 验证和测试时计算哪些指标。 |
+| `federated.algorithm` | `fedavg`、`sparse_fedavg`、`randomk_fedavg`、`qsgd_fedavg`、`secure_quantized_fedavg`、`adaptive_clipped_rdp_fedavg`、`ega_fedavg` | `fedavg` | 联邦聚合算法。批量脚本里的 `topk` 会映射到稀疏 FedAvg。 |
+| `federated.rounds` | 正整数 | `20` | 联邦通信轮数。 |
+| `federated.local_steps` | 正整数 | 未设置 | 如果配置，会优先于 `training.epochs`。 |
+| `federated.topk_fraction` | `(0,1]` 浮点数 | 稀疏方法未显式设置时通常走各任务 YAML；Top-k 示例配置默认 `0.10` | Top-k / Random-k 保留比例。 |
+| `federated.qsgd_levels` | 正整数 | QSGD 方法内部缺省 `127` | QSGD 量化级数。 |
+| `federated.quantization_dtype` | 常用 `float16`、`qint8` | 依配置文件 | 安全量化方法的量化类型。 |
+| `federated.quantization_seed` | 任意整数 | 未显式设置 | 量化相关随机种子。 |
+| `grpc.address` | `host:port` | 运行时默认 `0.0.0.0:50051` | 服务端监听地址。 |
+| `grpc.server_address` | `host:port` | 运行时默认 `127.0.0.1:50051` | 客户端连接地址。 |
+| `grpc.poll_seconds` | 正浮点数 | 运行时默认 `1.0`；公共 gRPC 配置文件里是 `5.0`；批量脚本会强制覆盖为 `POLL_SECONDS` | 客户端与服务端的轮询休眠间隔。 |
+| `grpc.max_message_mb` | 正浮点数 | `384.0` | gRPC 最大消息大小。 |
+| `replay_capture.enabled` | `true`、`false` | `true` | 是否保存可用于离线攻击的 `saved_updates`。 |
+| `replay_capture.frequency_rounds` | 正整数 | `30` | 第 0 轮、最后一轮以及每隔多少轮额外保存一次更新。 |
+| `tracking.enabled` | `true`、`false` | 运行时默认 `true`；分类 smoke-test 配置常显式设为 `false` | 是否启用 `wandb`。 |
+| `tracking.offline` | `true`、`false` | `true` | `wandb` 是否走离线模式。 |
+| `tracking.project` | 任意字符串 | `federated-rare-earth` | `wandb` project 名。 |
+| `artifacts.config_formats` | `yaml`、`json`、`toml` 组成的列表 | `[yaml]` | 启动时保存哪些格式的配置快照。 |
+| `artifacts.save_every_rounds` | 非负整数 | `0` | 是否额外保存按轮快照，`0` 表示关闭。 |
+
+#### 6.4.3 EGA 专用参数
+
+| 参数 | 取值范围 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `ega.artifact_path` | 合法路径 | `artifacts/ega/ega_h240_v1.pt` | EGA codec 文件路径。 |
+| `ega.num_clients` | 正整数、`auto` | `auto` | codec 初始化时使用的客户端数。 |
+| `ega.block_size` | 正整数 | `256` | 编码块大小。 |
+| `ega.encoded_dim` | 正整数 | `128` | 编码后维度。 |
+| `ega.hidden_dim` | 正整数 | `2048` | codec 隐层宽度。 |
+| `ega.residual_blocks` | 非负整数 | `4` | 残差块数量。 |
+| `ega.quantization_level` | 正整数 | `159` | 编码量化级数。 |
+| `ega.encode_buffers` | `true`、`false` | `false` | 是否把 buffer 也纳入编码通信。 |
+| `ega.buffer_tolerance` | 非负浮点数 | `0.0` | buffer 变化容忍阈值。 |
+| `ega.normalization` | 正浮点数 | `0.00025` | 编码归一化尺度。 |
+| `ega.initial_normalization` | 正浮点数 | `0.00025` | 初始归一化尺度。 |
+| `ega.min_normalization` | 正浮点数 | `1e-6` | 归一化下界。 |
+| `ega.normalization_strategy` | 当前常用 `ema_reported_client_max_abs` | `ema_reported_client_max_abs` | 归一化更新策略。 |
+| `ega.normalization_ema` | `[0,1]` 浮点数 | `0.98` | 归一化 EMA 系数。 |
+| `ega.encoded_dtype` | 常用 `int8` | `int8` | 编码后存储类型。 |
+| `ega.encoded_stochastic_rounding` | `true`、`false` | `false` | 编码量化是否随机舍入。 |
+| `ega.encoded_noise_std` | 非负浮点数 | `0.0` | 编码噪声强度。 |
+| `ega.error_feedback` | `true`、`false` | `true` | 是否使用误差反馈。 |
+| `ega.pretrain.epochs` | 正整数 | `220` | codec 预训练轮数。 |
+| `ega.pretrain.patience` | 非负整数 | `50` | codec 预训练早停耐心。 |
+| `ega.pretrain.batch_size` | 正整数 | `128` | codec 预训练 batch size。 |
+| `ega.pretrain.lr` | 正浮点数 | `0.0002` | codec 预训练学习率。 |
+| `ega.pretrain.train_groups` | 正整数 | `50000` | codec 预训练训练组数。 |
+| `ega.pretrain.val_groups` | 正整数 | `25000` | codec 预训练验证组数。 |
+| `ega.pretrain.seed` | 任意整数 | `4096`；脚本层通常会覆盖成 `EGA_PRETRAIN_SEED` | codec 预训练随机种子。 |
+| `ega.pretrain.device` | `same`、`cpu`、`cuda:*` | `same` | codec 预训练设备。 |
+
+#### 6.4.4 离线攻击回放参数
+
+这些参数由 `python -m fedlab.tools.replay_saved_update_attacks`、`replay_saved_update_dlg`、`replay_saved_update_idlg` 读取，不参与联邦训练本身。
+
+| 参数 | 取值范围 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `attack.target_type` | 当前仅支持 `update_payload` | `update_payload` | 指定攻击对象类型。 |
+| `attack.methods` | `dlg`、`idlg`、列表 | `[dlg,idlg]` | 选择回放哪些攻击方法。 |
+| `attack.frequency_rounds` | 正整数 | `30` | 统计上每隔多少轮挑选一次攻击轮；真正可回放轮次仍取决于训练阶段保存了哪些 `saved_updates`。 |
+| `attack.max_samples` | `auto` 或正整数 | `auto` | 每次联合恢复多少样本。 |
+| `attack.max_samples_cap` | 正整数 | `128` | `attack.max_samples=auto` 时的上限。 |
+| `attack.steps` | 正整数 | `300` | 每次攻击优化步数。 |
+| `attack.lr` | 正浮点数 | `0.001` | 攻击优化学习率。 |
+| `attack.optimizer` | 当前仅 `adam` | `adam` | 攻击优化器。 |
+| `attack.restarts` | 正整数 | `1` | 随机重启次数。 |
+| `attack.client_selection` | `all`、`first`、`round_robin` | `all` | 一轮内选哪些客户端发起攻击。 |
+| `attack.clients_per_round` | 正整数 | 配置默认 `3` | 每轮攻击多少个客户端。 |
+| `attack.input_clip` | 正浮点数 | `5.0` | 对恢复输入的裁剪上界。 |
+| `attack.target_clip` | 正浮点数 | `5.0` | 对恢复标签或目标张量的裁剪上界。 |
+| `attack.tv_weight` | 非负浮点数 | `0.0` | 总变差正则权重。 |
+| `attack.seed` | 任意整数 | 配置默认 `4096` | 攻击随机种子。 |
+| `attack.model_mode` | `train`、`eval` | 配置默认 `eval` | 攻击时模型工作模式。 |
+| `attack.local_optimizer` | `adam`、`sgd` | `adam` | 一步局部更新近似使用的优化器。 |
+| `attack.local_lr` | 正浮点数 | `0.001` | 一步局部更新近似学习率。 |
+| `attack.local_optimizer_eps` | 正浮点数 | `1e-8` | `adam` 近似的 `eps`。 |
+| `attack.recovery_match_metric` | `mse`、`psnr`、`ssim` | `mse` | 恢复后做一对一匹配时使用的指标。 |
+| `attack.recovery_success_metric` | `mse`、`psnr`、`ssim` | `mse` | 判定恢复成功时使用的指标。 |
+| `attack.recovery_success_threshold` | `null` 或浮点数 | `null` | 恢复成功阈值；为空时按指标自动推导。 |
+| `attack.success_rate_threshold` | `[0,1]` 浮点数 | `0.05` | 单次攻击成功率阈值。 |
+| `attack.overall_success_rate_threshold` | `[0,1]` 浮点数 | `0.05` | 汇总层面成功率阈值。 |
+| `attack.data_range` | 正浮点数 | `1.0` | PSNR / SSIM 使用的数据范围。 |
+| `attack.async_enabled` | `true`、`false` | `false` | 是否异步执行攻击。 |
+| `attack.async_workers` | 正整数 | `1` | 异步攻击 worker 数。 |
+| `attack.async_max_pending_rounds` | 正整数 | `5` | 异步模式下允许积压的最大轮数。 |
+| `attack.device` | `same`、`cpu`、`cuda:*` | `same` | 攻击设备。 |
+
+### 6.5 `summary.json` 指标说明
+
+训练结束后的 `summary.json` 主要由联邦训练摘要生成逻辑写出；如果后续执行离线攻击回放，攻击工具还会在其自己的输出目录里补充攻击相关字段。
+
+#### 6.5.1 联邦训练摘要字段
+
+| 指标 | 取值范围 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `test` | 指标字典 | 无 | 最终测试集指标，通常来自最佳验证轮对应模型。 |
+| `protocol_test` | 指标字典 | 默认与 `test` 相同 | 协议语义下的测试指标；如果没有单独协议测试，就等于 `test`。 |
+| `rounds` | 非负整数 | `0` | 实际完成的联邦轮数。 |
+| `total_time_seconds` | 非负浮点数 | `0.0` | 整个训练总耗时。 |
+| `best_round` | 非负整数 | 无 | 最佳验证指标所在轮次。 |
+| `test_checkpoint` | 字符串 | `best_validation` | 说明测试使用的是哪一份 checkpoint。 |
+| `best_val` | 指标字典 | 无 | 最佳验证轮上的完整验证指标。 |
+| `best_val_metric_name` | 字符串 | 由任务决定 | 用于早停和选最佳 checkpoint 的主指标名。 |
+| `best_val_metric_value` | 浮点数 | 无 | 主验证指标在最佳轮的数值。 |
+| `best_val_<metric>` | 浮点数 | 按任务生成 | 每个验证指标在最佳轮的数值展开形式，例如 `best_val_mse`。 |
+| `last_parameter_upload_bytes` | 非负整数 | `0` | 最后一轮按“模型参数语义”统计的上传字节数。 |
+| `last_parameter_download_bytes` | 非负整数 | `0` | 最后一轮按“模型参数语义”统计的下载字节数。 |
+| `last_parameter_total_bytes` | 非负整数 | `0` | 最后一轮参数级总通信量。 |
+| `last_transport_upload_bytes` | 非负整数 | `0` | 最后一轮按实际序列化传输统计的上传字节数。 |
+| `last_transport_download_bytes` | 非负整数 | `0` | 最后一轮按实际序列化传输统计的下载字节数。 |
+| `last_transport_total_bytes` | 非负整数 | `0` | 最后一轮实际传输总字节数。 |
+| `last_transport_upload_overhead_bytes` | 非负整数 | `0` | 最后一轮上传额外开销字节数，即实际传输减参数语义字节。 |
+| `last_transport_download_overhead_bytes` | 非负整数 | `0` | 最后一轮下载额外开销字节数。 |
+| `last_parameter_download_compression_ratio` | 非负浮点数 | `0.0` | 最后一轮下载相对 dense baseline 的压缩率。 |
+| `last_parameter_upload_compression_ratio` | 非负浮点数 | `0.0` | 最后一轮上传相对 dense baseline 的压缩率。 |
+| `last_parameter_total_communication_ratio` | 非负浮点数 | `0.0` | 最后一轮参数语义总通信压缩率。 |
+| `last_transport_download_compression_ratio` | 非负浮点数 | `0.0` | 最后一轮实际下载压缩率。 |
+| `last_transport_upload_compression_ratio` | 非负浮点数 | `0.0` | 最后一轮实际上传压缩率。 |
+| `last_transport_total_communication_ratio` | 非负浮点数 | `0.0` | 最后一轮实际总通信压缩率。 |
+| `total_parameter_upload_bytes` | 非负整数 | `0` | 全部轮次累计参数语义上传字节数。 |
+| `total_parameter_download_bytes` | 非负整数 | `0` | 全部轮次累计参数语义下载字节数。 |
+| `total_parameter_bytes` | 非负整数 | `0` | 全部轮次累计参数语义总通信量。 |
+| `total_transport_upload_bytes` | 非负整数 | `0` | 全部轮次累计实际上传字节数。 |
+| `total_transport_download_bytes` | 非负整数 | `0` | 全部轮次累计实际下载字节数。 |
+| `total_transport_bytes` | 非负整数 | `0` | 全部轮次累计实际总通信量。 |
+| `total_transport_upload_overhead_bytes` | 非负整数 | `0` | 全部轮次累计实际上传额外开销。 |
+| `total_transport_download_overhead_bytes` | 非负整数 | `0` | 全部轮次累计实际下载额外开销。 |
+| `privacy_accountant` | `null` 或字符串 | `null` | 当前隐私 accountant 名称；普通 FedAvg 常为空。 |
+| `privacy_epsilon` | `null` 或浮点数 | `null` | DP 隐私预算 epsilon。 |
+| `privacy_delta` | `null` 或浮点数 | `null` | DP 隐私预算 delta。 |
+| `privacy_rdp_alpha` | `null` 或浮点数 | `null` | RDP accountant 的 alpha。 |
+| `privacy_rdp_total` | `null` 或浮点数 | `null` | 累计 RDP 量。 |
+| `privacy_sampling_rate` | `null` 或浮点数 | `null` | 隐私会计使用的采样率。 |
+| `adaptive_clip_norm` | `null` 或浮点数 | `null` | 自适应裁剪当前阈值。 |
+| `adaptive_clip_median_norm` | `null` 或浮点数 | `null` | 自适应裁剪估计的中位范数。 |
+| `adaptive_reference_clip_norm` | `null` 或浮点数 | `null` | 自适应裁剪参考阈值。 |
+| `adaptive_noise_std` | `null` 或浮点数 | `null` | 自适应 DP 噪声标准差。 |
+| `privacy_trust_model` | `null` 或字符串 | `null` | 当前隐私信任模型描述。 |
+| `transport` | `null`、`inprocess`、`grpc` 等 | 视运行模式而定 | 本次运行使用的传输后端。 |
+
+#### 6.5.2 离线攻击回放追加字段
+
+这些字段通常写在攻击输出目录自己的 `summary.json` 里，而不是训练目录原始的 `summary.json`。
+
+| 指标 | 取值范围 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `attack_target_type` | 当前为 `update_payload` | 若攻击汇总缺失则回退到已有值或 `update_payload` | 攻击目标类型。 |
+| `attack_primary_metric_name` | `mse`、`psnr`、`ssim` 等 | 无 | 汇总攻击效果时使用的主指标名。 |
+| `attack_primary_metric_direction` | `min`、`max` | 无 | 主指标是越小越好还是越大越好。 |
+| `attack_overall_avg_primary_metric_value` | 浮点数 | 无 | 所有攻击样本整体平均主指标。 |
+| `attack_overall_best_primary_metric_value` | 浮点数 | 无 | 所有攻击记录里最优主指标。 |
+| `attack_success_rate` | `[0,1]` 浮点数 | 无 | 攻击总体成功率。 |
+| `attack_evaluations` | 非负整数 | `0` | 本次离线回放共评估了多少条攻击记录。 |
+| `attack_summary` | 字典 | 无 | 更完整的攻击统计汇总原文。 |
 
 ## 7. 进一步阅读
 
