@@ -246,6 +246,67 @@ def make_loaders_from_splits(
     )
 
 
+def _build_eval_loader_from_values(
+    values: np.ndarray,
+    scaler: Standardizer,
+    *,
+    seq_len: int,
+    pred_len: int,
+    batch_size: int,
+    num_workers: int,
+    seed: int | None,
+    identity: str,
+) -> DataLoader:
+    """Build one evaluation-only loader using externally provided scaling statistics."""
+
+    normalized = scaler.transform(values)
+    return attach_loader_scaler(
+        DataLoader(
+            WindowDataset(normalized, seq_len, pred_len),
+            **_loader_kwargs(batch_size, False, num_workers, seed, identity),
+        ),
+        scaler,
+    )
+
+
+def _standardizer_from_registration(
+    registration_metadata: dict[str, dict[str, Any]] | None,
+    client_id: str,
+) -> Standardizer:
+    """Rebuild a client scaler from the metadata uploaded during registration."""
+
+    metadata = (registration_metadata or {}).get(client_id) or {}
+    mean = metadata.get('scale_mean')
+    std = metadata.get('scale_std')
+    if mean is None or std is None:
+        raise ValueError(f'Missing uploaded scaler statistics for client {client_id}')
+    return Standardizer(
+        mean=np.asarray(mean, dtype='float32').reshape(-1),
+        std=np.asarray(std, dtype='float32').reshape(-1),
+    )
+
+
+def _registration_has_scalers(
+    registration_metadata: dict[str, dict[str, Any]] | None,
+    clients: list[str],
+) -> bool:
+    """Return whether every expected client uploaded reusable scaling statistics."""
+
+    if not registration_metadata:
+        return False
+    for client_id in clients:
+        metadata = registration_metadata.get(client_id) or {}
+        if metadata.get('scale_mean') is None or metadata.get('scale_std') is None:
+            return False
+    return True
+
+
+def _split_dir_has_client_train_splits(split_dir: Path, clients: list[str]) -> bool:
+    """Return whether every expected client train split is present on disk."""
+
+    return all((split_dir / 'clients' / client_id / 'train.csv').exists() for client_id in clients)
+
+
 def build_federated_loaders_from_split_dir(data_cfg: dict[str, Any], seed: int | None = None) -> tuple[dict[str, DataLoader], DataLoader, DataLoader]:
     """Build loaders from ``split_dir/clients/<client>/{train,val,test}.csv``.
 
@@ -276,6 +337,62 @@ def build_federated_loaders_from_split_dir(data_cfg: dict[str, Any], seed: int |
         val_loaders.append(val_loader)
         test_loaders.append(test_loader)
     return train_loaders, _ConcatLoader(val_loaders), _ConcatLoader(test_loaders)
+
+
+def build_server_rare_earth_evaluation_loaders(
+    config: dict[str, Any],
+    registration_metadata: dict[str, dict[str, Any]] | None = None,
+) -> tuple[DataLoader | None, DataLoader | None]:
+    """Build only the server-side validation/test loaders for forecasting."""
+
+    data_cfg = config['data']
+    seed = config.get('runtime', {}).get('seed')
+    if 'split_dir' not in data_cfg:
+        _, val_loader, test_loader = build_federated_loaders(config)
+        return val_loader, test_loader
+    split_dir = Path(data_cfg['split_dir'])
+    clients = list(data_cfg.get('clients', list(OXIDE_COLUMNS.keys())))
+    if not _registration_has_scalers(registration_metadata, clients):
+        if not _split_dir_has_client_train_splits(split_dir, clients):
+            return None, None
+        _, val_loader, test_loader = build_federated_loaders(config)
+        return val_loader, test_loader
+    seq_len = int(data_cfg.get('seq_len', 21))
+    pred_len = int(data_cfg.get('pred_len', 7))
+    batch_size = int(data_cfg.get('batch_size', 32))
+    num_workers = int(data_cfg.get('num_workers', 0))
+    val_loaders = []
+    test_loaders = []
+    for client_id in clients:
+        client_dir = split_dir / 'clients' / client_id
+        scaler = _standardizer_from_registration(registration_metadata, client_id)
+        val_values = read_value_frame(client_dir / 'val.csv')[['value']].to_numpy(dtype='float32')
+        test_values = read_value_frame(client_dir / 'test.csv')[['value']].to_numpy(dtype='float32')
+        val_loaders.append(
+            _build_eval_loader_from_values(
+                val_values,
+                scaler,
+                seq_len=seq_len,
+                pred_len=pred_len,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                seed=seed,
+                identity=client_id + ':server:val',
+            )
+        )
+        test_loaders.append(
+            _build_eval_loader_from_values(
+                test_values,
+                scaler,
+                seq_len=seq_len,
+                pred_len=pred_len,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                seed=seed,
+                identity=client_id + ':server:test',
+            )
+        )
+    return _ConcatLoader(val_loaders), _ConcatLoader(test_loaders)
 
 
 def build_federated_loaders(config: dict[str, Any]) -> tuple[dict[str, DataLoader], DataLoader, DataLoader]:
@@ -336,6 +453,7 @@ class _ConcatLoader:
         """Return the total number of batches across wrapped loaders."""
 
         return sum(len(loader) for loader in self.loaders)
+
 
 def build_client_rare_earth_train_loader(config: dict[str, Any], client_id: str) -> DataLoader:
     """Build only one client's local training loader for a prepared split directory."""
@@ -413,4 +531,3 @@ def _loader_num_samples(loader: Any) -> int:
 
     dataset = getattr(loader, 'dataset', None)
     return len(dataset) if dataset is not None else len(loader)
-

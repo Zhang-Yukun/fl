@@ -96,6 +96,66 @@ def _build_loader_from_payload(
     )
 
 
+def _load_server_or_merged_eval_payloads(split_dir: Path, clients: list[str]) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+    """Load shared validation/test payloads without touching any client train split."""
+
+    server_dir = split_dir / 'server'
+    val_payload = read_split_payload(server_dir / 'val.pt') if (server_dir / 'val.pt').exists() else None
+    test_payload = read_split_payload(server_dir / 'test.pt') if (server_dir / 'test.pt').exists() else None
+    if val_payload is not None and test_payload is not None:
+        return val_payload, test_payload
+
+    val_images = []
+    val_labels = []
+    test_images = []
+    test_labels = []
+    for client_id in clients:
+        client_dir = split_dir / 'clients' / client_id
+        client_val = read_split_payload(client_dir / 'val.pt')
+        client_test = read_split_payload(client_dir / 'test.pt')
+        val_images.append(client_val['images'])
+        val_labels.append(client_val['labels'])
+        test_images.append(client_test['images'])
+        test_labels.append(client_test['labels'])
+    return (
+        {'images': torch.cat(val_images, dim=0), 'labels': torch.cat(val_labels, dim=0)},
+        {'images': torch.cat(test_images, dim=0), 'labels': torch.cat(test_labels, dim=0)},
+    )
+
+
+def build_server_image_classification_evaluation_loaders(config: dict[str, Any]) -> tuple[DataLoader, DataLoader]:
+    """Build only the server-side validation/test loaders for classification."""
+
+    data_cfg = config.get('data', {})
+    split_dir = Path(data_cfg['split_dir'])
+    clients = list(data_cfg.get('clients', ['client1', 'client2', 'client3']))
+    batch_size = int(data_cfg.get('batch_size', 64))
+    num_workers = int(data_cfg.get('num_workers', 0))
+    seed = config.get('runtime', {}).get('seed')
+    summary = _read_split_summary(split_dir)
+    class_names = summary.get('class_names')
+    val_payload, test_payload = _load_server_or_merged_eval_payloads(split_dir, clients)
+    val_loader = _build_loader_from_payload(
+        val_payload,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        seed=seed,
+        identity='server:val',
+        class_names=class_names,
+    )
+    test_loader = _build_loader_from_payload(
+        test_payload,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        seed=seed,
+        identity='server:test',
+        class_names=class_names,
+    )
+    return val_loader, test_loader
+
+
 def build_federated_image_classification_loaders(config: dict[str, Any]) -> tuple[dict[str, DataLoader], Any, Any]:
     """Build per-client train loaders plus shared validation/test loaders."""
 
@@ -123,44 +183,9 @@ def build_federated_image_classification_loaders(config: dict[str, Any]) -> tupl
             class_names=class_names,
         )
 
-    server_dir = split_dir / 'server'
-    val_payload = read_split_payload(server_dir / 'val.pt') if (server_dir / 'val.pt').exists() else None
-    test_payload = read_split_payload(server_dir / 'test.pt') if (server_dir / 'test.pt').exists() else None
-    if val_payload is None or test_payload is None:
-        val_images = []
-        val_labels = []
-        test_images = []
-        test_labels = []
-        for client_id in clients:
-            client_dir = split_dir / 'clients' / client_id
-            client_val = read_split_payload(client_dir / 'val.pt')
-            client_test = read_split_payload(client_dir / 'test.pt')
-            val_images.append(client_val['images'])
-            val_labels.append(client_val['labels'])
-            test_images.append(client_test['images'])
-            test_labels.append(client_test['labels'])
-        val_payload = {'images': torch.cat(val_images, dim=0), 'labels': torch.cat(val_labels, dim=0)}
-        test_payload = {'images': torch.cat(test_images, dim=0), 'labels': torch.cat(test_labels, dim=0)}
-
-    val_loader = _build_loader_from_payload(
-        val_payload,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        seed=seed,
-        identity='server:val',
-        class_names=class_names,
-    )
-    test_loader = _build_loader_from_payload(
-        test_payload,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        seed=seed,
-        identity='server:test',
-        class_names=class_names,
-    )
+    val_loader, test_loader = build_server_image_classification_evaluation_loaders(config)
     return train_loaders, val_loader, test_loader
+
 
 def build_client_image_classification_train_loader(config: dict[str, Any], client_id: str) -> DataLoader:
     """Build only one client's local training loader from a prepared split directory."""
@@ -213,4 +238,3 @@ def summarize_image_classification_training(config: dict[str, Any]) -> dict[str,
         'total_clients': len(train_loaders),
         'total_train_samples': sum(len(loader.dataset) for loader in train_loaders.values()),
     }
-

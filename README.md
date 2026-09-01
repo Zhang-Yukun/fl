@@ -130,7 +130,9 @@ python -m fedlab.tools.prepare_image_classification_data --help
 python -m fedlab.tools.analyze_experiment_suite --help
 ```
 
-## 3. 数据准备(方便起见三个客户端以及一个服务器端都需要执行以下命令，获取到相同的数据划分)
+## 3. 数据准备
+
+如果你是把服务端和三个客户端分开部署，推荐先在任意一台机器上完成一次完整数据预处理，再把下面第 3.5 节列出的最小必要文件分别拷贝到服务端和各客户端机器。
 
 ### 3.1 框架最终期望的联邦数据布局
 
@@ -299,6 +301,82 @@ tar -xzf ../data/raw_data/cifar10/cifar-10-python.tar.gz   -C ../data/raw_data/c
 
 CIFAR-10 同理，只是客户端目录为 `c1/c2/c3`。
 
+### 3.5 多节点最小数据准备步骤
+
+如果四台机器分别准备数据，最简单也最稳妥的流程是：
+
+1. 先在任意一台机器上按上面的方式准备完整数据目录。
+2. 保证四台机器上的 `workspace/src` 配置一致。
+3. 再把最小必要数据按角色分发到服务端和客户端。
+4. 最好让所有机器都保持相同的相对目录，例如都使用 `workspace/data/...`，这样通常不需要额外改 `data.split_dir`。
+
+当前代码下，按训练阶段的最小需求准备即可：
+
+#### 3.5.1 `rare` 的最小文件集合
+
+如果只考虑联邦训练、不做攻击，服务端不再需要任何客户端 `train.csv`。
+服务端最少只需要三份客户端的 `val/test.csv`，因为验证和测试会按客户端各自上传的 scaler 统计进行恢复：
+
+```text
+../data/rare_earth_rawdata2/
+└── clients/
+    ├── Nd2O3/
+    │   ├── val.csv
+    │   └── test.csv
+    ├── CeO2/
+    │   ├── val.csv
+    │   └── test.csv
+    └── La2O3/
+        ├── val.csv
+        └── test.csv
+```
+
+客户端只需要自己的 `train.csv`：
+
+- `Nd2O3` 客户端：`../data/rare_earth_rawdata2/clients/Nd2O3/train.csv`
+- `CeO2` 客户端：`../data/rare_earth_rawdata2/clients/CeO2/train.csv`
+- `La2O3` 客户端：`../data/rare_earth_rawdata2/clients/La2O3/train.csv`
+
+#### 3.5.2 `mnist` / `cifar10` 的最小文件集合
+
+图像任务下，服务端当前推荐最少需要：
+
+- `server/val.pt` 和 `server/test.pt`，用于共享验证与测试
+
+以 `mnist` 为例，服务端最少目录为：
+
+```text
+../data/mnist/
+└── server/
+    ├── val.pt
+    └── test.pt
+```
+
+如果没有单独准备 `server/val.pt` 与 `server/test.pt`，服务端也可以退回读取各客户端的 `val.pt/test.pt` 来拼接评估集，但这不是推荐的最小部署。
+
+客户端只需要自己的 `train.pt`：
+
+- `m1` 客户端：`../data/mnist/clients/m1/train.pt`
+- `m2` 客户端：`../data/mnist/clients/m2/train.pt`
+- `m3` 客户端：`../data/mnist/clients/m3/train.pt`
+
+`cifar10` 同理，只是客户端目录换成 `c1/c2/c3`。
+
+各客户端只需要自己的 `train.pt`：
+
+- `m1` 客户端：`../data/mnist/clients/m1/train.pt`
+- `m2` 客户端：`../data/mnist/clients/m2/train.pt`
+- `m3` 客户端：`../data/mnist/clients/m3/train.pt`
+- `c1` 客户端：`../data/cifar10/clients/c1/train.pt`
+- `c2` 客户端：`../data/cifar10/clients/c2/train.pt`
+- `c3` 客户端：`../data/cifar10/clients/c3/train.pt`
+
+#### 3.5.3 一句话总结
+
+- 服务端：准备“服务端验证/测试需要的数据”以及“服务端启动时会读取到的客户端训练数据”
+- 客户端 `i`：只准备自己的本地训练集
+- 如果后续还要在某台机器上做离线攻击回放，那台机器还需要能访问被攻击客户端对应的训练集
+
 ## 4. 训练方式
 
 ### 4.1 单机直接训练（一般只用集中式训练）
@@ -340,8 +418,8 @@ python -m fedlab.entrypoints.train   --config configs/cifar10/centralized.yaml  
 - 客户端 `grpc.server_address` 需要指向服务器的实际 `IP:PORT`
 - 客户端 `client-id` 必须与 `data.clients` 一致
 - 下面示例里的默认地址使用 `127.0.0.1`，表示服务端和客户端都在本机运行；如果跨机器部署，请把它替换成服务器的实际 IP，并根据需要调整端口
-- 客户端只需要能访问自己的本地训练数据；图像任务下通常只需要 `split_dir/clients/<client_id>/`，时间序列任务下通常只需要自己的客户端原始数据或本地切分结果
-- 服务端不执行攻击，也不需要客户端完整训练集；服务端主要需要全局验证/测试所依赖的数据，以及正常聚合所需配置
+- 客户端只需要能访问自己的本地训练数据；图像任务下通常只需要 `split_dir/clients/<client_id>/train.pt`，时间序列任务下通常只需要自己的 `train.csv`
+- 服务端不执行攻击；训练阶段到底需要哪些最小数据，请直接以第 3.5 节和第 4.2.0 节为准
 - EGA 首轮会先等待服务端准备 codec，然后再开始真正的第 0 轮训练；首次等待时间较长时属于正常现象
 
 推荐把 `experiment.output_dir` 设到 `../outputs/...`，这样实验产物会落在 `src` 外层，避免污染代码目录。客户端会在本地额外写日志到：
@@ -356,19 +434,20 @@ python -m fedlab.entrypoints.train   --config configs/cifar10/centralized.yaml  
 
 - 单个客户端最少只需要自己的本地训练数据。
   对图像任务，通常就是 `split_dir/clients/<client_id>/train.pt`。
-  对 `rare`，通常就是该客户端自己的原始 Excel，或者预处理后该客户端自己的 `train.csv`。
+  对 `rare`，通常就是该客户端自己的预处理后 `train.csv`。
 - 单个客户端通常不需要别的客户端的训练集，也不需要全局训练集。
 - 单个客户端在当前默认训练流程下也不依赖自己的本地验证集和测试集；联邦训练阶段的验证/测试主要由服务端完成。
-- 服务端最少需要：配置文件、全局验证集、全局测试集，以及正常聚合所需的模型与算法配置。
-- 服务端不需要任一客户端的完整训练集副本，也不需要所有客户端训练集的汇总文件。
-- 如果某个客户端和服务端部署在同一台机器上，也仍然只要求该客户端本地能访问自己的训练数据；其他客户端数据缺失不会影响它启动。
+- 服务端在联邦训练阶段只负责验证和测试，不再读取客户端训练集。
+  对 `mnist` / `cifar10`，推荐最少需要 `server/val.pt` 和 `server/test.pt`；若缺失，服务端也可以退回读取各客户端的 `val.pt/test.pt` 来拼接评估集。
+  对 `rare`，最少需要三份客户端的 `val.csv/test.csv`；对应的标准化统计由客户端在注册阶段上传给服务端。
+- 如果某个客户端和服务端部署在同一台机器上，也仍然只要求该客户端本地能访问自己的训练数据；别的客户端训练集缺失不会影响这个客户端进程本身启动，也不会影响服务端完成初始化，只要服务端自己的验证/测试数据齐全即可。
 
-换句话说，当前框架在训练阶段并不要求“每个节点都持有所有客户端的 train/val/test”。最小可行部署通常是：
+换句话说，当前框架在训练阶段的最小可行部署通常是：
 
-- 服务端：全局 `val/test`
+- 服务端：服务端评估所需数据
 - 客户端 `i`：自己的 `train`
 
-如果你额外把本地 `val/test` 也放在客户端节点上不会出错，但不是训练必需条件。
+如果你额外把本地 `val/test` 也放在客户端节点上不会出错，但不是训练必需条件。更具体的最小目录请直接看上面的第 3.5 节。
 
 #### 4.2.0.1 gRPC 外部端口流量监控
 

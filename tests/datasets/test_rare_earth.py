@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from fedlab.datasets.rare_earth import Standardizer, WindowDataset, split_array
 
@@ -113,3 +114,47 @@ def test_build_federated_loaders_can_disable_train_shuffle(tmp_path):
 
     np.testing.assert_allclose(first_x_a, first_x_b)
     np.testing.assert_allclose(first_y_a, first_y_b)
+
+
+def test_build_server_rare_earth_evaluation_loaders_from_registration_metadata(tmp_path):
+    from fedlab.datasets.rare_earth import build_server_rare_earth_evaluation_loaders
+
+    for client, start_offset in [("Nd2O3", 0), ("CeO2", 100), ("La2O3", 200)]:
+        client_dir = tmp_path / "clients" / client
+        client_dir.mkdir(parents=True)
+        for split, start, length in [("val", start_offset + 40, 20), ("test", start_offset + 60, 20)]:
+            dates = [f"2020-01-{(idx % 28) + 1:02d}" for idx in range(start, start + length)]
+            values = np.arange(start, start + length, dtype="float32")
+            rows = "date,value\n" + "\n".join(f"{date},{value}" for date, value in zip(dates, values)) + "\n"
+            (client_dir / f"{split}.csv").write_text(rows, encoding="utf-8")
+
+    registration_metadata = {
+        "Nd2O3": {"scale_mean": [19.5], "scale_std": [11.54339599609375]},
+        "CeO2": {"scale_mean": [119.5], "scale_std": [11.54339599609375]},
+        "La2O3": {"scale_mean": [219.5], "scale_std": [11.54339599609375]},
+    }
+    config = {
+        "runtime": {"seed": 2026},
+        "data": {
+            "split_dir": str(tmp_path),
+            "clients": ["Nd2O3", "CeO2", "La2O3"],
+            "seq_len": 4,
+            "pred_len": 2,
+            "batch_size": 8,
+        },
+    }
+
+    val_loader, test_loader = build_server_rare_earth_evaluation_loaders(config, registration_metadata=registration_metadata)
+
+    assert val_loader is not None
+    assert test_loader is not None
+    assert len(val_loader) > 0
+    assert len(test_loader) > 0
+    assert getattr(val_loader.loaders[0], "scaler", None) is not None
+    first_x, _ = next(iter(val_loader.loaders[0]))
+    first_value = float(first_x[0, 0, 0])
+    expected_raw = float(
+        build_server_rare_earth_evaluation_loaders.__globals__['read_value_frame'](tmp_path / 'clients' / 'Nd2O3' / 'val.csv')['value'].iloc[0]
+    )
+    expected_value = np.float32((expected_raw - 19.5) / 11.54339599609375)
+    assert first_value == pytest.approx(float(expected_value))

@@ -361,7 +361,7 @@ def _extract_attack_payload(
 
 def _capture_round_update_records(
     config: dict[str, Any],
-    clients: list[FederatedClient],
+    clients: list[Any],
     results,
     round_index: int,
     max_rounds: int,
@@ -374,10 +374,11 @@ def _capture_round_update_records(
     if not _should_capture_update_payload(config, round_index, max_rounds):
         return []
     round_context = round_context or {}
+    client_ids = [client if isinstance(client, str) else client.client_id for client in clients]
     results_by_client = {result.client_id: result for result in results}
     records: list[dict[str, Any]] = []
-    for client in clients:
-        result = results_by_client[client.client_id]
+    for client_id in client_ids:
+        result = results_by_client[client_id]
         target_update = _extract_attack_payload(
             config,
             result,
@@ -389,7 +390,7 @@ def _capture_round_update_records(
         )
         records.append(
             {
-                "client_id": client.client_id,
+                "client_id": client_id,
                 "round_index": int(round_index),
                 "round_base_state": _clone_state(round_base_state),
                 "target_update": _clone_state(target_update),

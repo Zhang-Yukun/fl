@@ -938,6 +938,11 @@ def test_grpc_coordinator_restores_best_validation_checkpoint(tmp_path, monkeypa
             test_loader,
         ),
     )
+    monkeypatch.setattr(
+        __import__('fedlab.communication.grpc_training', fromlist=['build_server_evaluation_loaders']),
+        'build_server_evaluation_loaders',
+        lambda _config, registration_metadata=None: (val_loader, test_loader),
+    )
 
     def fake_evaluate(model, loader, device):
         weight = float(model.weight.item())
@@ -990,3 +995,82 @@ def test_grpc_coordinator_restores_best_validation_checkpoint(tmp_path, monkeypa
     assert summary["best_val_mse"] == 0.1
     assert summary["test_checkpoint"] == "best_validation"
     assert float(saved_state["weight"].item()) == pytest.approx(1.0)
+
+
+def test_grpc_server_classification_only_needs_evaluation_splits(tmp_path):
+    split_dir = tmp_path / 'classification_eval_only'
+    for client_index, client_id in enumerate(['m1', 'm2', 'm3'], start=1):
+        _write_classification_split(split_dir, client_id, 'val', torch.full((3, 1, 4, 4), float(client_index + 10)), torch.arange(3, dtype=torch.long) % 3)
+        _write_classification_split(split_dir, client_id, 'test', torch.full((3, 1, 4, 4), float(client_index + 20)), torch.arange(3, dtype=torch.long) % 3)
+    (split_dir / 'summary.json').write_text(json.dumps({'class_names': ['0', '1', '2']}), encoding='utf-8')
+
+    config = _classification_grpc_config(tmp_path, algorithm='fedavg')
+    config['data']['split_dir'] = str(split_dir)
+
+    coordinator = GrpcFederatedCoordinator(config)
+
+    assert coordinator.expected_clients == ('m1', 'm2', 'm3')
+    assert coordinator.evaluation_ready is True
+    assert coordinator.server.total_train_samples is None
+    assert len(coordinator.server.val_loader) > 0
+    assert len(coordinator.server.test_loader) > 0
+
+
+def test_grpc_server_forecasting_only_needs_val_test_and_uploaded_scalers(tmp_path):
+    split_dir = tmp_path / 'rare_eval_only'
+    for client, start_offset in [('Nd2O3', 0), ('CeO2', 100), ('La2O3', 200)]:
+        client_dir = split_dir / 'clients' / client
+        client_dir.mkdir(parents=True, exist_ok=True)
+        for split, start, length in [('val', start_offset + 40, 20), ('test', start_offset + 60, 20)]:
+            dates = [f'2020-01-{(index % 28) + 1:02d}' for index in range(start, start + length)]
+            values = torch.arange(start, start + length, dtype=torch.float32).tolist()
+            rows = 'date,value\n' + '\n'.join(f'{date},{value}' for date, value in zip(dates, values)) + '\n'
+            (client_dir / f'{split}.csv').write_text(rows, encoding='utf-8')
+
+    config = {
+        'experiment': {'output_dir': str(tmp_path / 'forecasting_server_eval_only'), 'mode': 'federated'},
+        'runtime': {'device': 'cpu', 'log_level': 'INFO', 'deterministic': True, 'seed': 2026},
+        'task': {'type': 'forecasting'},
+        'data': {
+            'split_dir': str(split_dir),
+            'clients': ['Nd2O3', 'CeO2', 'La2O3'],
+            'seq_len': 4,
+            'pred_len': 2,
+            'batch_size': 8,
+            'shuffle_train': False,
+            'num_workers': 0,
+        },
+        'model': {'name': 'lstm', 'input_dim': 1, 'hidden_dim': 8, 'num_layers': 1, 'dropout': 0.0, 'pred_len': 2},
+        'training': {'epochs': 1, 'lr': 0.001, 'optimizer': 'adam', 'loss': 'mse', 'patience': 1, 'min_delta': 0.0},
+        'centralized': {},
+        'federated': {'algorithm': 'fedavg', 'rounds': 1},
+        'replay_capture': {'enabled': True, 'frequency_rounds': 1},
+        'attack': {'enabled': False, 'async_enabled': False, 'device': 'cpu'},
+        'tracking': {'enabled': False},
+        'evaluation': {'metrics': ['mse', 'mae', 'mape']},
+        'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},
+        'grpc': {'address': '127.0.0.1:50051', 'server_address': '127.0.0.1:50051', 'poll_seconds': 0.05, 'max_message_mb': 32.0},
+    }
+
+    coordinator = GrpcFederatedCoordinator(config)
+
+    assert coordinator.evaluation_ready is False
+    assert coordinator.server.val_loader is None
+    assert coordinator.server.test_loader is None
+
+    for client_id, local_train_samples, scale_mean in [('Nd2O3', 35, [19.5]), ('CeO2', 35, [119.5]), ('La2O3', 35, [219.5])]:
+        response = coordinator.register_client({
+            'client_id': client_id,
+            'local_train_samples': local_train_samples,
+            'scale_mean': scale_mean,
+            'scale_std': [11.54339599609375],
+        })
+        assert response['accepted'] is True
+
+    payload = coordinator.get_global()
+    assert payload['ready'] is True
+    assert payload['round_context']['total_clients'] == 3
+    assert payload['round_context']['total_train_samples'] == 105
+    assert coordinator.evaluation_ready is True
+    assert len(coordinator.server.val_loader) > 0
+    assert len(coordinator.server.test_loader) > 0

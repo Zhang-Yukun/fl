@@ -20,7 +20,7 @@ from typing import Any
 from loguru import logger
 
 from fedlab.communication.grpc_service import FederatedRpcClient, FederatedRpcServer
-from fedlab.datasets import build_federated_loaders
+from fedlab.datasets import build_federated_loaders, build_server_evaluation_loaders
 from fedlab.datasets.image_classification import build_client_image_classification_train_loader
 from fedlab.datasets.rare_earth import build_client_rare_earth_train_loader
 from fedlab.federated.algorithms import (
@@ -135,27 +135,21 @@ class GrpcFederatedCoordinator:
         configure_random_seed(config, device=self.device)
         validate_transport_modes(config)
         self.tracker = Tracker(config)
-        train_loaders, val_loader, test_loader = build_federated_loaders(config)
-        self.expected_clients = tuple(train_loaders.keys())
+        configured_clients = tuple(config.get('data', {}).get('clients') or ())
+        if configured_clients:
+            self.expected_clients = configured_clients
+        else:
+            train_loaders, _, _ = build_federated_loaders(config)
+            self.expected_clients = tuple(train_loaders.keys())
+        val_loader, test_loader = build_server_evaluation_loaders(config)
         self.server = FederatedServer(config, val_loader, test_loader, self.device)
-        total_train_samples = sum(_loader_num_samples(loader) for loader in train_loaders.values())
-        self.server.total_clients = len(train_loaders)
-        self.server.total_train_samples = total_train_samples
+        self.server.total_clients = len(self.expected_clients)
+        self.server.total_train_samples = None
         self.registered_client_samples: dict[str, int] = {}
         self.registered_client_metadata: dict[str, dict[str, Any]] = {}
         self.registration_ready = False
-        self.attack_clients = [
-            FederatedClient(
-                client_id,
-                loader,
-                config,
-                self.device,
-                total_train_samples=total_train_samples,
-                total_clients=len(train_loaders),
-                allow_ega_pretrain=False,
-            )
-            for client_id, loader in train_loaders.items()
-        ]
+        self.evaluation_ready = val_loader is not None and test_loader is not None
+        self.capture_client_ids = list(self.expected_clients)
         self.compressed = is_compressed_algorithm(config)
         self.max_rounds = int(config['federated'].get('rounds', 20))
         self.primary_metric_name = _configured_primary_metric_name(config)
@@ -246,11 +240,6 @@ class GrpcFederatedCoordinator:
                 'scale_mean': None if scale_mean is None else [float(value) for value in scale_mean],
                 'scale_std': None if scale_std is None else [float(value) for value in scale_std],
             }
-            for attack_client in self.attack_clients:
-                if attack_client.client_id == client_id:
-                    setattr(attack_client, 'registered_scale_mean', self.registered_client_metadata[client_id]['scale_mean'])
-                    setattr(attack_client, 'registered_scale_std', self.registered_client_metadata[client_id]['scale_std'])
-                    break
             self.registration_ready = set(self.expected_clients).issubset(self.registered_client_samples)
             if previous is None:
                 logger.info(
@@ -264,10 +253,21 @@ class GrpcFederatedCoordinator:
                 logger.warning('Updated client {} registration local_train_samples {} -> {}', client_id, previous, local_train_samples)
             if self.registration_ready:
                 self.server.total_train_samples = sum(self.registered_client_samples[registered_id] for registered_id in self.expected_clients)
+                if not self.evaluation_ready:
+                    val_loader, test_loader = build_server_evaluation_loaders(
+                        self.config,
+                        registration_metadata=self.registered_client_metadata,
+                    )
+                    if val_loader is None or test_loader is None:
+                        raise RuntimeError('Server evaluation loaders are not ready after client registration')
+                    self.server.val_loader = val_loader
+                    self.server.test_loader = test_loader
+                    self.evaluation_ready = True
                 logger.info(
-                    'All clients registered for gRPC training: total_clients={} total_train_samples={}',
+                    'All clients registered for gRPC training: total_clients={} total_train_samples={} evaluation_ready={}',
                     self.server.total_clients,
                     self.server.total_train_samples,
+                    self.evaluation_ready,
                 )
             return {
                 'accepted': True,
@@ -324,7 +324,7 @@ class GrpcFederatedCoordinator:
         """Return the current global payload for remote clients."""
 
         with self.lock:
-            ready = self.runtime_ready and self.registration_ready
+            ready = self.runtime_ready and self.registration_ready and self.evaluation_ready
             return {
                 'round': self.round_index,
                 'state': self.server.global_state if ready else None,
@@ -382,7 +382,7 @@ class GrpcFederatedCoordinator:
             logger.debug('Skip gRPC val prediction plot: {}', exc)
         captured_update_records = _capture_round_update_records(
             self.config,
-            self.attack_clients,
+            self.capture_client_ids,
             results,
             round_index,
             self.max_rounds,
@@ -526,7 +526,7 @@ class GrpcFederatedCoordinator:
                         self.tracker.log({**_wandb_round_payload(record), **_wandb_cumulative_communication_payload(self.server.history)}, step=self.round_index)
                     captured_update_records = _capture_round_update_records(
                         self.config,
-                        self.attack_clients,
+                        self.capture_client_ids,
                         results,
                         self.round_index,
                         self.max_rounds,
