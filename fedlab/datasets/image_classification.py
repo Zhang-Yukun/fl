@@ -96,34 +96,42 @@ def _build_loader_from_payload(
     )
 
 
-def _load_server_or_merged_eval_payloads(split_dir: Path, clients: list[str]) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
+def _load_server_or_merged_eval_payloads(split_dir: Path, clients: list[str]) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor] | None]:
     """Load shared validation/test payloads without touching any client train split."""
 
     server_dir = split_dir / 'server'
     val_payload = read_split_payload(server_dir / 'val.pt') if (server_dir / 'val.pt').exists() else None
     test_payload = read_split_payload(server_dir / 'test.pt') if (server_dir / 'test.pt').exists() else None
-    if val_payload is not None and test_payload is not None:
+    if val_payload is not None:
         return val_payload, test_payload
 
     val_images = []
     val_labels = []
     test_images = []
     test_labels = []
+    have_test_payloads = True
     for client_id in clients:
         client_dir = split_dir / 'clients' / client_id
         client_val = read_split_payload(client_dir / 'val.pt')
-        client_test = read_split_payload(client_dir / 'test.pt')
         val_images.append(client_val['images'])
         val_labels.append(client_val['labels'])
-        test_images.append(client_test['images'])
-        test_labels.append(client_test['labels'])
+        client_test_path = client_dir / 'test.pt'
+        if client_test_path.exists():
+            client_test = read_split_payload(client_test_path)
+            test_images.append(client_test['images'])
+            test_labels.append(client_test['labels'])
+        else:
+            have_test_payloads = False
+    merged_test_payload = None
+    if have_test_payloads and test_images:
+        merged_test_payload = {'images': torch.cat(test_images, dim=0), 'labels': torch.cat(test_labels, dim=0)}
     return (
         {'images': torch.cat(val_images, dim=0), 'labels': torch.cat(val_labels, dim=0)},
-        {'images': torch.cat(test_images, dim=0), 'labels': torch.cat(test_labels, dim=0)},
+        merged_test_payload,
     )
 
 
-def build_server_image_classification_evaluation_loaders(config: dict[str, Any]) -> tuple[DataLoader, DataLoader]:
+def build_server_image_classification_evaluation_loaders(config: dict[str, Any]) -> tuple[DataLoader, DataLoader | None]:
     """Build only the server-side validation/test loaders for classification."""
 
     data_cfg = config.get('data', {})
@@ -144,15 +152,17 @@ def build_server_image_classification_evaluation_loaders(config: dict[str, Any])
         identity='server:val',
         class_names=class_names,
     )
-    test_loader = _build_loader_from_payload(
-        test_payload,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        seed=seed,
-        identity='server:test',
-        class_names=class_names,
-    )
+    test_loader = None
+    if test_payload is not None:
+        test_loader = _build_loader_from_payload(
+            test_payload,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            seed=seed,
+            identity='server:test',
+            class_names=class_names,
+        )
     return val_loader, test_loader
 
 

@@ -307,7 +307,7 @@ def _split_dir_has_client_train_splits(split_dir: Path, clients: list[str]) -> b
     return all((split_dir / 'clients' / client_id / 'train.csv').exists() for client_id in clients)
 
 
-def build_federated_loaders_from_split_dir(data_cfg: dict[str, Any], seed: int | None = None) -> tuple[dict[str, DataLoader], DataLoader, DataLoader]:
+def build_federated_loaders_from_split_dir(data_cfg: dict[str, Any], seed: int | None = None) -> tuple[dict[str, DataLoader], DataLoader, DataLoader | None]:
     """Build loaders from ``split_dir/clients/<client>/{train,val,test}.csv``.
 
     Example:
@@ -325,18 +325,29 @@ def build_federated_loaders_from_split_dir(data_cfg: dict[str, Any], seed: int |
     train_loaders: dict[str, DataLoader] = {}
     val_loaders = []
     test_loaders = []
+    have_test_splits = True
     for client in clients:
         client_dir = split_dir / "clients" / client
         train = read_value_frame(client_dir / "train.csv")[["value"]].to_numpy(dtype="float32")
         val = read_value_frame(client_dir / "val.csv")[["value"]].to_numpy(dtype="float32")
-        test = read_value_frame(client_dir / "test.csv")[["value"]].to_numpy(dtype="float32")
-        train_loader, val_loader, test_loader, _ = make_loaders_from_splits(
-            train, val, test, seq_len, pred_len, batch_size, num_workers, shuffle_train, seed, client
-        )
+        test_path = client_dir / "test.csv"
+        if test_path.exists():
+            test = read_value_frame(test_path)[["value"]].to_numpy(dtype="float32")
+            train_loader, val_loader, test_loader, _ = make_loaders_from_splits(
+                train, val, test, seq_len, pred_len, batch_size, num_workers, shuffle_train, seed, client
+            )
+        else:
+            have_test_splits = False
+            train_loader, val_loader, _, _ = make_loaders_from_splits(
+                train, val, val, seq_len, pred_len, batch_size, num_workers, shuffle_train, seed, client
+            )
+            test_loader = None
         train_loaders[client] = train_loader
         val_loaders.append(val_loader)
-        test_loaders.append(test_loader)
-    return train_loaders, _ConcatLoader(val_loaders), _ConcatLoader(test_loaders)
+        if test_loader is not None:
+            test_loaders.append(test_loader)
+    merged_test_loader = _ConcatLoader(test_loaders) if have_test_splits and test_loaders else None
+    return train_loaders, _ConcatLoader(val_loaders), merged_test_loader
 
 
 def build_server_rare_earth_evaluation_loaders(
@@ -363,11 +374,11 @@ def build_server_rare_earth_evaluation_loaders(
     num_workers = int(data_cfg.get('num_workers', 0))
     val_loaders = []
     test_loaders = []
+    have_test_splits = True
     for client_id in clients:
         client_dir = split_dir / 'clients' / client_id
         scaler = _standardizer_from_registration(registration_metadata, client_id)
         val_values = read_value_frame(client_dir / 'val.csv')[['value']].to_numpy(dtype='float32')
-        test_values = read_value_frame(client_dir / 'test.csv')[['value']].to_numpy(dtype='float32')
         val_loaders.append(
             _build_eval_loader_from_values(
                 val_values,
@@ -380,19 +391,25 @@ def build_server_rare_earth_evaluation_loaders(
                 identity=client_id + ':server:val',
             )
         )
-        test_loaders.append(
-            _build_eval_loader_from_values(
-                test_values,
-                scaler,
-                seq_len=seq_len,
-                pred_len=pred_len,
-                batch_size=batch_size,
-                num_workers=num_workers,
-                seed=seed,
-                identity=client_id + ':server:test',
+        test_path = client_dir / 'test.csv'
+        if test_path.exists():
+            test_values = read_value_frame(test_path)[['value']].to_numpy(dtype='float32')
+            test_loaders.append(
+                _build_eval_loader_from_values(
+                    test_values,
+                    scaler,
+                    seq_len=seq_len,
+                    pred_len=pred_len,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    seed=seed,
+                    identity=client_id + ':server:test',
+                )
             )
-        )
-    return _ConcatLoader(val_loaders), _ConcatLoader(test_loaders)
+        else:
+            have_test_splits = False
+    merged_test_loader = _ConcatLoader(test_loaders) if have_test_splits and test_loaders else None
+    return _ConcatLoader(val_loaders), merged_test_loader
 
 
 def build_federated_loaders(config: dict[str, Any]) -> tuple[dict[str, DataLoader], DataLoader, DataLoader]:

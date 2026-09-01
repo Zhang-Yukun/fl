@@ -340,14 +340,16 @@ class FederatedServer:
 
         return self.evaluate_protocol()
 
-    def test_protocol(self) -> dict[str, float]:
-        """Evaluate the protocol-visible global model on the test set."""
+    def test_protocol(self) -> dict[str, float] | None:
+        """Evaluate the protocol-visible global model on the test set when available."""
 
+        if self.test_loader is None:
+            return None
         self.model.load_state_dict(self.global_state)
         return evaluate(self.model, self.test_loader, self.device)
 
-    def test_global(self) -> dict[str, float]:
-        """Evaluate the protocol-visible global model on the test set."""
+    def test_global(self) -> dict[str, float] | None:
+        """Evaluate the protocol-visible global model on the test set when available."""
 
         return self.test_protocol()
 

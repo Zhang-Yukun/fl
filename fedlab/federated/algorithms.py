@@ -178,7 +178,7 @@ def _round_history_communication_summary(history: list[RoundRecord]) -> dict[str
 def _build_federated_summary(
     *,
     server: FederatedServer,
-    test_metrics: dict[str, float],
+    test_metrics: dict[str, float] | None,
     total_elapsed: float,
     best_round: int,
     best_metrics: dict[str, float],
@@ -190,6 +190,7 @@ def _build_federated_summary(
     history = server.history
     last_privacy = history[-1] if history else None
     protocol_test = test_metrics if protocol_test_metrics is None else protocol_test_metrics
+    final_test_executed = test_metrics is not None
     primary_metric_name = _configured_primary_metric_name(server.config)
     summary = {
         "test": test_metrics,
@@ -197,7 +198,8 @@ def _build_federated_summary(
         "rounds": len(history),
         "total_time_seconds": total_elapsed,
         "best_round": best_round,
-        "test_checkpoint": "best_validation",
+        "test_checkpoint": "best_validation" if final_test_executed else None,
+        "final_test_executed": final_test_executed,
         "last_parameter_download_compression_ratio": history[-1].parameter_download_compression_ratio if history else 0.0,
         "last_parameter_upload_compression_ratio": history[-1].parameter_upload_compression_ratio if history else 0.0,
         "last_parameter_total_communication_ratio": history[-1].parameter_total_communication_ratio if history else 0.0,
@@ -784,24 +786,29 @@ def run_federated(config: dict[str, Any]) -> dict[str, Any]:
     final_test_step = max(len(server.history), best_round + 1)
     total_elapsed = time.perf_counter() - start_time
     server.save(output_dir, config)
-    final_log_payload = {**{f"test/{key}": value for key, value in test_metrics.items()}, "run/total_time_seconds": total_elapsed}
+    final_log_payload = {"run/total_time_seconds": total_elapsed, "run/final_test_executed": test_metrics is not None}
+    if test_metrics is not None:
+        final_log_payload.update({f"test/{key}": value for key, value in test_metrics.items()})
     if protocol_test_metrics is not None:
         final_log_payload.update({f"protocol_test/{key}": value for key, value in protocol_test_metrics.items()})
     tracker.log(final_log_payload)
-    try:
-        _log_prediction_views(
-            tracker,
-            "prediction/federated/test_protocol",
-            "federated test protocol prediction",
-            server.model,
-            test_loader,
-            device,
-            step=final_test_step,
-            client_ids=client_ids,
-            state=server.global_state,
-        )
-    except Exception as exc:
-        logger.debug("Skip federated prediction plot: {}", exc)
+    if test_metrics is not None and test_loader is not None:
+        try:
+            _log_prediction_views(
+                tracker,
+                "prediction/federated/test_protocol",
+                "federated test protocol prediction",
+                server.model,
+                test_loader,
+                device,
+                step=final_test_step,
+                client_ids=client_ids,
+                state=server.global_state,
+            )
+        except Exception as exc:
+            logger.debug("Skip federated prediction plot: {}", exc)
+    else:
+        logger.info("Skip final federated test because no test loader is available")
     summary = _build_federated_summary(
         server=server,
         test_metrics=test_metrics,

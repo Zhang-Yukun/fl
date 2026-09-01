@@ -158,3 +158,23 @@ def test_build_server_rare_earth_evaluation_loaders_from_registration_metadata(t
     )
     expected_value = np.float32((expected_raw - 19.5) / 11.54339599609375)
     assert first_value == pytest.approx(float(expected_value))
+
+
+def test_build_federated_loaders_from_split_dir_without_test_splits(tmp_path):
+    from fedlab.datasets.rare_earth import build_federated_loaders
+
+    for client in ["Nd2O3", "CeO2", "La2O3"]:
+        client_dir = tmp_path / "clients" / client
+        client_dir.mkdir(parents=True)
+        for split, start, length in [("train", 0, 40), ("val", 40, 30)]:
+            dates = [f"2020-01-{(idx % 28) + 1:02d}" for idx in range(start, start + length)]
+            values = np.arange(start, start + length, dtype="float32")
+            rows = "date,value\n" + "\n".join(f"{date},{value}" for date, value in zip(dates, values)) + "\n"
+            (client_dir / f"{split}.csv").write_text(rows, encoding="utf-8")
+    config = {"data": {"split_dir": str(tmp_path), "clients": ["Nd2O3", "CeO2", "La2O3"], "seq_len": 4, "pred_len": 2, "batch_size": 8}}
+
+    train_loaders, val_loader, test_loader = build_federated_loaders(config)
+
+    assert set(train_loaders) == {"Nd2O3", "CeO2", "La2O3"}
+    assert len(val_loader) > 0
+    assert test_loader is None

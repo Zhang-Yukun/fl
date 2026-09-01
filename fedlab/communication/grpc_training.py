@@ -148,7 +148,7 @@ class GrpcFederatedCoordinator:
         self.registered_client_samples: dict[str, int] = {}
         self.registered_client_metadata: dict[str, dict[str, Any]] = {}
         self.registration_ready = False
-        self.evaluation_ready = val_loader is not None and test_loader is not None
+        self.evaluation_ready = val_loader is not None
         self.capture_client_ids = list(self.expected_clients)
         self.compressed = is_compressed_algorithm(config)
         self.max_rounds = int(config['federated'].get('rounds', 20))
@@ -258,8 +258,8 @@ class GrpcFederatedCoordinator:
                         self.config,
                         registration_metadata=self.registered_client_metadata,
                     )
-                    if val_loader is None or test_loader is None:
-                        raise RuntimeError('Server evaluation loaders are not ready after client registration')
+                    if val_loader is None:
+                        raise RuntimeError('Server validation loader is not ready after client registration')
                     self.server.val_loader = val_loader
                     self.server.test_loader = test_loader
                     self.evaluation_ready = True
@@ -408,7 +408,7 @@ class GrpcFederatedCoordinator:
         """Persist final model artifacts and a summary compatible with the main FL path."""
 
         self.server.global_state = _clone_state(self.best_global_state)
-        logger.info('Restored best gRPC federated checkpoint from round {} for final test', self.best_round)
+        logger.info('Restored best gRPC federated checkpoint from round {} for finalization', self.best_round)
         test_metrics = self.server.test_global()
         protocol_test_metrics = test_metrics
         self.server.save(self.output_dir, self.config)
@@ -424,10 +424,10 @@ class GrpcFederatedCoordinator:
             transport='grpc',
         )
         final_log_payload = {
-            **{f'test/{key}': value for key, value in test_metrics.items()},
             'run/rounds': len(self.server.history),
             'run/total_time_seconds': total_elapsed,
             'run/transport': 'grpc',
+            'run/final_test_executed': test_metrics is not None,
             'run/best_round': self.best_round,
             'run/best_val_metric_name': self.primary_metric_name,
             'run/best_val_metric_value': self.best_metrics[self.primary_metric_name],
@@ -438,23 +438,28 @@ class GrpcFederatedCoordinator:
             'privacy/sampling_rate': summary['privacy_sampling_rate'],
             'privacy/adaptive_clip_norm': summary['adaptive_clip_norm'],
         }
+        if test_metrics is not None:
+            final_log_payload.update({f'test/{key}': value for key, value in test_metrics.items()})
         if protocol_test_metrics is not None:
             final_log_payload.update({f'protocol_test/{key}': value for key, value in protocol_test_metrics.items()})
         self.tracker.log(final_log_payload)
-        try:
-            _log_prediction_views(
-                self.tracker,
-                'prediction/grpc/test_protocol',
-                'grpc test protocol prediction',
-                self.server.model,
-                self.server.test_loader,
-                self.server.device,
-                step=final_test_step,
-                client_ids=list(self.expected_clients),
-                state=self.server.global_state,
-            )
-        except Exception as exc:
-            logger.debug('Skip gRPC prediction plot: {}', exc)
+        if test_metrics is not None and self.server.test_loader is not None:
+            try:
+                _log_prediction_views(
+                    self.tracker,
+                    'prediction/grpc/test_protocol',
+                    'grpc test protocol prediction',
+                    self.server.model,
+                    self.server.test_loader,
+                    self.server.device,
+                    step=final_test_step,
+                    client_ids=list(self.expected_clients),
+                    state=self.server.global_state,
+                )
+            except Exception as exc:
+                logger.debug('Skip gRPC prediction plot: {}', exc)
+        else:
+            logger.info('Skip final gRPC test because no test loader is available')
         self.tracker.finish()
         with (self.output_dir / 'summary.json').open('w', encoding='utf-8') as handle:
             json.dump(summary, handle, ensure_ascii=False, indent=2)

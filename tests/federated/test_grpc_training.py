@@ -1074,3 +1074,26 @@ def test_grpc_server_forecasting_only_needs_val_test_and_uploaded_scalers(tmp_pa
     assert coordinator.evaluation_ready is True
     assert len(coordinator.server.val_loader) > 0
     assert len(coordinator.server.test_loader) > 0
+
+
+def test_grpc_server_classification_without_test_split_skips_final_test(tmp_path):
+    split_dir = tmp_path / 'classification_no_test'
+    for client_index, client_id in enumerate(['m1', 'm2', 'm3'], start=1):
+        _write_classification_split(split_dir, client_id, 'train', torch.full((6, 1, 4, 4), float(client_index)), torch.arange(6, dtype=torch.long) % 3)
+        _write_classification_split(split_dir, client_id, 'val', torch.full((3, 1, 4, 4), float(client_index + 10)), torch.arange(3, dtype=torch.long) % 3)
+    (split_dir / 'summary.json').write_text(json.dumps({'class_names': ['0', '1', '2']}), encoding='utf-8')
+
+    config = _classification_grpc_config(tmp_path, algorithm='fedavg')
+    config['data']['split_dir'] = str(split_dir)
+
+    coordinator = GrpcFederatedCoordinator(config)
+    response = _submit_one_round(coordinator, config)
+    summary = json.loads((Path(config['experiment']['output_dir']) / 'summary.json').read_text(encoding='utf-8'))
+
+    assert response['accepted'] is True
+    assert response['stop'] is True
+    assert coordinator.server.test_loader is None
+    assert summary['test'] is None
+    assert summary['protocol_test'] is None
+    assert summary['final_test_executed'] is False
+    assert summary['test_checkpoint'] is None
