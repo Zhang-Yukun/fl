@@ -613,7 +613,11 @@ def run_client(config: dict[str, Any], client_id: str) -> None:
     poll_seconds = float(config.get('grpc', {}).get('poll_seconds', 1.0))
     max_message_mb = float(config.get('grpc', {}).get('max_message_mb', 256.0))
     max_message_length = int(max_message_mb * 1024 * 1024)
-    setup_logging(Path(config['experiment']['output_dir']) / f'client_{client_id}', config.get('runtime', {}).get('log_level', 'INFO'))
+    client_output_dir = Path(config['experiment']['output_dir']) / f'client_{client_id}'
+    setup_logging(client_output_dir, config.get('runtime', {}).get('log_level', 'INFO'))
+    config_formats = config.get('artifacts', {}).get('config_formats')
+    saved_configs = save_experiment_config(config, client_output_dir, config_formats)
+    logger.info('Client {} saved startup config artifacts: {}', client_id, [str(path) for path in saved_configs])
     configure_torch_runtime(config)
     device = resolve_device(config)
     configure_random_seed(config, device=device)
