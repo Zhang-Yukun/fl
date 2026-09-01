@@ -392,8 +392,7 @@ python -m fedlab.tools.prepare_role_datasets \
 python -m fedlab.tools.prepare_role_datasets \
   --task rare \
   --source-root ../data \
-  --output-root ../data/role_datasets \
-  --evaluation-context ../outputs/exp/rare/multi_sync/42/mse/fedavg/evaluation_context.json
+  --output-root ../data/role_datasets
 ```
 
 生成后的目录按角色组织，大致如下：
@@ -425,14 +424,134 @@ python -m fedlab.tools.prepare_role_datasets \
     └── summary.json
 ```
 
-其中：
+如果你准备把这些角色目录真正分发到不同机器，建议不要直接在目标机器上保留 `role_datasets/...` 这一层，而是把对应角色目录里的内容复制到目标机器最终要读取的 `split_dir` 根目录下。
 
-- `server/` 可以直接部署到联邦服务端机器，并通过 `--override data.split_dir=.../server` 读取
-- `client/<client_id>/` 可以直接部署到对应客户端机器，并通过 `--override data.split_dir=.../client/<client_id>` 读取
-- `attack/` 已经是攻击回放原生可读的标准 `split_dir` 格式，可以直接通过 `--override data.split_dir=.../attack` 传给 `replay_saved_update_attacks` / `replay_saved_update_dlg` / `replay_saved_update_idlg`
-- `test/` 可以直接部署到离线测试机器，并通过 `--data-dir .../test` 传给 `replay_saved_model_evaluation`
+以 `rare` 为例，假设四类机器最终都使用各自本地的 `workspace/data/rare/` 作为读取根目录，那么部署后的目录建议长这样。
 
-`mnist` 和 `cifar10` 同理，只是文件从 `.csv` 变成 `.pt`；其中 `attack/clients/<client_id>/train.pt` 也同样可以直接给攻击回放使用。
+服务端机器：
+
+```text
+workspace/
+├── data/
+│   └── rare/
+│       ├── clients/
+│       │   ├── Nd2O3/val.csv
+│       │   ├── CeO2/val.csv
+│       │   └── La2O3/val.csv
+│       └── summary.json
+└── src/
+```
+
+这时服务端直接读取：
+
+```yaml
+data:
+  split_dir: ../data/rare
+```
+
+也就是说，把 `../data/role_datasets/rare/server/` 目录里的内容整体复制到服务端机器的 `workspace/data/rare/` 下。
+
+客户端 `Nd2O3` 机器：
+
+```text
+workspace/
+├── data/
+│   └── rare/
+│       ├── clients/
+│       │   └── Nd2O3/train.csv
+│       └── summary.json
+└── src/
+```
+
+客户端 `CeO2` 机器：
+
+```text
+workspace/
+├── data/
+│   └── rare/
+│       ├── clients/
+│       │   └── CeO2/train.csv
+│       └── summary.json
+└── src/
+```
+
+客户端 `La2O3` 机器：
+
+```text
+workspace/
+├── data/
+│   └── rare/
+│       ├── clients/
+│       │   └── La2O3/train.csv
+│       └── summary.json
+└── src/
+```
+
+也就是说，分别把：
+
+- `../data/role_datasets/rare/client/Nd2O3/` 的内容复制到 `Nd2O3` 客户端机器的 `workspace/data/rare/`
+- `../data/role_datasets/rare/client/CeO2/` 的内容复制到 `CeO2` 客户端机器的 `workspace/data/rare/`
+- `../data/role_datasets/rare/client/La2O3/` 的内容复制到 `La2O3` 客户端机器的 `workspace/data/rare/`
+
+这样客户端仍然可以直接沿用默认的：
+
+```yaml
+data:
+  split_dir: ../data/rare
+```
+
+攻击机（正常也是服务器）：
+
+攻击机不必沿用默认的 `workspace/data/rare/`。如果你希望把攻击数据单独放到别的位置，比如 `workspace/data/attack/rare/attack`，那么部署后的目录可以直接是：
+
+```text
+workspace/data/attack/rare/attack
+├── clients/
+│   ├── Nd2O3/train.csv
+│   ├── CeO2/train.csv
+│   └── La2O3/train.csv
+└── summary.json
+```
+
+也就是说，把 `../data/role_datasets/rare/attack/` 的内容整体复制到你真正打算给攻击脚本读取的那个目录即可。部署后，这个目录本身就是攻击回放原生可读的标准 `split_dir` 格式，可以直接传：
+
+```bash
+--override data.split_dir=../data/attack/rare/attack
+```
+
+测试机(正常也是服务器)：
+
+测试机同样不必沿用默认的 `workspace/data/rare/`。如果你希望把离线测试数据单独放到别的位置，比如 `workspace/data/test/rare/test`，那么部署后的目录可以直接是：
+
+```text
+workspace/data/test/rare/test
+├── clients/
+│   ├── Nd2O3/test.csv
+│   ├── CeO2/test.csv
+│   └── La2O3/test.csv
+├── evaluation_context.json
+└── summary.json
+```
+
+也就是说，把 `../data/role_datasets/rare/test/` 的内容整体复制到你真正打算给离线测试脚本读取的那个目录即可。部署后离线测试时可以直接传：
+
+```bash
+--data-dir ../data/test/rare/test
+```
+
+因此：
+
+- 服务端和训练客户端如果仍然沿用配置里的默认 `split_dir`，可以尽量保持原路径不变
+- 攻击机和测试机则完全可以把数据放在任意别的位置，只要在攻击/测试命令里显式传入对应路径即可
+
+`mnist` 和 `cifar10` 同理，只是文件从 `.csv` 变成 `.pt`：
+
+- 服务端机器保留 `server/val.pt`
+- 每个客户端机器只保留 `clients/<client_id>/train.pt`
+- 攻击机保留 `clients/*/train.pt`
+- 测试机保留 `server/test.pt` 或各客户端 `test.pt`
+
+如果你选择直接保留 `role_datasets/<task>/server`、`role_datasets/<task>/client/<client_id>` 这种新根目录不变，那也可以，只是运行命令里需要显式覆盖 `data.split_dir`。
 
 ## 4. 训练方式
 
@@ -641,13 +760,19 @@ python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/fedavg   --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/fedavg   --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/offline_attack_replay_dlg --override data.split_dir=../data/attack/rare/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/fedavg   --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/fedavg   --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/offline_attack_replay_idlg --override data.split_dir=../data/attack/rare/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/rare/multi_sync/4096/fedavg/model.pt --config ../outputs/exp/rare/multi_sync/4096/fedavg/config.yaml --data-dir ../data/test/rare/test --evaluation-context ../outputs/exp/rare/multi_sync/4096/fedavg/evaluation_context.json --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/offline_test_replay --override runtime.device=cpu
 ```
 
 
@@ -699,13 +824,19 @@ python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/topk   --output-dir ../outputs/exp/rare/multi_sync/4096/topk/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/topk   --output-dir ../outputs/exp/rare/multi_sync/4096/topk/offline_attack_replay_dlg --override data.split_dir=../data/attack/rare/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/topk   --output-dir ../outputs/exp/rare/multi_sync/4096/topk/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/topk   --output-dir ../outputs/exp/rare/multi_sync/4096/topk/offline_attack_replay_idlg --override data.split_dir=../data/attack/rare/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/rare/multi_sync/4096/topk/model.pt --config ../outputs/exp/rare/multi_sync/4096/topk/config.yaml --data-dir ../data/test/rare/test --evaluation-context ../outputs/exp/rare/multi_sync/4096/topk/evaluation_context.json --output-dir ../outputs/exp/rare/multi_sync/4096/topk/offline_test_replay --override runtime.device=cpu
 ```
 
 #### 4.2.3 `rare` 的 EGA
@@ -755,13 +886,19 @@ python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/ega   --output-dir ../outputs/exp/rare/multi_sync/4096/ega/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/ega   --output-dir ../outputs/exp/rare/multi_sync/4096/ega/offline_attack_replay_dlg --override data.split_dir=../data/attack/rare/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/ega   --output-dir ../outputs/exp/rare/multi_sync/4096/ega/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/ega   --output-dir ../outputs/exp/rare/multi_sync/4096/ega/offline_attack_replay_idlg --override data.split_dir=../data/attack/rare/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/rare/multi_sync/4096/ega/model.pt --config ../outputs/exp/rare/multi_sync/4096/ega/config.yaml --data-dir ../data/test/rare/test --evaluation-context ../outputs/exp/rare/multi_sync/4096/ega/evaluation_context.json --output-dir ../outputs/exp/rare/multi_sync/4096/ega/offline_test_replay --override runtime.device=cpu
 ```
 
 #### 4.2.4 `mnist` 的 FedAvg / Top-k / EGA
@@ -811,13 +948,19 @@ python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/fe
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/fedavg   --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/fedavg   --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/offline_attack_replay_dlg --override data.split_dir=../data/attack/mnist/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/fedavg   --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/fedavg   --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/offline_attack_replay_idlg --override data.split_dir=../data/attack/mnist/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/mnist/multi_sync/4096/fedavg/model.pt --config ../outputs/exp/mnist/multi_sync/4096/fedavg/config.yaml --data-dir ../data/test/mnist/test --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/offline_test_replay --override runtime.device=cpu
 ```
 
 #### Topk
@@ -864,13 +1007,19 @@ python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/to
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/topk   --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/topk   --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/offline_attack_replay_dlg --override data.split_dir=../data/attack/mnist/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/topk   --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/topk   --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/offline_attack_replay_idlg --override data.split_dir=../data/attack/mnist/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/mnist/multi_sync/4096/topk/model.pt --config ../outputs/exp/mnist/multi_sync/4096/topk/config.yaml --data-dir ../data/test/mnist/test --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/offline_test_replay --override runtime.device=cpu
 ```
 
 ##### EGA
@@ -916,13 +1065,19 @@ python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/eg
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/ega   --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/ega   --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/offline_attack_replay_dlg --override data.split_dir=../data/attack/mnist/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/ega   --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/ega   --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/offline_attack_replay_idlg --override data.split_dir=../data/attack/mnist/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/mnist/multi_sync/4096/ega/model.pt --config ../outputs/exp/mnist/multi_sync/4096/ega/config.yaml --data-dir ../data/test/mnist/test --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/offline_test_replay --override runtime.device=cpu
 ```
 
 #### 4.2.5 `cifar10` 的 FedAvg / Top-k / EGA
@@ -972,13 +1127,19 @@ python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/fedavg   --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/fedavg   --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/offline_attack_replay_dlg --override data.split_dir=../data/attack/cifar10/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/fedavg   --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/fedavg   --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/offline_attack_replay_idlg --override data.split_dir=../data/attack/cifar10/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/cifar10/multi_sync/4096/fedavg/model.pt --config ../outputs/exp/cifar10/multi_sync/4096/fedavg/config.yaml --data-dir ../data/test/cifar10/test --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/offline_test_replay --override runtime.device=cpu
 ```
 
 ##### Topk
@@ -1024,13 +1185,19 @@ python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/topk   --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/topk   --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/offline_attack_replay_dlg --override data.split_dir=../data/attack/cifar10/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/topk   --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/topk   --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/offline_attack_replay_idlg --override data.split_dir=../data/attack/cifar10/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/cifar10/multi_sync/4096/topk/model.pt --config ../outputs/exp/cifar10/multi_sync/4096/topk/config.yaml --data-dir ../data/test/cifar10/test --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/offline_test_replay --override runtime.device=cpu
 ```
 
 ##### EGA
@@ -1077,13 +1244,19 @@ python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/
 执行 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/ega   --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/ega   --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/offline_attack_replay_dlg --override data.split_dir=../data/attack/cifar10/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 执行 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/ega   --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/ega   --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/offline_attack_replay_idlg --override data.split_dir=../data/attack/cifar10/attack --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+测试：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/cifar10/multi_sync/4096/ega/model.pt --config ../outputs/exp/cifar10/multi_sync/4096/ega/config.yaml --data-dir ../data/test/cifar10/test --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/offline_test_replay --override runtime.device=cpu
 ```
 
 ## 5. 训练完成后的攻击回放与测试回放
