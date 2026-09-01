@@ -91,8 +91,8 @@ def _classification_config(split_dir: Path, output_dir: Path) -> dict:
     }
 
 
-def _run_script(model_path: Path, output_dir: Path) -> dict[str, object]:
-    argv = ['replay_saved_model_evaluation', str(model_path), '--output-dir', str(output_dir)]
+def _run_script(model_path: Path, output_dir: Path, *extra_args: str) -> dict[str, object]:
+    argv = ['replay_saved_model_evaluation', str(model_path), '--output-dir', str(output_dir), *extra_args]
     stdout = io.StringIO()
     old_argv = sys.argv
     try:
@@ -102,6 +102,50 @@ def _run_script(model_path: Path, output_dir: Path) -> dict[str, object]:
     finally:
         sys.argv = old_argv
     return json.loads(stdout.getvalue())
+
+
+def _prepare_forecasting_split_dir(root: Path, *, client_ids: list[str]) -> None:
+    for client_offset, client_id in enumerate(client_ids):
+        client_dir = root / 'clients' / client_id
+        client_dir.mkdir(parents=True, exist_ok=True)
+        for split, start, length in [('train', 0, 40), ('val', 40, 20), ('test', 60, 20)]:
+            offset = client_offset * 100
+            dates = [f'2020-01-{((index + offset) % 28) + 1:02d}' for index in range(start, start + length)]
+            values = [float(offset + index) for index in range(start, start + length)]
+            rows = 'date,value\n' + '\n'.join(f'{date},{value}' for date, value in zip(dates, values)) + '\n'
+            (client_dir / f'{split}.csv').write_text(rows, encoding='utf-8')
+
+
+def _forecasting_config(split_dir: Path, output_dir: Path) -> dict:
+    return {
+        'experiment': {'output_dir': str(output_dir), 'mode': 'federated'},
+        'runtime': {'device': 'cpu', 'log_level': 'INFO', 'deterministic': True, 'seed': 2026},
+        'task': {'type': 'forecasting'},
+        'data': {
+            'split_dir': str(split_dir),
+            'clients': ['Nd2O3', 'CeO2', 'La2O3'],
+            'seq_len': 4,
+            'pred_len': 2,
+            'batch_size': 8,
+            'shuffle_train': False,
+            'num_workers': 0,
+        },
+        'model': {'name': 'lstm', 'input_dim': 1, 'hidden_dim': 8, 'num_layers': 1, 'dropout': 0.0, 'pred_len': 2},
+        'training': {'epochs': 1, 'lr': 0.001, 'optimizer': 'adam', 'loss': 'mse', 'patience': 1, 'min_delta': 0.0},
+        'federated': {'algorithm': 'fedavg', 'rounds': 1},
+        'attack': {'enabled': False, 'target_type': 'update_payload', 'frequency_rounds': 1, 'steps': 1, 'async_enabled': False, 'device': 'same'},
+        'tracking': {'enabled': False},
+        'evaluation': {'metrics': ['mse', 'mae', 'mape']},
+        'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},
+    }
+
+
+def _prepare_forecasting_test_only_split(source_root: Path, target_root: Path, *, client_ids: list[str]) -> None:
+    for client_id in client_ids:
+        source = source_root / 'clients' / client_id / 'test.csv'
+        client_dir = target_root / 'clients' / client_id
+        client_dir.mkdir(parents=True, exist_ok=True)
+        (client_dir / 'test.csv').write_text(source.read_text(encoding='utf-8'), encoding='utf-8')
 
 
 def test_replay_saved_model_evaluation_matches_online_test_results(tmp_path):
@@ -129,3 +173,32 @@ def test_replay_saved_model_evaluation_matches_online_test_results(tmp_path):
 
 def test_replay_saved_model_evaluation_script_exists():
     assert SCRIPT_PATH.exists()
+
+
+def test_replay_saved_model_evaluation_rare_uses_saved_scalers_with_test_only_data(tmp_path):
+    split_dir = tmp_path / 'rare_full'
+    online_dir = tmp_path / 'online_rare'
+    replay_data_dir = tmp_path / 'rare_test_only'
+    replay_dir = tmp_path / 'replay_rare'
+    _prepare_forecasting_split_dir(split_dir, client_ids=['Nd2O3', 'CeO2', 'La2O3'])
+    _prepare_forecasting_test_only_split(split_dir, replay_data_dir, client_ids=['Nd2O3', 'CeO2', 'La2O3'])
+    config = _forecasting_config(split_dir, online_dir)
+
+    summary = run_federated(config)
+    assert (online_dir / 'evaluation_context.json').exists()
+
+    payload = _run_script(
+        online_dir / 'model.pt',
+        replay_dir,
+        '--config', str(online_dir / 'config.yaml'),
+        '--data-dir', str(replay_data_dir),
+    )
+
+    replay_metrics = json.loads((replay_dir / 'test_metrics.json').read_text(encoding='utf-8'))
+    replay_summary = json.loads((replay_dir / 'test_summary.json').read_text(encoding='utf-8'))
+
+    assert replay_metrics == pytest.approx(summary['test'])
+    assert replay_summary['test'] == pytest.approx(summary['test'])
+    assert replay_summary['protocol_test'] == pytest.approx(summary['protocol_test'])
+    assert replay_summary['source_evaluation_context_path'] == str(online_dir / 'evaluation_context.json')
+    assert payload['test_summary_path'] == str(replay_dir / 'test_summary.json')

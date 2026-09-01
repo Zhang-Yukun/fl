@@ -13,6 +13,7 @@ import torch
 from loguru import logger
 
 from fedlab.datasets import build_federated_loaders
+from fedlab.datasets.rare_earth import build_saved_model_rare_earth_test_loader
 from fedlab.engine.training import evaluate
 from fedlab.utils.runtime import configure_random_seed, configure_torch_runtime, resolve_device
 from fedlab.modeling import build_model
@@ -20,6 +21,37 @@ from fedlab.tools.replay_saved_update_common import default_config_path
 from fedlab.utils.artifacts import save_experiment_config
 from fedlab.utils.config import load_config
 from fedlab.utils.logging import setup_logging
+
+
+
+
+def default_evaluation_context_path(run_dir: Path) -> Path:
+    """Return the default persisted offline evaluation metadata path for one run."""
+
+    return run_dir / 'evaluation_context.json'
+
+
+def _build_saved_model_test_loader(
+    config: dict[str, Any],
+    *,
+    data_dir: Path | None,
+    evaluation_context_path: Path | None,
+):
+    """Build the detached offline test loader, using task-specific shortcuts when available."""
+
+    task_type = str(config.get('task', {}).get('type', 'forecasting')).lower()
+    if task_type == 'forecasting' and 'split_dir' in config.get('data', {}):
+        context = None
+        if evaluation_context_path is not None and evaluation_context_path.exists():
+            context = json.loads(evaluation_context_path.read_text(encoding='utf-8'))
+        if context is not None:
+            return build_saved_model_rare_earth_test_loader(
+                config,
+                data_dir=data_dir,
+                evaluation_context=context,
+            )
+    _, _, test_loader = build_federated_loaders(config)
+    return test_loader
 
 
 def build_evaluation_config(config_path: Path, overrides: list[str], data_dir: Path | None) -> dict[str, Any]:
@@ -41,6 +73,7 @@ def evaluate_saved_model(
     output_dir: Path,
     overrides: list[str],
     data_dir: Path | None = None,
+    evaluation_context_path: Path | None = None,
 ) -> dict[str, Any]:
     """Evaluate one serialized model against the configured shared test loader."""
 
@@ -51,7 +84,7 @@ def evaluate_saved_model(
     configure_torch_runtime(config)
     device = resolve_device(config)
     configure_random_seed(config, device=device)
-    _, _, test_loader = build_federated_loaders(config)
+    test_loader = _build_saved_model_test_loader(config, data_dir=data_dir, evaluation_context_path=evaluation_context_path)
     model = build_model(config).to(device)
     state = torch.load(model_path, map_location='cpu')
     model.load_state_dict(state)
@@ -68,6 +101,7 @@ def evaluate_saved_model(
         'source_model_path': str(model_path),
         'source_config_path': str(config_path),
         'source_data_split_dir': str(Path(config.get('data', {}).get('split_dir', '')).expanduser()),
+        'source_evaluation_context_path': None if evaluation_context_path is None else str(evaluation_context_path),
         'elapsed_time_seconds': elapsed,
     }
     with (output_dir / 'test_metrics.json').open('w', encoding='utf-8') as handle:
@@ -93,6 +127,7 @@ def main() -> None:
     parser.add_argument('--config', type=Path, default=None, help='Optional config artifact path; defaults to model_path parent config.*')
     parser.add_argument('--data-dir', type=Path, default=None, help='Optional split directory overriding data.split_dir')
     parser.add_argument('--output-dir', type=Path, default=None, help='Directory receiving detached test artifacts')
+    parser.add_argument('--evaluation-context', type=Path, default=None, help='Optional persisted evaluation metadata path; defaults to model directory evaluation_context.json')
     parser.add_argument('--override', action='append', default=[], help='Optional config overrides applied before testing')
     args = parser.parse_args()
 
@@ -100,12 +135,14 @@ def main() -> None:
     config_path = args.config.expanduser().resolve() if args.config is not None else default_config_path(model_path.parent)
     data_dir = args.data_dir.expanduser().resolve() if args.data_dir is not None else None
     output_dir = args.output_dir.expanduser().resolve() if args.output_dir is not None else (model_path.parent / 'offline_test_replay')
+    evaluation_context_path = args.evaluation_context.expanduser().resolve() if args.evaluation_context is not None else default_evaluation_context_path(model_path.parent)
     payload = evaluate_saved_model(
         model_path,
         config_path=config_path,
         output_dir=output_dir,
         overrides=list(args.override),
         data_dir=data_dir,
+        evaluation_context_path=evaluation_context_path,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 

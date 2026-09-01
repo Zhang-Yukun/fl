@@ -52,6 +52,7 @@ def test_one_round_federated_run(tmp_path):
     assert {client["client_id"] for client in metrics[0]["clients"]} == {"Nd2O3", "CeO2", "La2O3"}
     assert (tmp_path / "model.pt").exists()
     assert (tmp_path / "config.yaml").exists()
+    assert (tmp_path / "evaluation_context.json").exists()
     assert not (tmp_path / "config.json").exists()
 
 

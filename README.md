@@ -1117,14 +1117,27 @@ python -m fedlab.tools.replay_saved_update_idlg   ../outputs/rare_fedavg_grpc   
 
 离线测试回放使用 `model.pt` 和对应实验配置重新构建数据加载器与模型，然后在共享测试集上评测。
 
+对于 `rare`，训练输出目录下现在会额外保存 `evaluation_context.json`，里面记录了每个客户端测试时需要的 scaler 统计。因此离线测试时，只要：
+
+- 有 `model.pt`、`config.yaml`、`evaluation_context.json`
+- 并且新的数据目录里仍然能提供各客户端 `test.csv`
+
+就可以脱离训练集独立测试。
+
 最常用命令：
 
 ```bash
 cd workspace/src
-python -m fedlab.tools.replay_saved_model_evaluation   ../outputs/rare_fedavg_grpc/model.pt   --config ../outputs/rare_fedavg_grpc/config.yaml   --output-dir ../outputs/rare_fedavg_grpc/offline_test_replay
+python -m fedlab.tools.replay_saved_model_evaluation   ../outputs/rare_fedavg_grpc/model.pt   --config ../outputs/rare_fedavg_grpc/config.yaml   --data-dir ../data/rare_earth_test_only   --output-dir ../outputs/rare_fedavg_grpc/offline_test_replay
 ```
 
-如果想换一套数据目录重新测试，可以覆盖 `data.split_dir`，或者直接传 `--data-dir`：
+如果你显式把 `evaluation_context.json` 放到了别的位置，也可以继续传：
+
+```bash
+python -m fedlab.tools.replay_saved_model_evaluation   ../outputs/rare_fedavg_grpc/model.pt   --config ../outputs/rare_fedavg_grpc/config.yaml   --data-dir ../data/rare_earth_test_only   --evaluation-context ../outputs/rare_fedavg_grpc/evaluation_context.json   --output-dir ../outputs/rare_fedavg_grpc/offline_test_replay
+```
+
+对 `mnist` / `cifar10`，离线测试仍然按照原来的预切分目录读取；如果想换一套数据目录重新测试，可以覆盖 `data.split_dir`，或者直接传 `--data-dir`：
 
 ```bash
 python -m fedlab.tools.replay_saved_model_evaluation   ../outputs/mnist_fedavg_grpc/model.pt   --config ../outputs/mnist_fedavg_grpc/config.yaml   --data-dir ../data/mnist   --output-dir ../outputs/mnist_fedavg_grpc/offline_test_replay

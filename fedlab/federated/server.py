@@ -25,6 +25,7 @@ from fedlab.utils.serialization import (
 )
 from fedlab.engine.training import evaluate
 from fedlab.tasks import primary_metric as task_primary_metric
+from fedlab.tasks.registry import task_type
 from fedlab.utils.privacy_accounting import (
     AdaptiveRdpStep,
     adaptive_clip_threshold,
@@ -49,6 +50,33 @@ def _format_num_bytes(num_bytes: int) -> str:
             return f"{value:.2f}{unit}"
         value /= 1024.0
     return f"{value:.2f}TB"
+
+def _server_evaluation_context(server: "FederatedServer") -> dict[str, Any] | None:
+    """Build task-specific offline evaluation metadata when needed."""
+
+    if task_type(server.config) != 'forecasting':
+        return None
+    client_ids = list(server.config.get('data', {}).get('clients', []))
+    subloaders = getattr(server.val_loader, 'loaders', None)
+    if not client_ids or subloaders is None or len(subloaders) != len(client_ids):
+        return None
+    clients: dict[str, dict[str, list[float]]] = {}
+    for client_id, loader in zip(client_ids, subloaders):
+        scaler = getattr(loader, 'scaler', None)
+        mean = getattr(scaler, 'mean', None)
+        std = getattr(scaler, 'std', None)
+        if mean is None or std is None:
+            return None
+        clients[str(client_id)] = {
+            'scale_mean': [float(value) for value in mean.reshape(-1).tolist()],
+            'scale_std': [float(value) for value in std.reshape(-1).tolist()],
+        }
+    return {
+        'task_type': 'forecasting',
+        'format': 'rare_earth_evaluation_context_v1',
+        'clients': clients,
+    }
+
 
 
 @dataclass
@@ -577,3 +605,7 @@ class FederatedServer:
         logger.info("Saved experiment config artifacts: {}", [str(path) for path in saved_configs])
         with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
             json.dump([asdict(record) for record in self.history], handle, ensure_ascii=False, indent=2)
+        evaluation_context = _server_evaluation_context(self)
+        if evaluation_context is not None:
+            with (output_dir / "evaluation_context.json").open("w", encoding="utf-8") as handle:
+                json.dump(evaluation_context, handle, ensure_ascii=False, indent=2)

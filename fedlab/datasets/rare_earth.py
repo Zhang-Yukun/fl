@@ -301,6 +301,47 @@ def _registration_has_scalers(
     return True
 
 
+def build_saved_model_rare_earth_test_loader(
+    config: dict[str, Any],
+    *,
+    data_dir: str | Path | None = None,
+    evaluation_context: dict[str, Any] | None = None,
+) -> DataLoader:
+    """Build an offline rare-earth test loader using persisted scaler metadata only."""
+
+    data_cfg = config['data']
+    split_dir = Path(data_dir if data_dir is not None else data_cfg['split_dir'])
+    clients = list(data_cfg.get('clients', list(OXIDE_COLUMNS.keys())))
+    if not _registration_has_scalers((evaluation_context or {}).get('clients'), clients):
+        raise ValueError('Offline rare-earth test replay requires evaluation_context with per-client scaler statistics')
+    seq_len = int(data_cfg.get('seq_len', 21))
+    pred_len = int(data_cfg.get('pred_len', 7))
+    batch_size = int(data_cfg.get('batch_size', 32))
+    num_workers = int(data_cfg.get('num_workers', 0))
+    seed = config.get('runtime', {}).get('seed')
+    test_loaders = []
+    for client_id in clients:
+        client_dir = split_dir / 'clients' / client_id
+        test_path = client_dir / 'test.csv'
+        if not test_path.exists():
+            raise FileNotFoundError(f'Missing offline rare-earth test split for {client_id}: {test_path}')
+        scaler = _standardizer_from_registration((evaluation_context or {}).get('clients'), client_id)
+        test_values = read_value_frame(test_path)[['value']].to_numpy(dtype='float32')
+        test_loaders.append(
+            _build_eval_loader_from_values(
+                test_values,
+                scaler,
+                seq_len=seq_len,
+                pred_len=pred_len,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                seed=seed,
+                identity=client_id + ':offline:test',
+            )
+        )
+    return _ConcatLoader(test_loaders)
+
+
 def _split_dir_has_client_train_splits(split_dir: Path, clients: list[str]) -> bool:
     """Return whether every expected client train split is present on disk."""
 
