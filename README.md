@@ -1073,7 +1073,7 @@ PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/ra
 如果你想联合分析多次不同 seed 或不同运行目录，也可以一次传多个根目录：
 
 ```bash
-PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/rare_suite_mse/seed42   ../outputs/rare_suite_mse/seed4096   ../outputs/rare_suite_mse/seed2026   --loss mse   --output-dir ../outputs/analysis/rare_multiseed_mse   --algorithms centralized fedavg topk ega
+PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/rare/multi_sync/4096   ../outputs/exp/rare/multi_sync/2026   ../outputs/exp/rare/multi_sync/42   --loss mse   --output-dir ../outputs/analysis/rare/multi_sync/   --algorithms centralized fedavg topk ega
 ```
 
 当前工具支持：
