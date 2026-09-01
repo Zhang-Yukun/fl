@@ -84,10 +84,11 @@ def test_prepare_rare_role_dataset_materializes_minimal_role_dirs(tmp_path):
     assert not (output_dir / 'client' / 'Nd2O3' / 'clients' / 'Nd2O3' / 'val.csv').exists()
     assert (output_dir / 'server' / 'clients' / 'CeO2' / 'val.csv').exists()
     assert not (output_dir / 'server' / 'clients' / 'La2O3' / 'test.csv').exists()
-    assert (output_dir / 'attack' / 'Nd2O3' / 'clients' / 'Nd2O3' / 'train.csv').exists()
-    assert not (output_dir / 'attack' / 'CeO2').exists()
+    assert (output_dir / 'attack' / 'clients' / 'Nd2O3' / 'train.csv').exists()
+    assert not (output_dir / 'attack' / 'clients' / 'CeO2').exists()
     assert (output_dir / 'test' / 'clients' / 'Nd2O3' / 'test.csv').exists()
     assert (output_dir / 'test' / 'evaluation_context.json').exists()
+    assert summary['roles']['attack']['split_dir'] == str(output_dir / 'attack')
     assert summary['notes']['evaluation_context_path'] == str(output_dir / 'test' / 'evaluation_context.json')
     saved_summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
     assert saved_summary['task'] == 'rare'
@@ -109,11 +110,12 @@ def test_prepare_classification_role_dataset_materializes_minimal_role_dirs(tmp_
     assert not (output_dir / 'client' / 'm1' / 'clients' / 'm1' / 'val.pt').exists()
     assert (output_dir / 'server' / 'server' / 'val.pt').exists()
     assert not (output_dir / 'server' / 'server' / 'test.pt').exists()
-    assert (output_dir / 'attack' / 'm2' / 'clients' / 'm2' / 'train.pt').exists()
-    assert not (output_dir / 'attack' / 'm1').exists()
+    assert (output_dir / 'attack' / 'clients' / 'm2' / 'train.pt').exists()
+    assert not (output_dir / 'attack' / 'clients' / 'm1').exists()
     assert (output_dir / 'test' / 'server' / 'test.pt').exists()
-    payload = torch.load(output_dir / 'attack' / 'm2' / 'clients' / 'm2' / 'train.pt', map_location='cpu', weights_only=False)
+    payload = torch.load(output_dir / 'attack' / 'clients' / 'm2' / 'train.pt', map_location='cpu', weights_only=False)
     assert payload['labels'].tolist() == [0, 1, 2]
+    assert summary['roles']['attack']['split_dir'] == str(output_dir / 'attack')
     assert summary['task'] == 'mnist'
 
 
@@ -132,5 +134,6 @@ def test_prepare_role_datasets_supports_all_tasks(tmp_path):
 
     assert set(summary) == {'rare', 'mnist', 'cifar10'}
     assert (output_root / 'rare' / 'server' / 'clients' / 'Nd2O3' / 'val.csv').exists()
+    assert (output_root / 'rare' / 'attack' / 'clients' / 'Nd2O3' / 'train.csv').exists()
     assert (output_root / 'mnist' / 'server' / 'server' / 'val.pt').exists()
     assert (output_root / 'cifar10' / 'test' / 'server' / 'test.pt').exists()

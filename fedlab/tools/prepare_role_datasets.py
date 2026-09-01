@@ -70,7 +70,7 @@ def prepare_rare_role_dataset(
     copied: dict[str, Any] = {
         'client': {},
         'server': {'files': []},
-        'attack': {},
+        'attack': {'split_dir': str(output_dir / 'attack'), 'files': []},
         'test': {'files': []},
     }
 
@@ -108,26 +108,24 @@ def prepare_rare_role_dataset(
         client_train = split_dir / 'clients' / client_id / 'train.csv'
         if not client_train.exists():
             raise FileNotFoundError(f'Missing attack reference train split: {client_train}')
-        copied['attack'][client_id] = {
-            'split_dir': str(output_dir / 'attack' / client_id),
-            'files': [
-                _copy_file(
-                    client_train,
-                    output_dir / 'attack' / client_id / 'clients' / client_id / 'train.csv',
-                ),
-            ],
-        }
+        copied['attack']['files'].append(
+            _copy_file(
+                client_train,
+                output_dir / 'attack' / 'clients' / client_id / 'train.csv',
+            )
+        )
 
     server_summary = _copy_common_summary(split_dir, output_dir / 'server')
     if server_summary is not None:
         copied['server']['files'].append(server_summary)
+    attack_summary = _copy_common_summary(split_dir, output_dir / 'attack')
+    if attack_summary is not None:
+        copied['attack']['files'].append(attack_summary)
     test_summary = _copy_common_summary(split_dir, output_dir / 'test')
     if test_summary is not None:
         copied['test']['files'].append(test_summary)
     for client_id in client_ids:
         _copy_common_summary(split_dir, output_dir / 'client' / client_id)
-    for client_id in selected_attack_clients:
-        _copy_common_summary(split_dir, output_dir / 'attack' / client_id)
 
     evaluation_context_target = None
     if evaluation_context_path is not None:
@@ -146,7 +144,7 @@ def prepare_rare_role_dataset(
             'notes': {
                 'client': 'Each client receives only its own train.csv.',
                 'server': 'Server receives all client val.csv only.',
-                'attack': 'Attack replay receives only selected clients train.csv.',
+                'attack': 'Attack replay receives one standard split_dir root containing clients/*/train.csv for the selected attack clients.',
                 'test': 'Offline test receives all client test.csv; rare-earth offline test also needs evaluation_context.json.',
                 'evaluation_context_path': evaluation_context_target,
             },
@@ -169,7 +167,7 @@ def prepare_classification_role_dataset(
     copied: dict[str, Any] = {
         'client': {},
         'server': {'files': []},
-        'attack': {},
+        'attack': {'split_dir': str(output_dir / 'attack'), 'files': []},
         'test': {'files': []},
     }
 
@@ -193,15 +191,14 @@ def prepare_classification_role_dataset(
     copied['server']['files'].append(_copy_file(server_val, output_dir / 'server' / 'server' / 'val.pt'))
     for client_id in selected_attack_clients:
         train_path = split_dir / 'clients' / client_id / 'train.pt'
-        copied['attack'][client_id] = {
-            'split_dir': str(output_dir / 'attack' / client_id),
-            'files': [
-                _copy_file(
-                    train_path,
-                    output_dir / 'attack' / client_id / 'clients' / client_id / 'train.pt',
-                ),
-            ],
-        }
+        if not train_path.exists():
+            raise FileNotFoundError(f'Missing attack reference train split: {train_path}')
+        copied['attack']['files'].append(
+            _copy_file(
+                train_path,
+                output_dir / 'attack' / 'clients' / client_id / 'train.pt',
+            )
+        )
 
     test_source = split_dir / 'server' / 'test.pt'
     if test_source.exists():
@@ -221,13 +218,14 @@ def prepare_classification_role_dataset(
     server_summary = _copy_common_summary(split_dir, output_dir / 'server')
     if server_summary is not None:
         copied['server']['files'].append(server_summary)
+    attack_summary = _copy_common_summary(split_dir, output_dir / 'attack')
+    if attack_summary is not None:
+        copied['attack']['files'].append(attack_summary)
     test_summary = _copy_common_summary(split_dir, output_dir / 'test')
     if test_summary is not None:
         copied['test']['files'].append(test_summary)
     for client_id in client_ids:
         _copy_common_summary(split_dir, output_dir / 'client' / client_id)
-    for client_id in selected_attack_clients:
-        _copy_common_summary(split_dir, output_dir / 'attack' / client_id)
 
     return _write_summary(
         output_dir,
@@ -238,7 +236,7 @@ def prepare_classification_role_dataset(
             'notes': {
                 'client': 'Each client receives only its own train.pt.',
                 'server': 'Server receives shared val.pt only.',
-                'attack': 'Attack replay receives only selected clients train.pt.',
+                'attack': 'Attack replay receives one standard split_dir root containing clients/*/train.pt for the selected attack clients.',
                 'test': 'Offline test receives server/test.pt when available, otherwise each client test.pt.',
             },
         },

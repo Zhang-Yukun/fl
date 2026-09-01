@@ -374,6 +374,66 @@ CIFAR-10 同理，只是客户端目录为 `c1/c2/c3`。
 - 客户端 `i`：只准备自己的本地训练集
 - 如果后续还要在某台机器上做离线攻击回放，那台机器还需要能访问被攻击客户端对应的训练集
 
+#### 3.5.4 使用 `prepare_role_datasets` 直接生成按角色部署的目录
+
+如果你已经先按第 3.2 和第 3.3 节完成了完整预处理，可以再执行一次：
+
+```bash
+cd workspace/src
+python -m fedlab.tools.prepare_role_datasets \
+  --task all \
+  --source-root ../data \
+  --output-root ../data/role_datasets
+```
+
+如果要给 `rare` 的离线测试目录同时带上训练输出里的 `evaluation_context.json`，可以额外传：
+
+```bash
+python -m fedlab.tools.prepare_role_datasets \
+  --task rare \
+  --source-root ../data \
+  --output-root ../data/role_datasets \
+  --evaluation-context ../outputs/exp/rare/multi_sync/42/mse/fedavg/evaluation_context.json
+```
+
+生成后的目录按角色组织，大致如下：
+
+```text
+../data/role_datasets/rare/
+├── server/
+│   ├── clients/
+│   │   ├── Nd2O3/val.csv
+│   │   ├── CeO2/val.csv
+│   │   └── La2O3/val.csv
+│   └── summary.json
+├── client/
+│   ├── Nd2O3/clients/Nd2O3/train.csv
+│   ├── CeO2/clients/CeO2/train.csv
+│   └── La2O3/clients/La2O3/train.csv
+├── attack/
+│   ├── clients/
+│   │   ├── Nd2O3/train.csv
+│   │   ├── CeO2/train.csv
+│   │   └── La2O3/train.csv
+│   └── summary.json
+└── test/
+    ├── clients/
+    │   ├── Nd2O3/test.csv
+    │   ├── CeO2/test.csv
+    │   └── La2O3/test.csv
+    ├── evaluation_context.json
+    └── summary.json
+```
+
+其中：
+
+- `server/` 可以直接部署到联邦服务端机器，并通过 `--override data.split_dir=.../server` 读取
+- `client/<client_id>/` 可以直接部署到对应客户端机器，并通过 `--override data.split_dir=.../client/<client_id>` 读取
+- `attack/` 已经是攻击回放原生可读的标准 `split_dir` 格式，可以直接通过 `--override data.split_dir=.../attack` 传给 `replay_saved_update_attacks` / `replay_saved_update_dlg` / `replay_saved_update_idlg`
+- `test/` 可以直接部署到离线测试机器，并通过 `--data-dir .../test` 传给 `replay_saved_model_evaluation`
+
+`mnist` 和 `cifar10` 同理，只是文件从 `.csv` 变成 `.pt`；其中 `attack/clients/<client_id>/train.pt` 也同样可以直接给攻击回放使用。
+
 ## 4. 训练方式
 
 ### 4.1 单机直接训练（一般只用集中式训练）
@@ -1049,7 +1109,7 @@ python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_s
 
 `replay_saved_update_attacks.py` 会读取某个实验目录下的 `saved_updates/`，并按当前配置重新执行已启用攻击。
 
-注意：离线攻击回放不会再从训练输出里读取参考样本模板，而是会根据 `config.yaml` 里的数据配置重新加载客户端本地训练集。因此做离线攻击时，原始数据或预处理后的联邦数据目录仍然必须可访问，且路径要与配置一致；如果目录变了，需要通过 `--config` 或 `--override data.split_dir=...` / `--override data.csv_path=...` 指到新的位置。
+注意：离线攻击回放不会再从训练输出里读取参考样本模板，而是会根据 `config.yaml` 里的数据配置重新加载客户端本地训练集。因此做离线攻击时，攻击机仍然必须能访问被攻击客户端的训练集；如果你已经用第 3.5.4 节的 `prepare_role_datasets` 生成了角色目录，推荐直接把 `role_datasets/<task>/attack/` 作为新的 `data.split_dir` 传入。
 
 #### 5.2.1 离线攻击阶段的最小数据需求
 
@@ -1080,19 +1140,19 @@ python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_s
 
 ```bash
 cd workspace/src
-python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay
+python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override data.split_dir=../data/role_datasets/rare/attack
 ```
 
 如果想临时修改攻击参数，可以继续追加 `--override`：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override attack.steps=300   --override attack.lr=0.05   --override attack.max_samples=8
+python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override data.split_dir=../data/role_datasets/rare/attack   --override attack.steps=300   --override attack.lr=0.05   --override attack.max_samples=8
 ```
 
 如果你还想同时固定攻击设备和攻击随机种子，可以继续追加：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override attack.device=cuda:1   --override attack.seed=1234   --override attack.steps=300
+python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override data.split_dir=../data/role_datasets/rare/attack   --override attack.device=cuda:1   --override attack.seed=1234   --override attack.steps=300
 ```
 
 ### 5.3 只回放 DLG 或 iDLG
@@ -1102,13 +1162,13 @@ python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc
 只回放 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.steps=500
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_dlg --override data.split_dir=../data/role_datasets/rare/attack --override attack.max_samples=512 --override attack.steps=500
 ```
 
 只回放 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.steps=500
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_idlg --override data.split_dir=../data/role_datasets/rare/attack --override attack.max_samples=512 --override attack.steps=500
 ```
 
 如果你只想回放单一攻击方法，可以直接使用上面的 `replay_saved_update_dlg` 或 `replay_saved_update_idlg` 入口；README 这里不再展开批量脚本调用方式。
