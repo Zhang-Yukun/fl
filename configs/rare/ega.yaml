@@ -9,4 +9,4 @@ experiment:
 
 federated:
   algorithm: ega_fedavg
-  quantization_seed: 2026
+  quantization_seed: 4096

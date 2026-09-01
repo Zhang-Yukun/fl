@@ -410,9 +410,9 @@ tracking_args() {
   local tracking_name="$1"
   tracking_name="$(effective_tracking_name "${tracking_name}")"
   printf -- '--override
-tracking.enabled=true
+tracking.enabled=false
 --override
-tracking.offline=true
+tracking.offline=false
 --override
 tracking.project=%s
 --override

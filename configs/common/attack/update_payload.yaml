@@ -40,4 +40,4 @@ attack:
   async_max_pending_rounds: 5
   # same inherits runtime.device.
   device: same
-  seed: 2026
+  seed: 4096

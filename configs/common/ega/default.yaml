@@ -25,5 +25,5 @@ ega:
     lr: 0.0002
     train_groups: 50000
     val_groups: 25000
-    seed: 2026
+    seed: 4096
     device: same

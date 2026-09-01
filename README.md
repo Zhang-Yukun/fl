@@ -8,6 +8,18 @@
 
 如果你按本文档建议的 `workspace/data + workspace/src` 目录组织工程，仓库默认配置里的相对路径可以直接工作，无需额外修改 `data.split_dir`。
 
+如果你准备使用 gRPC 端口外部流量监控，建议在机器上提前确认以下 Linux 命令可用：
+
+- `pkill`：通常由 `procps` 或 `procps-ng` 提供，用于清理残留监控进程
+- `tcpdump`：用于抓取指定 gRPC 端口的实际 TCP 流量
+
+最简单的自检方式：
+
+```bash
+which pkill
+which tcpdump
+```
+
 ## 1. 工作区组织
 
 推荐先创建一个独立工作区，例如 `workspace/`，然后把原始数据和代码分别放到 `data/` 与 `src/`：
@@ -86,6 +98,24 @@ pip install -r src/requirements.txt
 
 ```bash
 pip install pytest
+```
+
+如果你要启用 `MONITOR_GRPC_PORT_TRAFFIC=true` 的外部流量监控，除了 Python 依赖外，还需要系统层面提供：
+
+- `tcpdump`
+- `pkill`
+
+在常见 Debian / Ubuntu 系统上通常对应：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y tcpdump procps
+```
+
+在常见 CentOS / Rocky / AlmaLinux 系统上通常对应：
+
+```bash
+sudo yum install -y tcpdump procps-ng
 ```
 
 ### 2.2 快速检查安装是否成功
@@ -324,6 +354,61 @@ python -m fedlab.entrypoints.train   --config configs/mnist/ega.yaml   --mode fe
 - 客户端 `i`：自己的 `train`
 
 如果你额外把本地 `val/test` 也放在客户端节点上不会出错，但不是训练必需条件。
+
+#### 4.2.0.1 gRPC 外部端口流量监控
+
+如果你希望在 `run_suite.sh` 或 `run_exp_seed*.sh` 批量脚本里额外记录 gRPC 端口的外部 TCP 流量，可以启用：
+
+- `MONITOR_GRPC_PORT_TRAFFIC=true`
+- `GRPC_MONITOR_INTERFACE=<网卡名>`
+
+例如单机本地运行时：
+
+```bash
+cd workspace/src
+RUNTIME_DEVICE=cuda:0 MONITOR_GRPC_PORT_TRAFFIC=true GRPC_MONITOR_INTERFACE=lo bash scripts/run_exp_seed42_part2.sh
+```
+
+如果你不确定应该监听哪块网卡，可以直接使用默认值 `any`：
+
+```bash
+cd workspace/src
+RUNTIME_DEVICE=cuda:0 MONITOR_GRPC_PORT_TRAFFIC=true GRPC_MONITOR_INTERFACE=any bash scripts/run_exp_seed42_part2.sh
+```
+
+说明：
+
+- `part2` 对应 `multi_sync -> grpc_sync`
+- `GRPC_MONITOR_INTERFACE=lo` 适合单机 `127.0.0.1`
+- `GRPC_MONITOR_INTERFACE=any` 会监听所有网卡，也是当前默认值
+- 监控结果会输出到每个 gRPC 实验目录下的 `grpc_port_traffic/`
+
+其中常见文件包括：
+
+- `grpc_port_traffic.summary.json`
+- `grpc_port_traffic.tcpdump.log`
+- `grpc_port_traffic.tcpdump.stderr.log`
+- `monitor.log`
+
+`grpc_port_traffic.summary.json` 中：
+
+- `received_payload_bytes` 表示相对于被监听服务端端口的接收流量，在联邦语义里通常对应客户端上传
+- `sent_payload_bytes` 表示相对于被监听服务端端口的发送流量，在联邦语义里通常对应服务端下发
+
+如果你中途外部中断了批量训练脚本，监控进程通常会一起退出；但在异常退出或强制中断场景下，也可能遗留 `monitor_tcp_port_traffic.sh` 或 `tcpdump`。推荐清理命令如下：
+
+```bash
+ps -efww | grep monitor_tcp_port_traffic | grep -v grep
+ps -efww | grep 'tcpdump -n -l -tt' | grep -v grep
+pkill -f 'scripts/monitor_tcp_port_traffic.sh'
+pkill -f 'tcpdump -n -l -tt'
+```
+
+如果你知道具体监控端口，也可以更精确地只清理该端口对应的 `tcpdump`：
+
+```bash
+pkill -f 'tcpdump -n -l -tt -i .* tcp port 58100'
+```
 
 #### 4.2.1 `rare` 的 FedAvg
 
@@ -630,6 +715,12 @@ python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc
 python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override attack.steps=300   --override attack.lr=0.05   --override attack.max_samples=8
 ```
 
+如果你还想同时固定攻击设备和攻击随机种子，可以继续追加：
+
+```bash
+python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay   --override attack.device=cuda:1   --override attack.seed=1234   --override attack.steps=300
+```
+
 ### 5.3 只回放 DLG 或 iDLG
 
 如果只想评估单一攻击方法，可以使用专门的入口；它们仍然会按当前配置重新加载客户端本地参考数据。
@@ -645,6 +736,18 @@ python -m fedlab.tools.replay_saved_update_dlg   ../outputs/rare_fedavg_grpc   -
 ```bash
 python -m fedlab.tools.replay_saved_update_idlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_idlg
 ```
+
+如果你希望批量扫描 `outputs/exp` 下某一批实验，并同时指定 seed、攻击设备、攻击随机种子和攻击步数，可以使用：
+
+```bash
+cd workspace/src
+bash scripts/run_replay_saved_update_batch.sh   --input-root ../outputs/exp   --modes multi_sync   --seeds 42   --override attack.device=cuda:0   --override attack.seed=42   --override attack.steps=500   --override attack.max_samples=512
+```
+
+如果只回放 DLG 或 iDLG，可以追加：
+
+- `--dlg-only`
+- `--idlg-only`
 
 ### 5.4 对保存好的模型重新做测试回放
 
