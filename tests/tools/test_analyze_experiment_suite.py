@@ -294,6 +294,6 @@ def test_analyze_experiment_suite_script_exists_and_is_executable():
     assert 'val_mse_vs_cumulative_upload.png' in content
     assert 'test_mse_bar.png' in content
     assert 'test_mse_vs_upload_bubble.png' in content
-    assert 'fedavg baseline' in content
+    assert 'centralized baseline' in content
     assert 'attack_success_rate' in content
     assert 'attack_overall_avg_primary_metric_value' in content

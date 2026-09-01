@@ -102,7 +102,7 @@ pip install -r src/requirements.txt
 pip install pytest
 ```
 
-如果你要在 `tmux` 里管理多进程训练，或启用 `MONITOR_GRPC_PORT_TRAFFIC=true` 的外部流量监控，除了 Python 依赖外，还建议系统层面提供：
+如果你要在 `tmux` 里管理多进程训练，或在服务器节点上对 gRPC 端口做外部流量监控，除了 Python 依赖外，还建议系统层面提供：
 
 - `tmux`
 - `tcpdump`
@@ -130,7 +130,7 @@ python -m fedlab.tools.prepare_image_classification_data --help
 python -m fedlab.tools.analyze_experiment_suite --help
 ```
 
-## 3. 数据准备
+## 3. 数据准备(方便起见三个客户端以及一个服务器端都需要执行以下命令，获取到相同的数据划分)
 
 ### 3.1 框架最终期望的联邦数据布局
 
@@ -179,7 +179,7 @@ workspace/data/raw_data/rare/
 └── *.xlsx
 ```
 
-最常见的情况就是这里直接放三个 Excel，分别对应三个稀土客户端；只要文件内容里的 `品名` 列能区分出：
+最常见的情况就是这里直接放三个 Excel，分别对应三个稀土客户端（下载的三个 excel 直接放到该目录下即可）；只要文件内容里的 `品名` 列能区分出：
 
 - `氧化钕` -> `Nd2O3`
 - `氧化铈` -> `CeO2`
@@ -301,25 +301,29 @@ CIFAR-10 同理，只是客户端目录为 `c1/c2/c3`。
 
 ## 4. 训练方式
 
-### 4.1 单机直接训练
+### 4.1 单机直接训练（一般只用集中式训练）
 
 集中式训练：
 
+rare数据
+
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.train   --config configs/rare/centralized.yaml   --mode centralized
+python -m fedlab.entrypoints.train   --config configs/rare/centralized.yaml  --mode centralized --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/centralized --override runtime.seed=4096
 ```
 
-单机顺序联邦训练：
+mnist 数据
 
 ```bash
-python -m fedlab.entrypoints.train   --config configs/rare/fedavg.yaml   --mode federated
+cd workspace/src
+python -m fedlab.entrypoints.train   --config configs/mnist/centralized.yaml  --mode centralized --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/centralized --override runtime.seed=4096
 ```
 
-你也可以通过 `--override` 覆盖常见参数：
+cifar10 数据
 
 ```bash
-python -m fedlab.entrypoints.train   --config configs/mnist/ega.yaml   --mode federated   --override experiment.output_dir=../outputs/mnist_ega_debug   --override federated.rounds=20   --override training.epochs=1   --override runtime.device=cuda:0
+cd workspace/src
+python -m fedlab.entrypoints.train   --config configs/cifar10/centralized.yaml  --mode centralized --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/centralized --override runtime.seed=4096
 ```
 
 ### 4.2 多进程 / 多节点 gRPC 联邦训练
@@ -330,7 +334,7 @@ python -m fedlab.entrypoints.train   --config configs/mnist/ega.yaml   --mode fe
 
 - 服务端使用 `python -m fedlab.entrypoints.server`
 - 客户端使用 `python -m fedlab.entrypoints.client`
-- 推荐先启动服务端，确认 `grpc.address` 对应端口已经开始监听后，再依次启动各个客户端
+- 需要先启动服务端，确认 `grpc.address` 对应端口已经开始监听后，再依次启动各个客户端
 - 三端需要使用语义一致的配置
 - 服务端 `grpc.address` 需要监听一个实际可访问的地址
 - 客户端 `grpc.server_address` 需要指向服务器的实际 `IP:PORT`
@@ -368,45 +372,49 @@ python -m fedlab.entrypoints.train   --config configs/mnist/ega.yaml   --mode fe
 
 #### 4.2.0.1 gRPC 外部端口流量监控
 
-如果你希望在 `run_suite.sh` 或 `run_exp_seed*.sh` 批量脚本里额外记录 gRPC 端口的外部 TCP 流量，可以启用：
+正式多节点部署时，建议直接在服务器节点上监听服务端 `grpc.address` 对应的端口。也就是说，谁在跑 `python -m fedlab.entrypoints.server`，就在哪台机器上做监控。
 
-- `MONITOR_GRPC_PORT_TRAFFIC=true`
-- `GRPC_MONITOR_INTERFACE=<网卡名>`
+推荐做法是：先在服务器节点启动监控，再启动联邦服务端和各个客户端；训练结束后停止监控。
 
-例如单机本地运行时：
+例如服务端监听 `0.0.0.0:50051`，服务器对外通信网卡是 `eth0`，输出目录是 `../outputs/rare_fedavg_grpc`，可以在服务器节点执行：
 
 ```bash
 cd workspace/src
-RUNTIME_DEVICE=cuda:0 MONITOR_GRPC_PORT_TRAFFIC=true GRPC_MONITOR_INTERFACE=lo bash scripts/run_exp_seed42_part2.sh
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50051 \
+  --interface eth0 \
+  --output-dir ../outputs/rare_fedavg_grpc/grpc_port_traffic
 ```
 
-如果你不确定应该监听哪块网卡，可以直接使用默认值 `any`：
+如果你不确定具体走哪块网卡，可以直接用 `any`：
 
 ```bash
 cd workspace/src
-RUNTIME_DEVICE=cuda:0 MONITOR_GRPC_PORT_TRAFFIC=true GRPC_MONITOR_INTERFACE=any bash scripts/run_exp_seed42_part2.sh
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50051 \
+  --interface any \
+  --output-dir ../outputs/rare_fedavg_grpc/grpc_port_traffic
 ```
 
 说明：
 
-- `part2` 对应 `multi_sync -> grpc_sync`
-- `GRPC_MONITOR_INTERFACE=lo` 适合单机 `127.0.0.1`
-- `GRPC_MONITOR_INTERFACE=any` 会监听所有网卡，也是当前默认值
-- 监控结果会输出到每个 gRPC 实验目录下的 `grpc_port_traffic/`
+- `--port` 应该填服务端实际监听的 gRPC 端口
+- `--interface` 应该填服务器实际通信网卡；单机本地联调常见是 `lo`，跨机器部署常见是 `eth0`、`ens*` 或直接 `any`
+- 监控结果会输出到 `grpc_port_traffic/` 目录
+- 训练结束后在监控所在终端 `Ctrl-C` 即可，脚本会自动汇总统计结果
 
 其中常见文件包括：
 
 - `grpc_port_traffic.summary.json`
 - `grpc_port_traffic.tcpdump.log`
 - `grpc_port_traffic.tcpdump.stderr.log`
-- `monitor.log`
 
 `grpc_port_traffic.summary.json` 中：
 
 - `received_payload_bytes` 表示相对于被监听服务端端口的接收流量，在联邦语义里通常对应客户端上传
 - `sent_payload_bytes` 表示相对于被监听服务端端口的发送流量，在联邦语义里通常对应服务端下发
 
-如果你中途外部中断了批量训练脚本，监控进程通常会一起退出；但在异常退出或强制中断场景下，也可能遗留 `monitor_tcp_port_traffic.sh` 或 `tcpdump`。推荐清理命令如下：
+如果监控异常退出后有残留进程，可以在服务器节点清理：
 
 ```bash
 ps -efww | grep monitor_tcp_port_traffic | grep -v grep
@@ -418,283 +426,528 @@ pkill -f 'tcpdump -n -l -tt'
 如果你知道具体监控端口，也可以更精确地只清理该端口对应的 `tcpdump`：
 
 ```bash
-pkill -f 'tcpdump -n -l -tt -i .* tcp port 58100'
+pkill -f 'tcpdump -n -l -tt -i .* tcp port 50051'
 ```
 
 #### 4.2.0.2 启动顺序与轮询间隔
 
 推荐启动顺序：
 
-1. 先启动服务端。
-2. 确认服务端日志已经显示监听地址，且端口可连通。
-3. 再启动全部客户端。
+1. 先在服务器节点启动端口监控。
+2. 再启动服务端。
+3. 确认服务端日志已经显示监听地址，且端口可连通。
+4. 最后启动全部客户端。
 
 `grpc.poll_seconds` 控制的是 gRPC 训练过程中客户端和服务端的轮询休眠间隔，也就是“多久重试一次注册、拉取全局模型、提交更新、等待关闭确认”；它不是服务器主动推送消息的频率。
 
-直接用 Python 入口时，可以这样改：
+直接用 Python 入口时，服务端和客户端都可以通过 `--override grpc.poll_seconds=...` 控制：
+
+```bash
+python -m fedlab.entrypoints.server \
+  --config configs/rare/fedavg.yaml \
+  --override grpc.address=0.0.0.0:50051 \
+  --override grpc.poll_seconds=5.0
+```
 
 ```bash
 python -m fedlab.entrypoints.client \
   --client-id Nd2O3 \
   --config configs/rare/fedavg.yaml \
   --override grpc.server_address=127.0.0.1:50051 \
-  --override grpc.poll_seconds=0.5
-```
-
-批量脚本里可以直接改环境变量：
-
-```bash
-cd workspace/src
-POLL_SECONDS=0.5 RUNTIME_DEVICE=cuda:0 bash scripts/run_exp_seed42_part2.sh
-```
-
-或者显式走 `run_suite.sh`：
-
-```bash
-cd workspace/src
-POLL_SECONDS=0.5 RUNTIME_DEVICE=cuda:0 bash scripts/run_suite.sh --modes grpc_sync
+  --override grpc.poll_seconds=5.0
 ```
 
 #### 4.2.1 `rare` 的 FedAvg
 
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50051 \
+  --interface any \
+  --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/traffic
+```
+
 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/rare/fedavg.yaml   --override grpc.address=0.0.0.0:50051   --override grpc.server_address=127.0.0.1:50051   --override experiment.output_dir=../outputs/rare_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/rare/fedavg.yaml   --override grpc.address=0.0.0.0:50051   --override grpc.server_address=127.0.0.1:50051   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `Nd2O3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id Nd2O3   --config configs/rare/fedavg.yaml   --override grpc.server_address=127.0.0.1:50051   --override experiment.output_dir=../outputs/rare_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id Nd2O3   --config configs/rare/fedavg.yaml   --override grpc.server_address=127.0.0.1:50051   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `CeO2`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id CeO2   --config configs/rare/fedavg.yaml   --override grpc.server_address=127.0.0.1:50051   --override experiment.output_dir=../outputs/rare_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id CeO2   --config configs/rare/fedavg.yaml   --override grpc.server_address=127.0.0.1:50051   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `La2O3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/fedavg.yaml   --override grpc.server_address=127.0.0.1:50051   --override experiment.output_dir=../outputs/rare_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/fedavg.yaml   --override grpc.server_address=127.0.0.1:50051   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/fedavg   --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/fedavg   --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
 
 #### 4.2.2 `rare` 的 Top-k
 
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50052 \
+  --interface any \
+  --output-dir ../outputs/exp/rare/multi_sync/4096/topk/traffic
+```
+
+
 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/rare/topk.yaml   --override grpc.address=0.0.0.0:50052   --override grpc.server_address=127.0.0.1:50052   --override experiment.output_dir=../outputs/rare_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/rare/topk.yaml   --override grpc.address=0.0.0.0:50052   --override grpc.server_address=127.0.0.1:50052   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `Nd2O3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id Nd2O3   --config configs/rare/topk.yaml   --override grpc.server_address=127.0.0.1:50052   --override experiment.output_dir=../outputs/rare_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id Nd2O3   --config configs/rare/topk.yaml   --override grpc.server_address=127.0.0.1:50052   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `CeO2`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id CeO2   --config configs/rare/topk.yaml   --override grpc.server_address=127.0.0.1:50052   --override experiment.output_dir=../outputs/rare_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id CeO2   --config configs/rare/topk.yaml   --override grpc.server_address=127.0.0.1:50052   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `La2O3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/topk.yaml   --override grpc.server_address=127.0.0.1:50052   --override experiment.output_dir=../outputs/rare_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/topk.yaml   --override grpc.server_address=127.0.0.1:50052   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
+```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/topk   --output-dir ../outputs/exp/rare/multi_sync/4096/topk/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/topk   --output-dir ../outputs/exp/rare/multi_sync/4096/topk/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 #### 4.2.3 `rare` 的 EGA
 
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50053 \
+  --interface any \
+  --output-dir ../outputs/exp/rare/multi_sync/4096/ega/traffic
+```
+
 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/rare/ega.yaml   --override grpc.address=0.0.0.0:50053   --override grpc.server_address=127.0.0.1:50053   --override experiment.output_dir=../outputs/rare_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/rare/ega.yaml   --override grpc.address=0.0.0.0:50053   --override grpc.server_address=127.0.0.1:50053   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `Nd2O3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id Nd2O3   --config configs/rare/ega.yaml   --override grpc.server_address=127.0.0.1:50053   --override experiment.output_dir=../outputs/rare_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id Nd2O3   --config configs/rare/ega.yaml   --override grpc.server_address=127.0.0.1:50053   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `CeO2`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id CeO2   --config configs/rare/ega.yaml   --override grpc.server_address=127.0.0.1:50053   --override experiment.output_dir=../outputs/rare_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id CeO2   --config configs/rare/ega.yaml   --override grpc.server_address=127.0.0.1:50053   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 客户端 `La2O3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/ega.yaml   --override grpc.server_address=127.0.0.1:50053   --override experiment.output_dir=../outputs/rare_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/ega.yaml   --override grpc.server_address=127.0.0.1:50053   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/rare/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
+```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/rare/multi_sync/4096/ega   --output-dir ../outputs/exp/rare/multi_sync/4096/ega/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/rare/multi_sync/4096/ega   --output-dir ../outputs/exp/rare/multi_sync/4096/ega/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 #### 4.2.4 `mnist` 的 FedAvg / Top-k / EGA
 
 `mnist` 的客户端固定是：`m1`、`m2`、`m3`。下面只替换配置文件、客户端 ID、输出目录和端口。
 
+#### FedAvg
+
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50061 \
+  --interface any \
+  --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/traffic
+```
+
 FedAvg 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/mnist/fedavg.yaml   --override grpc.address=0.0.0.0:50061   --override grpc.server_address=127.0.0.1:50061   --override experiment.output_dir=../outputs/mnist_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/mnist/fedavg.yaml   --override grpc.address=0.0.0.0:50061   --override grpc.server_address=127.0.0.1:50061   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 FedAvg 客户端 `m1` / `m2` / `m3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m1   --config configs/mnist/fedavg.yaml   --override grpc.server_address=127.0.0.1:50061   --override experiment.output_dir=../outputs/mnist_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m1   --config configs/mnist/fedavg.yaml   --override grpc.server_address=127.0.0.1:50061   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m2   --config configs/mnist/fedavg.yaml   --override grpc.server_address=127.0.0.1:50061   --override experiment.output_dir=../outputs/mnist_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m2   --config configs/mnist/fedavg.yaml   --override grpc.server_address=127.0.0.1:50061   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/fedavg.yaml   --override grpc.server_address=127.0.0.1:50061   --override experiment.output_dir=../outputs/mnist_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/fedavg.yaml   --override grpc.server_address=127.0.0.1:50061   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/fedavg   --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/fedavg   --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+#### Topk
+
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50062 \
+  --interface any \
+  --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/traffic
+```
+
 
 Top-k 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/mnist/topk.yaml   --override grpc.address=0.0.0.0:50062   --override grpc.server_address=127.0.0.1:50062   --override experiment.output_dir=../outputs/mnist_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/mnist/topk.yaml   --override grpc.address=0.0.0.0:50062   --override grpc.server_address=127.0.0.1:50062   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 Top-k 客户端 `m1` / `m2` / `m3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m1   --config configs/mnist/topk.yaml   --override grpc.server_address=127.0.0.1:50062   --override experiment.output_dir=../outputs/mnist_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m1   --config configs/mnist/topk.yaml   --override grpc.server_address=127.0.0.1:50062   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m2   --config configs/mnist/topk.yaml   --override grpc.server_address=127.0.0.1:50062   --override experiment.output_dir=../outputs/mnist_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m2   --config configs/mnist/topk.yaml   --override grpc.server_address=127.0.0.1:50062   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/topk.yaml   --override grpc.server_address=127.0.0.1:50062   --override experiment.output_dir=../outputs/mnist_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/topk.yaml   --override grpc.server_address=127.0.0.1:50062   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
+```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/topk   --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/topk   --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+##### EGA
+
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50063 \
+  --interface any \
+  --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/traffic
 ```
 
 EGA 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/mnist/ega.yaml   --override grpc.address=0.0.0.0:50063   --override grpc.server_address=127.0.0.1:50063   --override experiment.output_dir=../outputs/mnist_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/mnist/ega.yaml   --override grpc.address=0.0.0.0:50063   --override grpc.server_address=127.0.0.1:50063   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 EGA 客户端 `m1` / `m2` / `m3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m1   --config configs/mnist/ega.yaml   --override grpc.server_address=127.0.0.1:50063   --override experiment.output_dir=../outputs/mnist_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m1   --config configs/mnist/ega.yaml   --override grpc.server_address=127.0.0.1:50063   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m2   --config configs/mnist/ega.yaml   --override grpc.server_address=127.0.0.1:50063   --override experiment.output_dir=../outputs/mnist_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m2   --config configs/mnist/ega.yaml   --override grpc.server_address=127.0.0.1:50063   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/ega.yaml   --override grpc.server_address=127.0.0.1:50063   --override experiment.output_dir=../outputs/mnist_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/ega.yaml   --override grpc.server_address=127.0.0.1:50063   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/mnist/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
+```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/mnist/multi_sync/4096/ega   --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/mnist/multi_sync/4096/ega   --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 #### 4.2.5 `cifar10` 的 FedAvg / Top-k / EGA
 
 `cifar10` 的客户端固定是：`c1`、`c2`、`c3`。
 
+##### FedAvg
+
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50071 \
+  --interface any \
+  --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/traffic
+```
+
 FedAvg 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/cifar10/fedavg.yaml   --override grpc.address=0.0.0.0:50071   --override grpc.server_address=127.0.0.1:50071   --override experiment.output_dir=../outputs/cifar10_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/cifar10/fedavg.yaml   --override grpc.address=0.0.0.0:50071   --override grpc.server_address=127.0.0.1:50071   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 FedAvg 客户端 `c1` / `c2` / `c3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c1   --config configs/cifar10/fedavg.yaml   --override grpc.server_address=127.0.0.1:50071   --override experiment.output_dir=../outputs/cifar10_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c1   --config configs/cifar10/fedavg.yaml   --override grpc.server_address=127.0.0.1:50071   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c2   --config configs/cifar10/fedavg.yaml   --override grpc.server_address=127.0.0.1:50071   --override experiment.output_dir=../outputs/cifar10_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c2   --config configs/cifar10/fedavg.yaml   --override grpc.server_address=127.0.0.1:50071   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/fedavg.yaml   --override grpc.server_address=127.0.0.1:50071   --override experiment.output_dir=../outputs/cifar10_fedavg_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/fedavg.yaml   --override grpc.server_address=127.0.0.1:50071   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/fedavg --override runtime.seed=4096 --override grpc.poll_seconds=10.0
+```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/fedavg   --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/fedavg   --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+##### Topk
+
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50072 \
+  --interface any \
+  --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/traffic
 ```
 
 Top-k 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/cifar10/topk.yaml   --override grpc.address=0.0.0.0:50072   --override grpc.server_address=127.0.0.1:50072   --override experiment.output_dir=../outputs/cifar10_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/cifar10/topk.yaml   --override grpc.address=0.0.0.0:50072   --override grpc.server_address=127.0.0.1:50072   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 Top-k 客户端 `c1` / `c2` / `c3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c1   --config configs/cifar10/topk.yaml   --override grpc.server_address=127.0.0.1:50072   --override experiment.output_dir=../outputs/cifar10_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c1   --config configs/cifar10/topk.yaml   --override grpc.server_address=127.0.0.1:50072   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c2   --config configs/cifar10/topk.yaml   --override grpc.server_address=127.0.0.1:50072   --override experiment.output_dir=../outputs/cifar10_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c2   --config configs/cifar10/topk.yaml   --override grpc.server_address=127.0.0.1:50072   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/topk.yaml   --override grpc.server_address=127.0.0.1:50072   --override experiment.output_dir=../outputs/cifar10_topk_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/topk.yaml   --override grpc.server_address=127.0.0.1:50072   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/topk --override runtime.seed=4096 --override grpc.poll_seconds=10.0
+```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/topk   --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/topk   --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+##### EGA
+
+（可选）启动服务器端流量监控
+
+```bash
+cd workspace/src
+bash scripts/monitor_tcp_port_traffic.sh \
+  --port 50073 \
+  --interface any \
+  --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/traffic
 ```
 
 EGA 服务端：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.server   --config configs/cifar10/ega.yaml   --override grpc.address=0.0.0.0:50073   --override grpc.server_address=127.0.0.1:50073   --override experiment.output_dir=../outputs/cifar10_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.server   --config configs/cifar10/ega.yaml   --override grpc.address=0.0.0.0:50073   --override grpc.server_address=127.0.0.1:50073   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 EGA 客户端 `c1` / `c2` / `c3`：
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c1   --config configs/cifar10/ega.yaml   --override grpc.server_address=127.0.0.1:50073   --override experiment.output_dir=../outputs/cifar10_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c1   --config configs/cifar10/ega.yaml   --override grpc.server_address=127.0.0.1:50073   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c2   --config configs/cifar10/ega.yaml   --override grpc.server_address=127.0.0.1:50073   --override experiment.output_dir=../outputs/cifar10_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c2   --config configs/cifar10/ega.yaml   --override grpc.server_address=127.0.0.1:50073   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
 ```
 
 ```bash
 cd workspace/src
-python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/ega.yaml   --override grpc.server_address=127.0.0.1:50073   --override experiment.output_dir=../outputs/cifar10_ega_grpc   --override runtime.device=cuda:0
+python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/ega.yaml   --override grpc.server_address=127.0.0.1:50073   --override runtime.device=cpu --override experiment.output_dir=../outputs/exp/cifar10/multi_sync/4096/ega --override runtime.seed=4096 --override grpc.poll_seconds=10.0
+```
+
+（可选）如果启动了服务器端流量监控
+
+通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+
+
+执行 DLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/exp/cifar10/multi_sync/4096/ega   --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
+```
+
+执行 iDLG：
+
+```bash
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/exp/cifar10/multi_sync/4096/ega   --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.max_samples_cap=512 --override attack.steps=500 --override attack.seed=4096 --override attack.device=cpu
 ```
 
 ## 5. 训练完成后的攻击回放与测试回放
@@ -773,26 +1026,16 @@ python -m fedlab.tools.replay_saved_update_attacks   ../outputs/rare_fedavg_grpc
 只回放 DLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_dlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_dlg
+python -m fedlab.tools.replay_saved_update_dlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_dlg --override attack.max_samples=512 --override attack.steps=500
 ```
 
 只回放 iDLG：
 
 ```bash
-python -m fedlab.tools.replay_saved_update_idlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_idlg
+python -m fedlab.tools.replay_saved_update_idlg   ../outputs/rare_fedavg_grpc   --output-dir ../outputs/rare_fedavg_grpc/offline_attack_replay_idlg --override attack.max_samples=512 --override attack.steps=500
 ```
 
-如果你希望批量扫描 `outputs/exp` 下某一批实验，并同时指定 seed、攻击设备、攻击随机种子和攻击步数，可以使用：
-
-```bash
-cd workspace/src
-bash scripts/run_replay_saved_update_batch.sh   --input-root ../outputs/exp   --modes multi_sync   --seeds 42   --override attack.device=cuda:0   --override attack.seed=42   --override attack.steps=500   --override attack.max_samples=512
-```
-
-如果只回放 DLG 或 iDLG，可以追加：
-
-- `--dlg-only`
-- `--idlg-only`
+如果你只想回放单一攻击方法，可以直接使用上面的 `replay_saved_update_dlg` 或 `replay_saved_update_idlg` 入口；README 这里不再展开批量脚本调用方式。
 
 ### 5.4 对保存好的模型重新做测试回放
 
@@ -816,21 +1059,21 @@ python -m fedlab.tools.replay_saved_model_evaluation   ../outputs/mnist_fedavg_g
 - `test_metrics.json`
 - `test_summary.json`
 
-## 6. 结果分析
+## 6. 结果分析 
 
 ### 6.1 直接使用 `analyze_experiment_suite`
 
-如果你已经有一个实验套件目录，推荐也把分析结果输出到 `../outputs/analysis/...`：
+如果你已经把多次实验结果整理在同一层级目录下，推荐把分析结果输出到 `../outputs/analysis/...`：
 
 ```bash
 cd workspace/src
-PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/rare/single_sync/42/mse   --loss mse   --output-dir ../outputs/analysis/rare_single_sync_42_mse   --algorithms centralized fedavg topk ega
+PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/rare/multi_sync/4096   --loss mse   --output-dir ../outputs/analysis/rare/multi_sync/4096   --algorithms centralized fedavg topk ega
 ```
 
-多 seed 联合分析时，可以一次传多个根目录：
+如果你想联合分析多次不同 seed 或不同运行目录，也可以一次传多个根目录：
 
 ```bash
-PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/rare/single_sync/42/mse   ../outputs/exp/rare/single_sync/4096/mse   ../outputs/exp/rare/single_sync/2026/mse   ../outputs/exp/rare/single_sync/8192/mse   --loss mse   --output-dir ../outputs/analysis/rare_single_sync_multiseed_mse   --algorithms centralized fedavg topk ega
+PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/rare_suite_mse/seed42   ../outputs/rare_suite_mse/seed4096   ../outputs/rare_suite_mse/seed2026   --loss mse   --output-dir ../outputs/analysis/rare_multiseed_mse   --algorithms centralized fedavg topk ega
 ```
 
 当前工具支持：
@@ -848,84 +1091,11 @@ PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/ra
 - 测试指标对比图
 - 相对 `centralized` 的性能损失统计
 
-### 6.2 使用批处理脚本分析 `outputs/exp`
+### 6.2 参数速查表
 
-如果你的实验目录遵循现在的批量实验结构：
+下面这部分按“用户真正会传入或覆盖的参数”整理。为了避免 README 失控，这里优先列出训练入口和离线攻击入口实际会读取的参数；如果你要看更完整的配置块说明，再查 `docs/config_reference.md`。
 
-```text
-../outputs/exp/<task>/<mode>/<seed>/<loss>
-```
-
-那么可以直接用：
-
-```bash
-cd workspace/src
-bash scripts/run_analyze_experiment_suite_batch.sh
-```
-
-默认等价于：
-
-```bash
-INPUT_ROOT=../outputs/exp OUTPUT_ROOT=../outputs/analysis/exp TASKS="rare mnist cifar10" TASK_LOSS_MAP="rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy" MODE=single_sync SEEDS="42 4096 2026 8192" ALGORITHMS="centralized fedavg topk ega" bash scripts/run_analyze_experiment_suite_batch.sh
-```
-
-只分析某一个任务和模式：
-
-```bash
-TASKS="mnist" MODE=multi_sync SEEDS="42 4096" bash scripts/run_analyze_experiment_suite_batch.sh
-```
-
-也可以通过命令行参数传入：
-
-```bash
-bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp   --output-root ../outputs/analysis/exp   --tasks "rare mnist cifar10"   --task-loss-map "rare=mse,mae;mnist=cross_entropy;cifar10=cross_entropy"   --mode multi_sync   --seeds "42 4096 2026 8192"   --algorithms "centralized fedavg topk ega"
-```
-
-### 6.3 批量实验的运行与分析建议
-
-如果你准备使用仓库里的批量实验脚本，推荐遵循下面的顺序：
-
-1. 先准备 `../data/rare_earth_rawdata2`、`../data/mnist`、`../data/cifar10`
-2. 再生成 `../outputs/exp/...` 实验目录
-3. 最后用 `scripts/run_analyze_experiment_suite_batch.sh` 做单 seed 与多 seed 汇总分析
-
-### 6.4 参数速查表
-
-下面这部分按“用户真正会传入或覆盖的参数”整理。为了避免 README 失控，这里优先列出当前脚本、训练入口和离线攻击入口实际会读取的参数；如果你要看更完整的配置块说明，再查 `docs/config_reference.md`。
-
-#### 6.4.1 批量脚本环境变量
-
-这些参数主要用于 `scripts/run_suite.sh`、`scripts/run_controlled_suite.sh`、`scripts/run_exp_seed*.sh`。
-
-| 参数 | 取值范围 | 默认值 | 作用 |
-| --- | --- | --- | --- |
-| `TASK_SET` / `TASKS` | `rare`、`mnist`、`cifar10`、`all`、逗号分隔列表 | `all` | 选择跑哪些任务。 |
-| `MODE_SET` / `--modes` | `centralized`、`single_sync`、`grpc_sync`、`all`、逗号分隔列表 | `all` | 选择运行模式。当前批量实验里 `part1`/`part2` 主要对应 `single_sync` / `grpc_sync`。 |
-| `FEDERATED_ALGORITHMS` / `BASE_ALGOS` | `fedavg`、`topk`、`ega`、逗号分隔列表 | `fedavg,topk,ega` | 选择联邦算法集合。 |
-| `RUN_CENTRALIZED` | `true`、`false` | `true` | 是否同时跑 centralized 基线。 |
-| `SUITE_SEED` | 任意整数 | `2026`；各 `run_exp_seed*.sh` 会改成对应脚本 seed | 该套实验的主随机种子，也是多个子 seed 的回退来源。 |
-| `RUNTIME_SEED` | 任意整数 | 跟随 `SUITE_SEED` | 训练运行时随机种子，对应 `runtime.seed`。 |
-| `RUNTIME_DEVICE` | `cpu`、`cuda:0`、`cuda:1` 等 | 不显式设置时沿用配置或运行环境 | 训练设备。 |
-| `ROUNDS` | 正整数 | 不在脚本层硬编码；沿用配置文件 | 覆盖 `federated.rounds`。 |
-| `PATIENCE` | 非负整数 | 不在脚本层硬编码；沿用配置文件 | 覆盖 `training.patience`。 |
-| `POLL_SECONDS` | 正浮点数 | `1.0` | gRPC 训练轮询休眠间隔，脚本会覆盖到 `grpc.poll_seconds`。 |
-| `BASE_PORT` | 正整数端口号 | `58000`；各 `run_exp_seed*.sh` 会改成对应端口段 | gRPC 运行时的起始端口。 |
-| `BASE_OUTPUT_ROOT` / `OUTPUT_PREFIX` | 合法路径 | `outputs/...`；`run_exp_seed*.sh` 默认落到 `../outputs/exp/...` | 实验输出根目录。推荐设到 `../outputs`，避免污染 `src/`。 |
-| `PROJECT_NAME` | 任意字符串 | `fl-<task>-<mode>` 或脚本内部默认值 | `wandb` project 名。 |
-| `MONITOR_GRPC_PORT_TRAFFIC` | `true`、`false` | `false` | 是否启用 `tcpdump` 对 gRPC 端口做外部流量监控。 |
-| `GRPC_MONITOR_INTERFACE` | 网卡名，如 `lo`、`eth0`、`any` | `any` | 外部流量监控监听的网卡。 |
-| `CAPTURE_FREQUENCY_ROUNDS` | 正整数 | 不显式设置时沿用配置，当前代码运行时默认 `30` | 覆盖 `replay_capture.frequency_rounds`，控制保存 `saved_updates` 的轮次间隔。 |
-| `QSGD_SEED` | 任意整数 | 跟随 `SUITE_SEED` | QSGD 量化随机种子。 |
-| `RANDOMK_SEED` | 任意整数 | 跟随 `SUITE_SEED` | Random-k 稀疏采样种子。 |
-| `ADAPTIVE_RDP_SEED` | 任意整数 | 跟随 `SUITE_SEED` | `adaptive_clipped_rdp_fedavg` 的随机种子。 |
-| `QINT8_SEED` | 任意整数 | 跟随 `SUITE_SEED` | `secure_quantized_fedavg` 的量化随机种子。 |
-| `EGA_QUANTIZATION_SEED` | 任意整数 | 跟随 `SUITE_SEED` | EGA 编码量化随机种子。 |
-| `EGA_PRETRAIN_SEED` | 任意整数 | 跟随 `SUITE_SEED` | EGA codec 预训练随机种子。 |
-| `EGA_ARTIFACT_PATH` | 合法路径 | `artifacts/ega/ega_h240_v1.pt` | EGA codec 产物路径。 |
-| `EGA_PRETRAIN_DEVICE` | `same`、`cpu`、`cuda:*` | `same` | EGA 预训练设备。 |
-| `EGA_PRETRAIN_EPOCHS` | 正整数 | 不显式设置时沿用配置，公共默认配置里是 `220` | EGA codec 预训练轮数。 |
-
-#### 6.4.2 训练入口常用 `--override`
+#### 6.2.1 训练入口常用 `--override`
 
 这些参数可直接传给 `python -m fedlab.entrypoints.train/server/client`。
 
@@ -933,7 +1103,7 @@ bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp
 | --- | --- | --- | --- |
 | `experiment.output_dir` | 合法路径 | 无固定默认输出目录 | 当前实验输出目录。 |
 | `runtime.device` | `cpu`、`cuda:*` | `cpu` | 主训练设备。 |
-| `runtime.seed` | 任意整数 | 未显式设置时为空；脚本通常会覆盖 | 训练随机种子。 |
+| `runtime.seed` | 任意整数 | 未显式设置时为空 | 训练随机种子。 |
 | `runtime.deterministic` | `true`、`false` | `true` | 是否尽量启用确定性运行。 |
 | `training.epochs` | 正整数 | `1` | centralized 模式下表示总训练 epoch；federated 模式下表示每轮本地训练 epoch。 |
 | `training.lr` | 正浮点数 | `0.001` | 训练学习率。 |
@@ -943,7 +1113,7 @@ bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp
 | `training.patience` | 非负整数 | `50` | 早停耐心轮数。 |
 | `training.min_delta` | 非负浮点数 | `0.0` | 早停最小改进阈值。 |
 | `evaluation.metrics` | 任务支持的指标列表 | forecasting 默认 `[mse,mae,mape]`；分类配置通常会覆盖 | 验证和测试时计算哪些指标。 |
-| `federated.algorithm` | `fedavg`、`sparse_fedavg`、`randomk_fedavg`、`qsgd_fedavg`、`secure_quantized_fedavg`、`adaptive_clipped_rdp_fedavg`、`ega_fedavg` | `fedavg` | 联邦聚合算法。批量脚本里的 `topk` 会映射到稀疏 FedAvg。 |
+| `federated.algorithm` | `fedavg`、`sparse_fedavg`、`randomk_fedavg`、`qsgd_fedavg`、`secure_quantized_fedavg`、`adaptive_clipped_rdp_fedavg`、`ega_fedavg` | `fedavg` | 联邦聚合算法。常用的 Top-k 配置通常对应 `sparse_fedavg`。 |
 | `federated.rounds` | 正整数 | `20` | 联邦通信轮数。 |
 | `federated.local_steps` | 正整数 | 未设置 | 如果配置，会优先于 `training.epochs`。 |
 | `federated.topk_fraction` | `(0,1]` 浮点数 | 稀疏方法未显式设置时通常走各任务 YAML；Top-k 示例配置默认 `0.10` | Top-k / Random-k 保留比例。 |
@@ -952,7 +1122,7 @@ bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp
 | `federated.quantization_seed` | 任意整数 | 未显式设置 | 量化相关随机种子。 |
 | `grpc.address` | `host:port` | 运行时默认 `0.0.0.0:50051` | 服务端监听地址。 |
 | `grpc.server_address` | `host:port` | 运行时默认 `127.0.0.1:50051` | 客户端连接地址。 |
-| `grpc.poll_seconds` | 正浮点数 | 运行时默认 `1.0`；公共 gRPC 配置文件里是 `5.0`；批量脚本会强制覆盖为 `POLL_SECONDS` | 客户端与服务端的轮询休眠间隔。 |
+| `grpc.poll_seconds` | 正浮点数 | 运行时默认 `1.0`；公共 gRPC 配置文件里是 `5.0` | 客户端与服务端的轮询休眠间隔。 |
 | `grpc.max_message_mb` | 正浮点数 | `384.0` | gRPC 最大消息大小。 |
 | `replay_capture.enabled` | `true`、`false` | `true` | 是否保存可用于离线攻击的 `saved_updates`。 |
 | `replay_capture.frequency_rounds` | 正整数 | `30` | 第 0 轮、最后一轮以及每隔多少轮额外保存一次更新。 |
@@ -962,7 +1132,7 @@ bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp
 | `artifacts.config_formats` | `yaml`、`json`、`toml` 组成的列表 | `[yaml]` | 启动时保存哪些格式的配置快照。 |
 | `artifacts.save_every_rounds` | 非负整数 | `0` | 是否额外保存按轮快照，`0` 表示关闭。 |
 
-#### 6.4.3 EGA 专用参数
+#### 6.2.2 EGA 专用参数
 
 | 参数 | 取值范围 | 默认值 | 作用 |
 | --- | --- | --- | --- |
@@ -990,10 +1160,10 @@ bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp
 | `ega.pretrain.lr` | 正浮点数 | `0.0002` | codec 预训练学习率。 |
 | `ega.pretrain.train_groups` | 正整数 | `50000` | codec 预训练训练组数。 |
 | `ega.pretrain.val_groups` | 正整数 | `25000` | codec 预训练验证组数。 |
-| `ega.pretrain.seed` | 任意整数 | `4096`；脚本层通常会覆盖成 `EGA_PRETRAIN_SEED` | codec 预训练随机种子。 |
+| `ega.pretrain.seed` | 任意整数 | `4096` | codec 预训练随机种子。 |
 | `ega.pretrain.device` | `same`、`cpu`、`cuda:*` | `same` | codec 预训练设备。 |
 
-#### 6.4.4 离线攻击回放参数
+#### 6.2.3 离线攻击回放参数
 
 这些参数由 `python -m fedlab.tools.replay_saved_update_attacks`、`replay_saved_update_dlg`、`replay_saved_update_idlg` 读取，不参与联邦训练本身。
 
@@ -1029,11 +1199,11 @@ bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp
 | `attack.async_max_pending_rounds` | 正整数 | `5` | 异步模式下允许积压的最大轮数。 |
 | `attack.device` | `same`、`cpu`、`cuda:*` | `same` | 攻击设备。 |
 
-### 6.5 `summary.json` 指标说明
+### 6.3 `summary.json` 指标说明
 
 训练结束后的 `summary.json` 主要由联邦训练摘要生成逻辑写出；如果后续执行离线攻击回放，攻击工具还会在其自己的输出目录里补充攻击相关字段。
 
-#### 6.5.1 联邦训练摘要字段
+#### 6.3.1 联邦训练摘要字段
 
 | 指标 | 取值范围 | 默认值 | 作用 |
 | --- | --- | --- | --- |
@@ -1082,7 +1252,7 @@ bash scripts/run_analyze_experiment_suite_batch.sh   --input-root ../outputs/exp
 | `privacy_trust_model` | `null` 或字符串 | `null` | 当前隐私信任模型描述。 |
 | `transport` | `null`、`inprocess`、`grpc` 等 | 视运行模式而定 | 本次运行使用的传输后端。 |
 
-#### 6.5.2 离线攻击回放追加字段
+#### 6.3.2 离线攻击回放追加字段
 
 这些字段通常写在攻击输出目录自己的 `summary.json` 里，而不是训练目录原始的 `summary.json`。
 

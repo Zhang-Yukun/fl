@@ -770,8 +770,8 @@ def plot_validation_metric_vs_upload(records: list[RunRecord], metric: str, outp
 def plot_test_metric_bar(rows: list[dict[str, Any]], metric: str, output_path: Path, title: str | None = None) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     metric_key = _metric_key(metric)
-    fedavg_row = next((row for row in rows if row.get('label') == 'fedavg' and row.get(metric_key) is not None), None)
-    bar_rows = [row for row in rows if row.get('label') != 'fedavg' and row.get(metric_key) is not None]
+    centralized_row = next((row for row in rows if row.get('label') == 'centralized' and row.get(metric_key) is not None), None)
+    bar_rows = [row for row in rows if row.get('label') != 'centralized' and row.get(metric_key) is not None]
     labels = [str(row['label']) for row in bar_rows]
     values = [float(row[metric_key]) for row in bar_rows]
     colors = [_bar_color(str(row['label'])) for row in bar_rows]
@@ -780,11 +780,11 @@ def plot_test_metric_bar(rows: list[dict[str, Any]], metric: str, output_path: P
     if labels:
         ax.bar(labels, values, color=colors)
         plt.xticks(rotation=20, ha='right')
-    elif fedavg_row is None:
+    elif centralized_row is None:
         ax.text(0.5, 0.5, f'No runs with test {METRIC_TITLES[metric]}', ha='center', va='center', transform=ax.transAxes)
-    if fedavg_row is not None:
-        baseline = float(fedavg_row[metric_key])
-        ax.axhline(baseline, linestyle='--', color='#e45756', linewidth=1.8, label='fedavg baseline')
+    if centralized_row is not None:
+        baseline = float(centralized_row[metric_key])
+        ax.axhline(baseline, linestyle='--', color='#4c78a8', linewidth=1.8, label='centralized baseline')
         ax.legend()
     ax.set_ylabel(f'Test {METRIC_TITLES[metric]}')
     ax.set_title(title or f'Test {METRIC_TITLES[metric]}')
@@ -924,8 +924,8 @@ def plot_aggregated_test_metric_bar(rows: list[dict[str, Any]], metric: str, out
     output_path.parent.mkdir(parents=True, exist_ok=True)
     mean_key = _metric_mean_key(metric)
     std_key = _metric_std_key(metric)
-    fedavg_row = next((row for row in rows if row.get('label') == 'fedavg' and row.get(mean_key) is not None), None)
-    bar_rows = [row for row in rows if row.get('label') != 'fedavg' and row.get(mean_key) is not None]
+    centralized_row = next((row for row in rows if row.get('label') == 'centralized' and row.get(mean_key) is not None), None)
+    bar_rows = [row for row in rows if row.get('label') != 'centralized' and row.get(mean_key) is not None]
     labels = [str(row['label']) for row in bar_rows]
     values = [float(row[mean_key]) for row in bar_rows]
     errors = [float(row.get(std_key) or 0.0) for row in bar_rows]
@@ -935,14 +935,14 @@ def plot_aggregated_test_metric_bar(rows: list[dict[str, Any]], metric: str, out
     if labels:
         ax.bar(labels, values, yerr=errors, capsize=5, color=colors)
         plt.xticks(rotation=20, ha='right')
-    elif fedavg_row is None:
+    elif centralized_row is None:
         ax.text(0.5, 0.5, f'No runs with test {METRIC_TITLES[metric]}', ha='center', va='center', transform=ax.transAxes)
-    if fedavg_row is not None:
-        baseline = float(fedavg_row[mean_key])
-        baseline_std = float(fedavg_row.get(std_key) or 0.0)
-        ax.axhline(baseline, linestyle='--', color='#e45756', linewidth=1.8, label='fedavg baseline')
+    if centralized_row is not None:
+        baseline = float(centralized_row[mean_key])
+        baseline_std = float(centralized_row.get(std_key) or 0.0)
+        ax.axhline(baseline, linestyle='--', color='#4c78a8', linewidth=1.8, label='centralized baseline')
         if baseline_std > 0.0:
-            ax.axhspan(baseline - baseline_std, baseline + baseline_std, color='#e45756', alpha=0.12)
+            ax.axhspan(baseline - baseline_std, baseline + baseline_std, color='#4c78a8', alpha=0.12)
         ax.legend()
     ax.set_ylabel(f'Test {METRIC_TITLES[metric]}')
     ax.set_title(f'Test {METRIC_TITLES[metric]} (mean +- std)')
