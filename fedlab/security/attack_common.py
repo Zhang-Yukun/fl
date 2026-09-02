@@ -139,7 +139,9 @@ def _update_distance(model: nn.Module, x: torch.Tensor, y: torch.Tensor, target_
         if name not in predicted:
             continue
         diff = predicted[name] - target.to(predicted[name].device, dtype=predicted[name].dtype)
-        term = torch.mean(diff ** 2)
+        # Aggregate over all parameter elements so large tensors keep their
+        # natural influence in the inversion objective.
+        term = torch.sum(diff ** 2)
         distance = term if distance is None else distance + term
     if distance is None:
         raise ValueError("Attack target update does not overlap with any trainable model parameter")
