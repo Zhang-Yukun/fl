@@ -22,6 +22,7 @@ CURRENT_SCRIPTS = (
     "run_exp_seed8192_part1.sh",
     "run_exp_seed8192_part2.sh",
     "run_suite.sh",
+    "run_exp_replay_tail.sh",
 )
 
 REMOVED_SCRIPTS = (
@@ -206,12 +207,41 @@ def test_seed_wrappers_delegate_to_controlled_suite():
         assert 'BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"' in content
         assert 'bash scripts/run_controlled_suite.sh "$@"' in content
         assert 'RUNTIME_DEVICE="${RUNTIME_DEVICE:-cuda:0}"' in content
+        assert 'bash scripts/run_exp_replay_tail.sh' in content
+        assert 'REPLAY_MODES_RAW=' in content
         if '_part' in path.name:
             assert 'LOSSES=(mse)' in content
         if '_part1.sh' in path.name:
             assert 'MODE="single_sync"' in content
         if '_part2.sh' in path.name:
             assert 'MODE="multi_sync"' in content
+
+
+def test_run_exp_replay_tail_supports_optional_post_suite_attack_scan():
+    content = _assert_executable('run_exp_replay_tail.sh')
+    for marker in (
+        'RUN_REPLAY_AFTER_EXP="${RUN_REPLAY_AFTER_EXP:-false}"',
+        'REPLAY_INPUT_ROOT="${REPLAY_INPUT_ROOT:-${OUTPUT_PREFIX}}"',
+        'TASKS_RAW="${TASKS:-rare mnist cifar10}"',
+        'REPLAY_MODES_RAW="${REPLAY_MODES_RAW:-}"',
+        'REPLAY_RUN_DLG="${REPLAY_RUN_DLG:-true}"',
+        'REPLAY_RUN_IDLG="${REPLAY_RUN_IDLG:-true}"',
+        'REPLAY_FORCE="${REPLAY_FORCE:-false}"',
+        'REPLAY_OVERRIDE_RAW="${REPLAY_OVERRIDE_RAW:-}"',
+        'bash scripts/run_replay_saved_update_batch.sh',
+        '--input-root "${REPLAY_INPUT_ROOT}"',
+        '--tasks "${TASKS_RAW}"',
+        '--seeds "${SUITE_SEED}"',
+        '--algorithms "${BASE_ALGOS}"',
+        'if [[ -n "${REPLAY_MODES_RAW}" ]]; then',
+        'cmd+=(--modes "${REPLAY_MODES_RAW}")',
+        '--dlg-only',
+        '--idlg-only',
+        '--force',
+        "IFS=';' read -r -a override_list <<< \"${REPLAY_OVERRIDE_RAW}\"",
+        'cmd+=(--override "${override}")',
+    ):
+        assert marker in content
 
 
 def test_removed_scripts_are_absent():

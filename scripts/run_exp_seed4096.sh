@@ -11,6 +11,7 @@ TASKS_RAW="${TASKS:-rare mnist cifar10}"
 read -r -a TASKS <<< "${TASKS_RAW}"
 MODES=(single_sync multi_sync)
 BASE_ALGOS="${BASE_ALGOS:-fedavg,topk,ega}"
+REPLAY_MODES_RAW="${REPLAY_MODES_RAW:-${MODES[*]}}"
 
 for task in "${TASKS[@]}"; do
   case "${task}" in
@@ -32,3 +33,5 @@ for task in "${TASKS[@]}"; do
     done
   done
 done
+
+OUTPUT_PREFIX="${OUTPUT_PREFIX}" TASKS="${TASKS_RAW}" SUITE_SEED="${SUITE_SEED}" BASE_ALGOS="${BASE_ALGOS}" REPLAY_MODES_RAW="${REPLAY_MODES_RAW}" bash scripts/run_exp_replay_tail.sh
