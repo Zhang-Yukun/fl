@@ -475,3 +475,28 @@ def test_classification_update_payload_attacks_keep_reference_labels():
     assert dlg.reference_y is not None
     assert torch.equal(dlg.reference_y, torch.tensor([1], dtype=torch.long))
     assert dlg.reconstructed_y is not None
+
+def test_update_payload_attack_supports_lbfgs_and_sigmoid_input_parameterization():
+    config = _tiny_classification_config()
+    config["attack"]["optimizer"] = "lbfgs"
+    config["attack"]["input_parameterization"] = "sigmoid"
+    config["attack"]["steps"] = 1
+    device = torch.device("cpu")
+    model = build_model(config).to(device)
+    x = torch.randn(1, 1, 4, 4)
+    y = torch.tensor([1], dtype=torch.long)
+    state = serialize_model(model)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config["training"]["lr"])
+    optimizer.zero_grad(set_to_none=True)
+    loss = torch.nn.functional.cross_entropy(model(x), y)
+    loss.backward()
+    optimizer.step()
+    target_update = subtract_state(serialize_model(model), state)
+
+    result = dlg_attack(config, state, target_update, x, y, device, target_type="update_payload")
+
+    assert result.reconstructed_x is not None
+    assert torch.all(result.reconstructed_x >= 0.0)
+    assert torch.all(result.reconstructed_x <= 1.0)
+    assert torch.isfinite(torch.tensor(result.mse))
+

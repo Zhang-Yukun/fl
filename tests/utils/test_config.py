@@ -120,6 +120,7 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["attack"]["model_mode"] == "train"
     assert config["attack"]["methods"] == ["dlg", "idlg"]
     assert config["attack"]["optimizer"] == "adam"
+    assert config["attack"]["input_parameterization"] == "identity"
     assert config["attack"]["lr"] == 0.001
     assert config["attack"]["max_samples"] == "auto"
     assert config["attack"]["frequency_rounds"] == 30

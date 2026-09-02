@@ -137,6 +137,33 @@ class LargeConvClassifier(nn.Module):
         return self.head(self.features(x))
 
 
+class SigmoidLeNetClassifier(nn.Module):
+    """LeNet-style classifier closer to classic DLG image-reconstruction settings."""
+
+    def __init__(self, in_channels: int, num_classes: int, hidden_channels: int = 12):
+        super().__init__()
+        if int(in_channels) != 1:
+            raise ValueError('sigmoid_lenet currently supports single-channel image inputs only')
+        width = int(hidden_channels)
+        self.features = nn.Sequential(
+            nn.Conv2d(in_channels, width, kernel_size=5, stride=1, padding=2),
+            nn.Sigmoid(),
+            nn.AvgPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(width, width, kernel_size=5, stride=1, padding=2),
+            nn.Sigmoid(),
+            nn.AvgPool2d(kernel_size=2, stride=2),
+        )
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(width * 7 * 7, 120),
+            nn.Sigmoid(),
+            nn.Linear(120, int(num_classes)),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.features(x))
+
+
 class ResidualBlock(nn.Module):
     """Residual block with BatchNorm buffers for communication analysis."""
 
@@ -256,6 +283,12 @@ def build_model(config: dict[str, Any]) -> nn.Module:
             num_classes=num_classes,
             hidden_channels=int(model_cfg.get('hidden_channels', 32)),
             dropout=float(model_cfg.get('dropout', 0.1)),
+        )
+    if name in {'sigmoid_lenet', 'lenet_sigmoid', 'dlg_lenet'}:
+        return SigmoidLeNetClassifier(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            hidden_channels=int(model_cfg.get('hidden_channels', 12)),
         )
     if name in {'small_resnet', 'medium_resnet', 'large_resnet'}:
         return _build_resnet_variant(

@@ -50,6 +50,7 @@ _RUNTIME_DEFAULTS = {
         "steps": 300,
         "lr": 0.001,
         "optimizer": "adam",
+        "input_parameterization": "identity",
         "restarts": 1,
         "tv_weight": 0.0,
         "success_rate_threshold": 0.05,

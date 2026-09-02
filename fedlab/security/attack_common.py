@@ -365,7 +365,24 @@ def apply_set_recovery_metrics(
 def _create_optimizer(name: str, variables: list[torch.Tensor], lr: float) -> torch.optim.Optimizer:
     if name == "adam":
         return torch.optim.Adam(variables, lr=lr)
-    raise ValueError(f"Unknown attack optimizer: {name}; only adam is supported")
+    if name == "lbfgs":
+        return torch.optim.LBFGS(variables, lr=lr, max_iter=1, history_size=100, line_search_fn="strong_wolfe")
+    raise ValueError(f"Unknown attack optimizer: {name}; supported optimizers: adam, lbfgs")
+
+
+def _attack_input_parameterization(config: dict[str, Any]) -> str:
+    value = str(config.get("attack", {}).get("input_parameterization", "identity")).lower()
+    if value not in {"identity", "sigmoid"}:
+        raise ValueError(f"Unknown attack input parameterization: {value}")
+    return value
+
+
+def _apply_input_parameterization(variable: torch.Tensor, parameterization: str) -> torch.Tensor:
+    if parameterization == "identity":
+        return variable
+    if parameterization == "sigmoid":
+        return torch.sigmoid(variable)
+    raise ValueError(f"Unknown attack input parameterization: {parameterization}")
 
 
 def run_attack_loop(
@@ -391,6 +408,7 @@ def run_attack_loop(
     input_clip = attack_cfg.get("input_clip")
     target_clip = attack_cfg.get("target_clip")
     tv_weight = float(attack_cfg.get("tv_weight", 0.0))
+    input_parameterization = _attack_input_parameterization(config)
     seed = attack_cfg.get("seed")
     prepared_target = OrderedDict((parameter_name, tensor.detach().cpu().clone()) for parameter_name, tensor in target.items())
     overall_start = time.perf_counter()
@@ -433,7 +451,7 @@ def run_attack_loop(
                     num_classes = int(config.get("data", {}).get("num_classes", 0))
                     if num_classes <= 0:
                         with torch.no_grad():
-                            num_classes = int(model(dummy_x.detach()).shape[1])
+                            num_classes = int(model(_apply_input_parameterization(dummy_x.detach(), input_parameterization)).shape[1])
                     dummy_y = torch.randn(batch_size, num_classes, device=device, requires_grad=True)
                 else:
                     dummy_y = torch.randn_like(real_y, device=device, requires_grad=True)
@@ -445,24 +463,35 @@ def run_attack_loop(
                 variables = [dummy_x]
             optimizer = _create_optimizer(optimizer_name, variables, lr)
             restart_best_objective = float("inf")
-            restart_best_x = dummy_x.detach().clone()
+            restart_best_x = _apply_input_parameterization(dummy_x.detach(), input_parameterization).clone()
             restart_best_y = dummy_y.detach().clone()
-            for _ in range(steps):
+
+            def closure() -> torch.Tensor:
                 optimizer.zero_grad(set_to_none=True)
-                dist = _update_distance(model, dummy_x, dummy_y, prepared_target, config)
+                current_x = _apply_input_parameterization(dummy_x, input_parameterization)
+                dist = _update_distance(model, current_x, dummy_y, prepared_target, config)
                 if tv_weight > 0:
-                    dist = dist + tv_weight * time_series_total_variation(dummy_x)
-                dist_value = float(dist.detach().cpu().item())
+                    dist = dist + tv_weight * time_series_total_variation(current_x)
                 dist.backward()
-                optimizer.step()
+                return dist
+
+            for _ in range(steps):
+                if optimizer_name == "lbfgs":
+                    loss_tensor = optimizer.step(closure)
+                    dist_value = float(loss_tensor.detach().cpu().item())
+                else:
+                    loss_tensor = closure()
+                    dist_value = float(loss_tensor.detach().cpu().item())
+                    optimizer.step()
                 with torch.no_grad():
-                    if input_clip is not None:
+                    if input_parameterization == "identity" and input_clip is not None:
                         dummy_x.clamp_(min=-float(input_clip), max=float(input_clip))
                     if optimize_dummy_y and target_clip is not None:
                         dummy_y.clamp_(min=-float(target_clip), max=float(target_clip))
+                    current_x = _apply_input_parameterization(dummy_x.detach(), input_parameterization)
                 if dist_value < restart_best_objective:
                     restart_best_objective = dist_value
-                    restart_best_x = dummy_x.detach().clone()
+                    restart_best_x = current_x.clone()
                     restart_best_y = dummy_y.detach().clone()
         if best_x is None or restart_best_objective < best_objective_mse:
             best_objective_mse = restart_best_objective

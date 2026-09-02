@@ -18,8 +18,10 @@ attack:
   max_samples_cap: 128
   steps: 300
   lr: 0.001
-  # Attack optimizer currently only supports adam.
+  # Attack optimizer supports adam and lbfgs.
   optimizer: adam
+  # identity optimizes pixels directly; sigmoid constrains inputs to (0, 1).
+  input_parameterization: identity
   restarts: 1
   client_selection: all
   clients_per_round: 3
