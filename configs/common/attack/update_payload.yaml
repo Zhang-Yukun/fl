@@ -10,7 +10,7 @@ attack:
   # Success metric used after one-to-one matching.
   recovery_success_metric: mse
   recovery_success_objective: auto
-  recovery_success_threshold: null
+  recovery_success_threshold: 0.1
   # Attack trigger frequency in rounds.
   frequency_rounds: 30
   # auto means recover up to the attacked client's training-set size, capped below.
