@@ -19,6 +19,7 @@ from loguru import logger
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from fedlab.utils.random import seed_cuda_device
 from fedlab.utils.serialization import StateDict
 from fedlab.utils.transport import auxiliary_payload_num_bytes, auxiliary_payload_num_parameters
 
@@ -529,7 +530,12 @@ def _build_synthetic_ega_loader(
         generator=generator,
         dtype=torch.int32,
     ).to(torch.float32)
-    return DataLoader(TensorDataset(data), batch_size=int(batch_size), shuffle=True)
+    return DataLoader(
+        TensorDataset(data),
+        batch_size=int(batch_size),
+        shuffle=True,
+        generator=generator,
+    )
 
 
 def pretrain_ega_codec(
@@ -543,85 +549,94 @@ def pretrain_ega_codec(
 
     ega_cfg = _ega_config(config)
     pretrain_cfg = ega_cfg.get("pretrain", {})
-    codec = build_ega_model(config).to(device)
     block_size = int(ega_cfg.get("block_size", 256))
     quantization_level = int(ega_cfg.get("quantization_level", 64))
-    train_loader = _build_synthetic_ega_loader(
-        groups=int(pretrain_cfg.get("train_groups", 1024)),
-        num_clients=num_clients,
-        block_size=block_size,
-        quantization_level=quantization_level,
-        batch_size=int(pretrain_cfg.get("batch_size", 32)),
-        seed=int(pretrain_cfg.get("seed", config.get("runtime", {}).get("seed", 2026))),
-    )
-    val_loader = _build_synthetic_ega_loader(
-        groups=int(pretrain_cfg.get("val_groups", 256)),
-        num_clients=num_clients,
-        block_size=block_size,
-        quantization_level=quantization_level,
-        batch_size=int(pretrain_cfg.get("batch_size", 32)),
-        seed=int(pretrain_cfg.get("seed", config.get("runtime", {}).get("seed", 2026))) + 17,
-    )
-    optimizer = torch.optim.Adam(codec.parameters(), lr=float(pretrain_cfg.get("lr", 1e-3)))
-    criterion = nn.MSELoss()
-    best_state = None
-    best_val = float("inf")
-    best_epoch = -1
-    completed_epochs = 0
-    patience = pretrain_cfg.get("patience")
-    patience = None if patience is None else int(patience)
-    min_delta = float(pretrain_cfg.get("min_delta", 0.0))
-    bad_epochs = 0
-    epochs = int(pretrain_cfg.get("epochs", 100))
-    for epoch in range(epochs):
-        codec.train()
-        train_loss = 0.0
-        train_count = 0
-        for (batch,) in train_loader:
-            batch = batch.to(device)
-            target = batch.mean(dim=1)
-            prediction = codec(batch)
-            loss = criterion(prediction, target)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            train_loss += float(loss.item()) * batch.shape[0]
-            train_count += int(batch.shape[0])
-        codec.eval()
-        val_loss = 0.0
-        val_count = 0
-        with torch.no_grad():
-            for (batch,) in val_loader:
-                batch = batch.to(device)
-                prediction = codec(batch)
-                target = batch.mean(dim=1)
-                loss = criterion(prediction, target)
-                val_loss += float(loss.item()) * batch.shape[0]
-                val_count += int(batch.shape[0])
-        avg_train = train_loss / max(train_count, 1)
-        avg_val = val_loss / max(val_count, 1)
-        logger.info(
-            "EGA pretrain epoch {} train_loss={:.6f} val_loss={:.6f}",
-            epoch,
-            avg_train,
-            avg_val,
+    pretrain_seed = int(pretrain_cfg.get("seed", config.get("runtime", {}).get("seed", 2026)))
+    cuda_devices = []
+    if device.type == "cuda" and torch.cuda.is_available():
+        cuda_devices = [device.index if device.index is not None else torch.cuda.current_device()]
+    # Keep codec initialization and loader shuffling reproducible even if
+    # earlier server startup steps consumed the global RNG state.
+    with torch.random.fork_rng(devices=cuda_devices):
+        torch.manual_seed(pretrain_seed)
+        seed_cuda_device(pretrain_seed, device)
+        codec = build_ega_model(config).to(device)
+        train_loader = _build_synthetic_ega_loader(
+            groups=int(pretrain_cfg.get("train_groups", 1024)),
+            num_clients=num_clients,
+            block_size=block_size,
+            quantization_level=quantization_level,
+            batch_size=int(pretrain_cfg.get("batch_size", 32)),
+            seed=pretrain_seed,
         )
-        completed_epochs = epoch + 1
-        if avg_val < (best_val - min_delta):
-            best_val = avg_val
-            best_epoch = epoch
-            bad_epochs = 0
-            best_state = {name: tensor.detach().cpu().clone() for name, tensor in codec.state_dict().items()}
-        else:
-            bad_epochs += 1
-            if patience is not None and bad_epochs >= patience:
-                logger.info(
-                    "EGA pretrain early stopping at epoch {} best_epoch={} best_val_loss={:.6f}",
-                    epoch,
-                    best_epoch,
-                    best_val,
-                )
-                break
+        val_loader = _build_synthetic_ega_loader(
+            groups=int(pretrain_cfg.get("val_groups", 256)),
+            num_clients=num_clients,
+            block_size=block_size,
+            quantization_level=quantization_level,
+            batch_size=int(pretrain_cfg.get("batch_size", 32)),
+            seed=pretrain_seed + 17,
+        )
+        optimizer = torch.optim.Adam(codec.parameters(), lr=float(pretrain_cfg.get("lr", 1e-3)))
+        criterion = nn.MSELoss()
+        best_state = None
+        best_val = float("inf")
+        best_epoch = -1
+        completed_epochs = 0
+        patience = pretrain_cfg.get("patience")
+        patience = None if patience is None else int(patience)
+        min_delta = float(pretrain_cfg.get("min_delta", 0.0))
+        bad_epochs = 0
+        epochs = int(pretrain_cfg.get("epochs", 100))
+        for epoch in range(epochs):
+            codec.train()
+            train_loss = 0.0
+            train_count = 0
+            for (batch,) in train_loader:
+                batch = batch.to(device)
+                target = batch.mean(dim=1)
+                prediction = codec(batch)
+                loss = criterion(prediction, target)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                train_loss += float(loss.item()) * batch.shape[0]
+                train_count += int(batch.shape[0])
+            codec.eval()
+            val_loss = 0.0
+            val_count = 0
+            with torch.no_grad():
+                for (batch,) in val_loader:
+                    batch = batch.to(device)
+                    prediction = codec(batch)
+                    target = batch.mean(dim=1)
+                    loss = criterion(prediction, target)
+                    val_loss += float(loss.item()) * batch.shape[0]
+                    val_count += int(batch.shape[0])
+            avg_train = train_loss / max(train_count, 1)
+            avg_val = val_loss / max(val_count, 1)
+            logger.info(
+                "EGA pretrain epoch {} train_loss={:.6f} val_loss={:.6f}",
+                epoch,
+                avg_train,
+                avg_val,
+            )
+            completed_epochs = epoch + 1
+            if avg_val < (best_val - min_delta):
+                best_val = avg_val
+                best_epoch = epoch
+                bad_epochs = 0
+                best_state = {name: tensor.detach().cpu().clone() for name, tensor in codec.state_dict().items()}
+            else:
+                bad_epochs += 1
+                if patience is not None and bad_epochs >= patience:
+                    logger.info(
+                        "EGA pretrain early stopping at epoch {} best_epoch={} best_val_loss={:.6f}",
+                        epoch,
+                        best_epoch,
+                        best_val,
+                    )
+                    break
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
