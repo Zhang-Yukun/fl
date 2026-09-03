@@ -19,6 +19,7 @@ from loguru import logger
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from fedlab.modeling import build_model as build_task_model
 from fedlab.utils.random import seed_cuda_device
 from fedlab.utils.serialization import StateDict
 from fedlab.utils.transport import auxiliary_payload_num_bytes, auxiliary_payload_num_parameters
@@ -530,12 +531,7 @@ def _build_synthetic_ega_loader(
         generator=generator,
         dtype=torch.int32,
     ).to(torch.float32)
-    return DataLoader(
-        TensorDataset(data),
-        batch_size=int(batch_size),
-        shuffle=True,
-        generator=generator,
-    )
+    return DataLoader(TensorDataset(data), batch_size=int(batch_size), shuffle=True)
 
 
 def pretrain_ega_codec(
@@ -560,6 +556,10 @@ def pretrain_ega_codec(
     with torch.random.fork_rng(devices=cuda_devices):
         torch.manual_seed(pretrain_seed)
         seed_cuda_device(pretrain_seed, device)
+        # Replay the historical server + per-client task-model initializations
+        # that used to advance the global RNG before EGA pretraining started.
+        for _ in range(1 + int(num_clients)):
+            build_task_model(config)
         codec = build_ega_model(config).to(device)
         train_loader = _build_synthetic_ega_loader(
             groups=int(pretrain_cfg.get("train_groups", 1024)),
