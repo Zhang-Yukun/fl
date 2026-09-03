@@ -41,7 +41,7 @@ workspace/
 │   │   ├── rare/                  # rare 的 rawdata2 Excel 原始文件
 │   │   ├── mnist/                 # MNIST 原始下载目录
 │   │   └── cifar10/               # CIFAR-10 原始下载目录
-│   ├── rare_earth_rawdata2/       # rare 预处理后的联邦数据目录
+│   ├── rare/                      # rare 预处理后的联邦数据目录
 │   ├── mnist/                     # MNIST 预处理后的联邦数据目录
 │   └── cifar10/                   # CIFAR-10 预处理后的联邦数据目录
 └── src/
@@ -149,7 +149,7 @@ mkdir -p ../data/raw_data/rare ../data/raw_data/mnist ../data/raw_data/cifar10
 
 ```yaml
 data:
-  split_dir: ../data/rare_earth_rawdata2
+  split_dir: ../data/rare
   clients: [Nd2O3, CeO2, La2O3]
 ```
 
@@ -212,7 +212,7 @@ workspace/data/raw_data/rare/
 cd workspace/src
 python -m fedlab.tools.prepare_rawdata2 \
   --raw-dir ../data/raw_data/rare \
-  --output-dir ../data/rare_earth_rawdata2
+  --output-dir ../data/rare
 ```
 
 ### 3.3 `mnist` / `cifar10` 原始数据如何放置
@@ -265,7 +265,7 @@ tar -xzf ../data/raw_data/cifar10/cifar-10-python.tar.gz   -C ../data/raw_data/c
 `rare` 预处理完成后通常会得到：
 
 ```text
-../data/rare_earth_rawdata2/
+../data/rare/
 ├── clients/
 │   ├── Nd2O3/
 │   │   ├── train.csv
@@ -318,7 +318,7 @@ CIFAR-10 同理，只是客户端目录为 `c1/c2/c3`。
 服务端最少需要三份客户端的 `val.csv`；如果你也希望训练结束时直接执行最终测试，再额外准备三份 `test.csv`。验证和测试会按客户端各自上传的 scaler 统计进行恢复：
 
 ```text
-../data/rare_earth_rawdata2/
+../data/rare/
 └── clients/
     ├── Nd2O3/
     │   └── val.csv
@@ -330,9 +330,9 @@ CIFAR-10 同理，只是客户端目录为 `c1/c2/c3`。
 
 客户端只需要自己的 `train.csv`：
 
-- `Nd2O3` 客户端：`../data/rare_earth_rawdata2/clients/Nd2O3/train.csv`
-- `CeO2` 客户端：`../data/rare_earth_rawdata2/clients/CeO2/train.csv`
-- `La2O3` 客户端：`../data/rare_earth_rawdata2/clients/La2O3/train.csv`
+- `Nd2O3` 客户端：`../data/rare/clients/Nd2O3/train.csv`
+- `CeO2` 客户端：`../data/rare/clients/CeO2/train.csv`
+- `La2O3` 客户端：`../data/rare/clients/La2O3/train.csv`
 
 #### 3.5.2 `mnist` / `cifar10` 的最小文件集合
 
@@ -489,9 +489,9 @@ workspace/
 
 也就是说，分别把：
 
-- `../data/role_datasets/rare/client/Nd2O3/` 的内容复制到 `Nd2O3` 客户端机器的 `workspace/data/rare/`
-- `../data/role_datasets/rare/client/CeO2/` 的内容复制到 `CeO2` 客户端机器的 `workspace/data/rare/`
-- `../data/role_datasets/rare/client/La2O3/` 的内容复制到 `La2O3` 客户端机器的 `workspace/data/rare/`
+- `../data/role_datasets/rare/client/Nd2O3/` 的内容复制到 `Nd2O3` 客户端机器的 `workspace/data/rare/clients/`
+- `../data/role_datasets/rare/client/CeO2/` 的内容复制到 `CeO2` 客户端机器的 `workspace/data/rare/clients/`
+- `../data/role_datasets/rare/client/La2O3/` 的内容复制到 `La2O3` 客户端机器的 `workspace/data/rare/clients/`
 
 这样客户端仍然可以直接沿用默认的：
 
