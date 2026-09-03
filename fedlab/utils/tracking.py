@@ -321,6 +321,16 @@ def _render_classification_probabilities(axis, tensor, title: str, reference_lab
     return True
 
 
+def _apply_integer_x_grid(axis) -> None:
+    """Snap attack-plot x-axis ticks and grid lines to integer sample indices."""
+
+    try:
+        from matplotlib.ticker import MultipleLocator
+    except Exception:
+        return
+    axis.xaxis.set_major_locator(MultipleLocator(1))
+
+
 def _render_target_panel(
     axis,
     tensor,
@@ -403,6 +413,7 @@ def _attack_reconstruction_figure(result):
         axes[0].plot(_to_series(real_x), label=f"{reference_label}_x", linewidth=2.0)
         axes[0].plot(_to_series(reconstructed_x), label='reconstructed_x', linewidth=2.0)
         axes[0].set_title('Input reconstruction')
+        _apply_integer_x_grid(axes[0])
         axes[0].grid(True, alpha=0.3)
         axes[0].legend(loc='best')
         y_real_series = _to_series(real_y)
@@ -412,6 +423,7 @@ def _attack_reconstruction_figure(result):
         if y_recon_series:
             axes[1].plot(y_recon_series, label='reconstructed_y', linewidth=2.0)
         axes[1].set_title('Target reconstruction')
+        _apply_integer_x_grid(axes[1])
         axes[1].grid(True, alpha=0.3)
         if y_real_series or y_recon_series:
             axes[1].legend(loc='best')
