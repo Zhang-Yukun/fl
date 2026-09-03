@@ -76,6 +76,7 @@ cd workspace/src
 - `reformer-pytorch`
 - `matplotlib`
 - `scipy`
+- `xlrd`
 
 推荐使用 conda 创建环境，Python 版本建议使用 `3.13` 或 `3.14`。
 
