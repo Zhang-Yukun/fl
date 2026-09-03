@@ -48,6 +48,46 @@ def _candidate_label_signal_from_tensor(tensor: torch.Tensor, num_classes: int) 
     return None
 
 
+def _last_linear_parameter_names(model: nn.Module) -> tuple[str, str | None] | None:
+    """Return parameter names for the final linear classifier head."""
+
+    last_module_name = None
+    last_module = None
+    for module_name, module in model.named_modules():
+        if isinstance(module, nn.Linear):
+            last_module_name = module_name
+            last_module = module
+    if last_module_name is None or last_module is None:
+        return None
+    bias_name = f"{last_module_name}.bias" if last_module.bias is not None else None
+    return f"{last_module_name}.weight", bias_name
+
+
+def _target_type_prefers_argmin(target_type: str) -> bool:
+    normalized = str(target_type).lower()
+    return normalized in {"gradient", "gradients", "shared_gradient", "shared_gradients"}
+
+
+def _preferred_label_signal(
+    model: nn.Module,
+    target: list[torch.Tensor] | StateDict,
+    num_classes: int,
+) -> torch.Tensor | None:
+    last_linear_names = _last_linear_parameter_names(model)
+    if last_linear_names is None:
+        return None
+    weight_name, bias_name = last_linear_names
+    if bias_name is not None and bias_name in target:
+        bias_signal = _candidate_label_signal_from_tensor(target[bias_name], num_classes)
+        if bias_signal is not None:
+            return bias_signal
+    if weight_name in target:
+        weight_signal = _candidate_label_signal_from_tensor(target[weight_name], num_classes)
+        if weight_signal is not None:
+            return weight_signal
+    return None
+
+
 def infer_classification_label(
     config: dict[str, Any],
     model: nn.Module,
@@ -58,17 +98,11 @@ def infer_classification_label(
     """Infer one iDLG pseudo-label and broadcast it across the attacked batch."""
 
     num_classes = _classification_num_classes(config, model=model, sample_x=reference_x[:1])
-    named_parameters = [(name, parameter) for name, parameter in model.named_parameters() if parameter.requires_grad]
-    candidate_signals: list[tuple[str, torch.Tensor]] = []
-    for name, _parameter in named_parameters:
-        if name not in target:
-            continue
-        signal = _candidate_label_signal_from_tensor(target[name], num_classes)
-        if signal is not None:
-            candidate_signals.append((name, signal))
-    if not candidate_signals:
+    preferred_signal = _preferred_label_signal(model, target, num_classes)
+    if preferred_signal is None:
         return None
-    _preferred_name, preferred_signal = candidate_signals[-1]
-    del target_type
-    inferred = int(torch.argmax(preferred_signal).item())
+    if _target_type_prefers_argmin(target_type):
+        inferred = int(torch.argmin(preferred_signal).item())
+    else:
+        inferred = int(torch.argmax(preferred_signal).item())
     return torch.full((int(reference_x.shape[0]),), inferred, device=reference_x.device, dtype=torch.long)

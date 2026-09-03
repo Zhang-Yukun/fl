@@ -75,3 +75,40 @@ def test_sigmoid_lenet_output_shape_for_mnist():
     })
     assert model(torch.zeros(3, 1, 28, 28)).shape == (3, 10)
 
+
+def test_public_lenet_output_shape_for_mnist():
+    model = build_model({
+        'task': {'type': 'classification'},
+        'data': {'dataset_name': 'mnist', 'image_shape': [1, 28, 28], 'num_classes': 10},
+        'model': {'name': 'public_lenet', 'hidden_channels': 12},
+    })
+    assert model(torch.zeros(3, 1, 28, 28)).shape == (3, 10)
+
+
+
+def test_uniform_init_override_changes_parameters_for_small_cnn():
+    torch.manual_seed(0)
+    default_model = build_model({
+        'task': {'type': 'classification'},
+        'data': {'dataset_name': 'mnist', 'image_shape': [1, 28, 28], 'num_classes': 10},
+        'model': {'name': 'small_cnn', 'hidden_channels': 8},
+    })
+    torch.manual_seed(0)
+    override_model = build_model({
+        'task': {'type': 'classification'},
+        'data': {'dataset_name': 'mnist', 'image_shape': [1, 28, 28], 'num_classes': 10},
+        'model': {'name': 'small_cnn', 'hidden_channels': 8, 'init': 'uniform', 'init_uniform_low': -0.25, 'init_uniform_high': 0.25},
+    })
+    assert not torch.equal(default_model.features[0].weight, override_model.features[0].weight)
+    assert float(torch.max(override_model.features[0].weight).item()) <= 0.25
+    assert float(torch.min(override_model.features[0].weight).item()) >= -0.25
+
+
+def test_public_dlg_uniform_alias_is_supported_for_public_lenet():
+    torch.manual_seed(0)
+    model = build_model({
+        'task': {'type': 'classification'},
+        'data': {'dataset_name': 'mnist', 'image_shape': [1, 28, 28], 'num_classes': 10},
+        'model': {'name': 'public_lenet', 'hidden_channels': 12, 'init': 'public_dlg_uniform'},
+    })
+    assert float(torch.max(torch.abs(model.body[0].weight)).item()) <= 0.5

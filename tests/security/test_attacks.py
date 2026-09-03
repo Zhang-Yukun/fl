@@ -5,6 +5,7 @@ from fedlab.modeling import build_model
 from fedlab.engine.training import first_batch_sample
 from fedlab.security.attack_common import AttackResult, apply_set_recovery_metrics, save_attack_artifacts, summarize_attack_results
 from fedlab.security.dlg import dlg_attack
+from fedlab.security.attack_tasks import infer_classification_label
 from fedlab.security.idlg import idlg_attack
 from fedlab.security.registry import register_attack_artifact_field, register_attack_record_field, register_attack_summary_metric, register_recovery_metric
 from fedlab.utils.serialization import serialize_model, subtract_state
@@ -363,6 +364,52 @@ def test_apply_set_recovery_metrics_uses_one_to_one_matching_for_time_series_and
 
 
 
+
+
+def test_gradient_target_idlg_inferrs_label_from_last_linear_layer_with_argmin_rule():
+    config = _tiny_classification_config()
+    device = torch.device("cpu")
+    model = build_model(config).to(device)
+    x = torch.randn(1, 1, 4, 4)
+    target = {
+        "features.0.bias": torch.tensor([9.0, -9.0, 3.0, 1.0]),
+        "head.2.weight": torch.tensor([
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+            [-0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9],
+            [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
+        ]),
+        "head.2.bias": torch.tensor([0.2, -1.5, 0.4]),
+    }
+
+    inferred = infer_classification_label(config, model, target, "gradient", x)
+
+    assert inferred is not None
+    assert inferred.shape == (1,)
+    assert inferred.dtype == torch.long
+    assert torch.equal(inferred.cpu(), torch.tensor([1], dtype=torch.long))
+
+
+def test_update_payload_idlg_uses_last_linear_layer_signal_instead_of_earlier_class_shaped_tensors():
+    config = _tiny_classification_config()
+    device = torch.device("cpu")
+    model = build_model(config).to(device)
+    x = torch.randn(1, 1, 4, 4)
+    target = {
+        "features.0.bias": torch.tensor([9.0, -9.0, 3.0, 1.0]),
+        "head.2.weight": torch.tensor([
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+            [-0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9],
+            [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
+        ]),
+        "head.2.bias": torch.tensor([0.2, 1.5, 0.4]),
+    }
+
+    inferred = infer_classification_label(config, model, target, "update_payload", x)
+
+    assert inferred is not None
+    assert inferred.shape == (1,)
+    assert inferred.dtype == torch.long
+    assert torch.equal(inferred.cpu(), torch.tensor([1], dtype=torch.long))
 
 
 def test_classification_idlg_inferrs_label_from_update_payload():

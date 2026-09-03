@@ -18,6 +18,10 @@ def _image_shape(config: dict[str, Any]) -> tuple[int, int, int]:
     return channels, height, width
 
 
+
+
+
+
 class FlattenClassifier(nn.Module):
     """A small MLP baseline for image classification."""
 
@@ -164,6 +168,41 @@ class SigmoidLeNetClassifier(nn.Module):
         return self.head(self.features(x))
 
 
+class PublicLeNetClassifier(nn.Module):
+    """LeNet variant aligned with the public DLG/iDLG reference architecture."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        num_classes: int,
+        image_shape: tuple[int, int, int],
+        hidden_channels: int = 12,
+    ):
+        super().__init__()
+        width = int(hidden_channels)
+        self.body = nn.Sequential(
+            nn.Conv2d(in_channels, width, kernel_size=5, padding=2, stride=2),
+            nn.Sigmoid(),
+            nn.Conv2d(width, width, kernel_size=5, padding=2, stride=2),
+            nn.Sigmoid(),
+            nn.Conv2d(width, width, kernel_size=5, padding=2, stride=1),
+            nn.Sigmoid(),
+        )
+        flattened_features = self._flattened_features(image_shape)
+        self.head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(flattened_features, int(num_classes)),
+        )
+
+    def _flattened_features(self, image_shape: tuple[int, int, int]) -> int:
+        with torch.no_grad():
+            sample = torch.zeros(1, *image_shape)
+            return int(self.body(sample).reshape(1, -1).shape[1])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.body(x))
+
+
 class ResidualBlock(nn.Module):
     """Residual block with BatchNorm buffers for communication analysis."""
 
@@ -263,46 +302,57 @@ def build_model(config: dict[str, Any]) -> nn.Module:
     in_channels = int(image_shape[0])
     num_classes = int(config.get('data', {}).get('num_classes', model_cfg.get('num_classes', 10)))
     name = str(model_cfg.get('name', 'small_cnn')).lower()
+    model: nn.Module | None = None
     if name in {'small_cnn', 'cnn', 'convnet'}:
-        return SmallConvClassifier(
+        model = SmallConvClassifier(
             in_channels=in_channels,
             num_classes=num_classes,
             hidden_channels=int(model_cfg.get('hidden_channels', 32)),
             dropout=float(model_cfg.get('dropout', 0.1)),
         )
-    if name == 'medium_cnn':
-        return MediumConvClassifier(
+    elif name == 'medium_cnn':
+        model = MediumConvClassifier(
             in_channels=in_channels,
             num_classes=num_classes,
             hidden_channels=int(model_cfg.get('hidden_channels', 32)),
             dropout=float(model_cfg.get('dropout', 0.1)),
         )
-    if name == 'large_cnn':
-        return LargeConvClassifier(
+    elif name == 'large_cnn':
+        model = LargeConvClassifier(
             in_channels=in_channels,
             num_classes=num_classes,
             hidden_channels=int(model_cfg.get('hidden_channels', 32)),
             dropout=float(model_cfg.get('dropout', 0.1)),
         )
-    if name in {'sigmoid_lenet', 'lenet_sigmoid', 'dlg_lenet'}:
-        return SigmoidLeNetClassifier(
+    elif name in {'sigmoid_lenet', 'lenet_sigmoid', 'dlg_lenet'}:
+        model = SigmoidLeNetClassifier(
             in_channels=in_channels,
             num_classes=num_classes,
             hidden_channels=int(model_cfg.get('hidden_channels', 12)),
         )
-    if name in {'small_resnet', 'medium_resnet', 'large_resnet'}:
-        return _build_resnet_variant(
+    elif name in {'public_lenet', 'publiclenet', 'dlg_public_lenet'}:
+        model = PublicLeNetClassifier(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            image_shape=image_shape,
+            hidden_channels=int(model_cfg.get('hidden_channels', 12)),
+        )
+    elif name in {'small_resnet', 'medium_resnet', 'large_resnet'}:
+        model = _build_resnet_variant(
             name,
             in_channels=in_channels,
             num_classes=num_classes,
             hidden_channels=int(model_cfg.get('hidden_channels', 32)),
             dropout=float(model_cfg.get('dropout', 0.1)),
         )
-    if name in {'mlp', 'flatten'}:
-        return FlattenClassifier(
+    elif name in {'mlp', 'flatten'}:
+        model = FlattenClassifier(
             image_shape=image_shape,
             num_classes=num_classes,
             hidden_size=int(model_cfg.get('hidden_size', 128)),
             dropout=float(model_cfg.get('dropout', 0.1)),
         )
-    raise ValueError(f"Unknown classification model name: {name}")
+    if model is None:
+        raise ValueError(f"Unknown classification model name: {name}")
+    return model
+

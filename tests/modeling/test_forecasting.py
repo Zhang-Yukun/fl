@@ -1,5 +1,6 @@
 import torch
 
+from fedlab.modeling import build_model as build_any_model
 from fedlab.modeling.forecasting import build_model
 
 
@@ -26,3 +27,22 @@ def test_patchtst_forecaster_state_dict_uses_raw_reference_names():
     assert keys
     assert not any(key.startswith("model.") for key in keys)
     assert any(key.startswith("patch_embedding.") for key in keys)
+
+
+
+def test_forecasting_uniform_init_override_changes_parameters():
+    torch.manual_seed(0)
+    default_model = build_any_model({
+        'task': {'type': 'forecasting'},
+        'data': {'seq_len': 4, 'pred_len': 2},
+        'model': {'name': 'mlp', 'channels': 1, 'hidden_size': 8},
+    })
+    torch.manual_seed(0)
+    override_model = build_any_model({
+        'task': {'type': 'forecasting'},
+        'data': {'seq_len': 4, 'pred_len': 2},
+        'model': {'name': 'mlp', 'channels': 1, 'hidden_size': 8, 'init': 'uniform', 'init_uniform_low': -0.25, 'init_uniform_high': 0.25},
+    })
+    assert not torch.equal(default_model.net[1].weight, override_model.net[1].weight)
+    assert float(torch.max(override_model.net[1].weight).item()) <= 0.25
+    assert float(torch.min(override_model.net[1].weight).item()) >= -0.25
