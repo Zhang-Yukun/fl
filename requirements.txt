@@ -2,6 +2,7 @@ torch==2.13.0
 torchvision==0.28.0
 numpy==2.5.2
 pandas==3.0.5
+xlrd==2.0.2
 PyYAML==6.0.3
 loguru==0.7.3
 wandb==0.28.2
