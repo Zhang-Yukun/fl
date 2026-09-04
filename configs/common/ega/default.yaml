@@ -2,7 +2,7 @@ ega:
   artifact_path: artifacts/ega/ega_h240_v1.pt
   num_clients: auto
   block_size: 256
-  encoded_dim: 128
+  encoded_dim: 144
   hidden_dim: 2048
   residual_blocks: 4
   quantization_level: 159
