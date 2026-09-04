@@ -105,21 +105,25 @@ pip install pytest
 
 如果你要在 `tmux` 里管理多进程训练，或在服务器节点上对 gRPC 端口做外部流量监控，除了 Python 依赖外，还建议系统层面提供：
 
+> 当前 `scripts/monitor_tcp_port_traffic.sh` 依赖 `tcpdump` 抓包，并使用 `tshark` 解析统计；不同发行版的安装包名可能不同，但最终需要保证这两个命令都可用。
+
+
 - `tmux`
 - `tcpdump`
+- `tshark`
 - `pkill`
 
 在常见 Debian / Ubuntu 系统上通常对应：
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y tmux tcpdump procps
+sudo apt-get install -y tmux tcpdump tshark procps
 ```
 
 在常见 CentOS / Rocky / AlmaLinux 系统上通常对应：
 
 ```bash
-sudo yum install -y tmux tcpdump procps-ng
+sudo yum install -y tmux tcpdump wireshark-cli procps-ng
 ```
 
 ### 2.2 快速检查安装是否成功
@@ -662,27 +666,29 @@ bash scripts/monitor_tcp_port_traffic.sh \
 其中常见文件包括：
 
 - `grpc_port_traffic.summary.json`
-- `grpc_port_traffic.tcpdump.log`
-- `grpc_port_traffic.tcpdump.stderr.log`
+- `grpc_port_traffic.pcap`
+- `grpc_port_traffic.capture.stderr.log`
 
 `grpc_port_traffic.summary.json` 中：
 
-- `received_payload_bytes` 表示相对于被监听服务端端口的接收流量，在联邦语义里通常对应客户端上传
-- `sent_payload_bytes` 表示相对于被监听服务端端口的发送流量，在联邦语义里通常对应服务端下发
+- `received_bytes` / `sent_bytes`：按抓包 `frame.len` 汇总的端口接收/发送总流量
+- `received_tcp_payload_bytes` / `sent_tcp_payload_bytes`：按 `tcp.len` 汇总的 TCP payload 字节，更接近应用层承载数据量
+- 这套外部抓包结果适合做网络侧旁证，但不建议直接拿来替代框架内 `parameter_*` 统计，也不建议直接用于计算论文里的通信压缩比
+- 抓包口径本身也会有误差：例如抓包进程权限/缓冲限制导致的漏包，或 TCP 重传、回环接口/多视角抓取带来的重复计数。因此它更适合做趋势核对和异常排查，而不是作为唯一通信真值
 
 如果监控异常退出后有残留进程，可以在服务器节点清理：
 
 ```bash
 ps -efww | grep monitor_tcp_port_traffic | grep -v grep
-ps -efww | grep 'tcpdump -n -l -tt' | grep -v grep
+ps -efww | grep 'tcpdump -n -U -i' | grep -v grep
 pkill -f 'scripts/monitor_tcp_port_traffic.sh'
-pkill -f 'tcpdump -n -l -tt'
+pkill -f 'tcpdump -n -U -i'
 ```
 
 如果你知道具体监控端口，也可以更精确地只清理该端口对应的 `tcpdump`：
 
 ```bash
-pkill -f 'tcpdump -n -l -tt -i .* tcp port 50051'
+pkill -f 'tcpdump -n -U -i .* tcp port 50051'
 ```
 
 #### 4.2.0.2 启动顺序与轮询间隔
@@ -755,7 +761,7 @@ python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 
 执行 DLG：
@@ -820,7 +826,7 @@ python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 执行 DLG：
 
@@ -882,7 +888,7 @@ python -m fedlab.entrypoints.client   --client-id La2O3   --config configs/rare/
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 执行 DLG：
 
@@ -944,7 +950,7 @@ python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/fe
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 执行 DLG：
 
@@ -1003,7 +1009,7 @@ python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/to
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 执行 DLG：
 
@@ -1061,7 +1067,7 @@ python -m fedlab.entrypoints.client   --client-id m3   --config configs/mnist/eg
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 执行 DLG：
 
@@ -1123,7 +1129,7 @@ python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 执行 DLG：
 
@@ -1181,7 +1187,7 @@ python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 执行 DLG：
 
@@ -1239,7 +1245,7 @@ python -m fedlab.entrypoints.client   --client-id c3   --config configs/cifar10/
 
 （可选）如果启动了服务器端流量监控
 
-通过 Ctrl-c来中断，可以自动从目录中获取 grpc_port_traffic.summary.json，里面的received_payload_bytes 代表服务器接受的字节数（即上传通信量，用来计算通信压缩比），sent_payload_bytes 代表下载通信量（当前阶段可以不管）。
+通过 Ctrl-c 来中断，可以自动从目录中获取 `grpc_port_traffic.summary.json`。其中 `received_bytes` / `sent_bytes` 是抓包口径下的端口总流量，`received_tcp_payload_bytes` / `sent_tcp_payload_bytes` 是更接近应用层承载数据量的 TCP payload 统计；它们适合做网络侧旁证，不建议直接替代框架内 `parameter_*` 统计来计算通信压缩比。
 
 
 执行 DLG：

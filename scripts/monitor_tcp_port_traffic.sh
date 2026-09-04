@@ -5,14 +5,15 @@ cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 TCPDUMP_BIN="${TCPDUMP_BIN:-tcpdump}"
+TSHARK_BIN="${TSHARK_BIN:-tshark}"
 INTERFACE="${INTERFACE:-any}"
 PORT=""
 OUTPUT_DIR=""
-RAW_LOG_NAME="${RAW_LOG_NAME:-grpc_port_traffic.tcpdump.log}"
-ERR_LOG_NAME="${ERR_LOG_NAME:-grpc_port_traffic.tcpdump.stderr.log}"
+RAW_PCAP_NAME="${RAW_PCAP_NAME:-grpc_port_traffic.pcap}"
+ERR_LOG_NAME="${ERR_LOG_NAME:-grpc_port_traffic.capture.stderr.log}"
 SUMMARY_NAME="${SUMMARY_NAME:-grpc_port_traffic.summary.json}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-1}"
-TCPDUMP_PID=""
+CAPTURE_PID=""
 
 usage() {
   cat <<'USAGE'
@@ -24,6 +25,7 @@ Optional flags:
   --output-dir DIR
   --interface IFACE
   --tcpdump-bin PATH
+  --tshark-bin PATH
   --python-bin PATH
 USAGE
 }
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tcpdump-bin)
       TCPDUMP_BIN="$2"
+      shift 2
+      ;;
+    --tshark-bin)
+      TSHARK_BIN="$2"
       shift 2
       ;;
     --python-bin)
@@ -68,66 +74,96 @@ if [[ -z "${PORT}" || -z "${OUTPUT_DIR}" ]]; then
 fi
 
 mkdir -p "${OUTPUT_DIR}"
-RAW_LOG="${OUTPUT_DIR}/${RAW_LOG_NAME}"
+RAW_PCAP="${OUTPUT_DIR}/${RAW_PCAP_NAME}"
 ERR_LOG="${OUTPUT_DIR}/${ERR_LOG_NAME}"
 SUMMARY_PATH="${OUTPUT_DIR}/${SUMMARY_NAME}"
 
 summarize_capture() {
-  "${PYTHON_BIN}" - "$PORT" "$RAW_LOG" "$ERR_LOG" "$SUMMARY_PATH" <<'PY_SUMMARY'
+  "${PYTHON_BIN}" - "$TSHARK_BIN" "$PORT" "$RAW_PCAP" "$ERR_LOG" "$SUMMARY_PATH" <<'PY_SUMMARY'
 import json
-import re
+import subprocess
 import sys
 from pathlib import Path
 
-port = int(sys.argv[1])
-raw_log = Path(sys.argv[2])
-err_log = Path(sys.argv[3])
-summary_path = Path(sys.argv[4])
-pattern = re.compile(r"^(?P<ts>\S+)\s+(?:(?:\S+)\s+){0,3}(?:IP6?|IP)\s+(?P<src>\S+)\s+>\s+(?P<dst>\S+):.*\slength\s+(?P<length>\d+)\s*$")
-
-def endpoint_port(endpoint: str):
-    endpoint = endpoint.rstrip(':')
-    if '.' not in endpoint:
-        return None
-    suffix = endpoint.rsplit('.', 1)[-1]
-    return int(suffix) if suffix.isdigit() else None
+tshark_bin = sys.argv[1]
+port = int(sys.argv[2])
+pcap_path = Path(sys.argv[3])
+err_log = Path(sys.argv[4])
+summary_path = Path(sys.argv[5])
 
 sent = 0
 received = 0
+sent_payload = 0
+received_payload = 0
 sent_packets = 0
 received_packets = 0
-ignored_lines = 0
-matched_lines = 0
-lines = raw_log.read_text(encoding='utf-8', errors='replace').splitlines() if raw_log.exists() else []
-for line in lines:
-    match = pattern.match(line.strip())
-    if not match:
-        ignored_lines += 1
-        continue
-    matched_lines += 1
-    src_port = endpoint_port(match.group('src'))
-    dst_port = endpoint_port(match.group('dst'))
-    length = int(match.group('length'))
-    if src_port == port and dst_port != port:
-        sent += length
-        sent_packets += 1
-    elif dst_port == port and src_port != port:
-        received += length
-        received_packets += 1
+parsed_packets = 0
+skipped_packets = 0
+parse_error = None
+
+if pcap_path.exists() and pcap_path.stat().st_size > 0:
+    command = [
+        tshark_bin,
+        '-r',
+        str(pcap_path),
+        '-T',
+        'fields',
+        '-E',
+        'separator=\t',
+        '-e',
+        'tcp.srcport',
+        '-e',
+        'tcp.dstport',
+        '-e',
+        'frame.len',
+        '-e',
+        'tcp.len',
+    ]
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        parse_error = exc.stderr or str(exc)
     else:
-        ignored_lines += 1
+        for line in completed.stdout.splitlines():
+            parts = line.rstrip('\n').split('\t')
+            if len(parts) != 4:
+                skipped_packets += 1
+                continue
+            src_port, dst_port, frame_len, tcp_len = parts
+            if not frame_len.isdigit():
+                skipped_packets += 1
+                continue
+            parsed_packets += 1
+            frame_len_value = int(frame_len)
+            tcp_len_value = int(tcp_len) if tcp_len.isdigit() else 0
+            src_port_value = int(src_port) if src_port.isdigit() else None
+            dst_port_value = int(dst_port) if dst_port.isdigit() else None
+            if src_port_value == port and dst_port_value != port:
+                sent += frame_len_value
+                sent_payload += tcp_len_value
+                sent_packets += 1
+            elif dst_port_value == port and src_port_value != port:
+                received += frame_len_value
+                received_payload += tcp_len_value
+                received_packets += 1
+            else:
+                skipped_packets += 1
 payload = {
     'port': port,
-    'sent_payload_bytes': sent,
-    'received_payload_bytes': received,
-    'total_payload_bytes': sent + received,
+    'sent_bytes': sent,
+    'received_bytes': received,
+    'total_bytes': sent + received,
+    'sent_tcp_payload_bytes': sent_payload,
+    'received_tcp_payload_bytes': received_payload,
+    'total_tcp_payload_bytes': sent_payload + received_payload,
     'sent_packets': sent_packets,
     'received_packets': received_packets,
-    'matched_lines': matched_lines,
-    'ignored_lines': ignored_lines,
-    'raw_log_path': str(raw_log),
+    'parsed_packets': parsed_packets,
+    'skipped_packets': skipped_packets,
+    'pcap_path': str(pcap_path),
     'stderr_log_path': str(err_log),
-    'tcpdump_stderr': err_log.read_text(encoding='utf-8', errors='replace') if err_log.exists() else '',
+    'capture_stderr': err_log.read_text(encoding='utf-8', errors='replace') if err_log.exists() else '',
+    'parse_error': parse_error,
 }
 summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
 PY_SUMMARY
@@ -136,9 +172,9 @@ PY_SUMMARY
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
-  if [[ -n "${TCPDUMP_PID}" ]] && kill -0 "${TCPDUMP_PID}" 2>/dev/null; then
-    kill "${TCPDUMP_PID}" 2>/dev/null || true
-    wait "${TCPDUMP_PID}" 2>/dev/null || true
+  if [[ -n "${CAPTURE_PID}" ]] && kill -0 "${CAPTURE_PID}" 2>/dev/null; then
+    kill -INT "${CAPTURE_PID}" 2>/dev/null || kill "${CAPTURE_PID}" 2>/dev/null || true
+    wait "${CAPTURE_PID}" 2>/dev/null || true
   fi
   summarize_capture
   exit "${status}"
@@ -146,11 +182,11 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
-echo "[monitor] starting tcpdump port=${PORT} interface=${INTERFACE} output_dir=${OUTPUT_DIR}"
-"${TCPDUMP_BIN}" -n -l -tt -i "${INTERFACE}" "tcp port ${PORT}" > "${RAW_LOG}" 2> "${ERR_LOG}" &
-TCPDUMP_PID=$!
+echo "[monitor] starting tcpdump capture port=${PORT} interface=${INTERFACE} output_dir=${OUTPUT_DIR}"
+"${TCPDUMP_BIN}" -n -U -i "${INTERFACE}" -s 0 -w "${RAW_PCAP}" "tcp port ${PORT}" > /dev/null 2> "${ERR_LOG}" &
+CAPTURE_PID=$!
 
-while kill -0 "${TCPDUMP_PID}" 2>/dev/null; do
+while kill -0 "${CAPTURE_PID}" 2>/dev/null; do
   sleep "${SLEEP_SECONDS}"
 done
-wait "${TCPDUMP_PID}" || true
+wait "${CAPTURE_PID}" || true
