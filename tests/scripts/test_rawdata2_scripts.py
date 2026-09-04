@@ -252,17 +252,20 @@ def test_removed_scripts_are_absent():
 def test_port_traffic_monitor_script_captures_tcpdump_and_writes_summary():
     content = _assert_executable("monitor_tcp_port_traffic.sh")
     for marker in (
-        'TCPDUMP_BIN="${TCPDUMP_BIN:-tcpdump}"',
+        'TSHARK_BIN="${TSHARK_BIN:-tshark}"',
         'INTERFACE="${INTERFACE:-any}"',
         '--port PORT',
         '--output-dir DIR',
-        'RAW_LOG_NAME="${RAW_LOG_NAME:-grpc_port_traffic.tcpdump.log}"',
+        'RAW_PCAP_NAME="${RAW_PCAP_NAME:-grpc_port_traffic.pcap}"',
         'SUMMARY_NAME="${SUMMARY_NAME:-grpc_port_traffic.summary.json}"',
         'summarize_capture() {',
-        'sent_payload_bytes',
-        'received_payload_bytes',
-        'tcpdump_stderr',
-        '"${TCPDUMP_BIN}" -n -l -tt -i "${INTERFACE}" "tcp port ${PORT}"',
+        'sent_bytes',
+        'received_bytes',
+        'sent_tcp_payload_bytes',
+        'received_tcp_payload_bytes',
+        'tcp.len',
+        'capture_stderr',
+        '"${TSHARK_BIN}" -n -i "${INTERFACE}" -f "tcp port ${PORT}" -s 0 -w "${RAW_PCAP}"',
         'trap cleanup EXIT HUP INT TERM',
     ):
         assert marker in content
