@@ -13,7 +13,7 @@ This reference matches the current implementation and does not document removed 
 ### 1.1 Parameter communication vs transport communication
 
 - `parameter_*`: logical algorithm-level communication volume. This counts the bytes strictly required to reconstruct the semantic payload at the receiver, including quantization scales, sparse indices, codebook/context payloads, and other algorithm-required metadata.
-- `transport_*`: actual serialized bytes sent through the local or grpc transport, including serialization and protocol overhead.
+- `transport_*`: framework-side serialized message-body byte estimates. In single-process mode these come from local pickle envelope estimation; in gRPC mode they come from the framework RPC body counters. They are useful for within-framework comparison, but they are not a packet-level network ground truth and may differ from external captures. External packet captures are also imperfect: they can miss packets and can over-count traffic because of retransmissions or duplicate observation on loopback / multi-interface paths.
 - `*_compression_ratio` / `*_communication_ratio`: numerator is the dense FedAvg reference volume for the same round, denominator is the current method volume. Larger means better compression.
 
 ### 1.2 Protocol evaluation
