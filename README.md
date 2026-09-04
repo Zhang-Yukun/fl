@@ -105,10 +105,11 @@ pip install pytest
 
 如果你要在 `tmux` 里管理多进程训练，或在服务器节点上对 gRPC 端口做外部流量监控，除了 Python 依赖外，还建议系统层面提供：
 
-> 当前 `scripts/monitor_tcp_port_traffic.sh` 依赖 `tshark` 进行抓包与统计；不同发行版的安装包名可能不同，但最终需要保证 `tshark` 命令可用。
+> 当前 `scripts/monitor_tcp_port_traffic.sh` 依赖 `tcpdump` 抓包，并使用 `tshark` 解析统计；不同发行版的安装包名可能不同，但最终需要保证这两个命令都可用。
 
 
 - `tmux`
+- `tcpdump`
 - `tshark`
 - `pkill`
 
@@ -116,13 +117,13 @@ pip install pytest
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y tmux tshark procps
+sudo apt-get install -y tmux tcpdump tshark procps
 ```
 
 在常见 CentOS / Rocky / AlmaLinux 系统上通常对应：
 
 ```bash
-sudo yum install -y tmux wireshark-cli procps-ng
+sudo yum install -y tmux tcpdump wireshark-cli procps-ng
 ```
 
 ### 2.2 快速检查安装是否成功
