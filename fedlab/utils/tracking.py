@@ -396,24 +396,6 @@ def _attack_reconstruction_loss_text(result: Any) -> str | None:
     return ' '.join(parts) or None
 
 
-def _set_shared_y_limits(*axes_and_series: tuple[Any, list[float]]) -> None:
-    """Apply one shared y-axis range across multiple line-plot axes."""
-
-    values: list[float] = []
-    for _axis, series in axes_and_series:
-        values.extend(float(value) for value in series)
-    if not values:
-        return
-    lower = min(values)
-    upper = max(values)
-    if lower == upper:
-        padding = max(abs(lower) * 0.05, 1e-6)
-        lower -= padding
-        upper += padding
-    for axis, _series in axes_and_series:
-        axis.set_ylim(lower, upper)
-
-
 def _attack_reconstruction_figure(result):
     """Return a matplotlib figure for attack reconstruction diagnostics."""
 
@@ -482,12 +464,6 @@ def _attack_reconstruction_figure(result):
         axes[1].grid(True, alpha=0.3)
         if y_real_series or y_recon_series:
             axes[1].legend(loc='best')
-        _set_shared_y_limits(
-            (axes[0], x_real_series),
-            (axes[0], x_recon_series),
-            (axes[1], y_real_series),
-            (axes[1], y_recon_series),
-        )
     figure.suptitle(title)
     figure.tight_layout()
     return figure
