@@ -1597,6 +1597,154 @@ PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/ra
 | `attack_evaluations` | 非负整数 | `0` | 本次离线回放共评估了多少条攻击记录。 |
 | `attack_summary` | 字典 | 无 | 更完整的攻击统计汇总原文。 |
 
+### 6.3.3 攻击输出字段补充说明
+
+攻击相关输出主要有三类：
+
+- `attack_results.json`：逐条攻击结果的扁平记录，便于统计和筛选。
+- `attack_artifacts/*.pt`：逐条攻击保存的张量与可视化辅助字段，便于离线回放和画图。
+- 攻击可视化标题：运行时或离线绘图时即时计算出来的展示字段，不直接写回 `attack_results.json`。
+
+下面这三类字段名字看起来相近，但口径并不完全相同，尤其需要区分：
+
+- `primary_metric_name` / `primary_metric_value`：当前这条攻击记录用于汇总和排序的“主指标”。
+- `objective_mse`：攻击优化过程本身最小化的目标残差。
+- `loss_norm`：可视化标题里按归一化域 `reference_x` 与 `reconstructed_x` 计算出来的 MSE。
+- `loss_raw`：可视化标题里按反归一化后的 `plot_reference_x` 与 `plot_reconstructed_x` 计算出来的 MSE。
+
+#### 6.3.3.1 `attack_results.json` 字段
+
+`attack_results.json` 适合做筛选、排序、汇总和批量分析。按当前默认配置，攻击结果在完成集合恢复统计后，主指标通常会固定落在 `budget_recovered_fraction` 上，因此 `primary_metric_value` 默认最常见的含义也是“成功恢复样本占已重构样本的比例”。下面虽然仍按通用字段解释，但如果后续不主动改默认配置，实际读结果时基本可以按这个默认行为理解。
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `name` | string | 攻击方法名，通常为 `DLG` 或 `iDLG`。用于区分是哪一种恢复方法产生了这条记录。 |
+| `iterations` | int | 本次攻击实际执行了多少步优化。它反映的是求解过程长度，不直接代表恢复质量。 |
+| `time_seconds` | float | 本次攻击耗时。通常用于比较攻击开销，而不是比较恢复效果。 |
+| `success` | bool | 当前记录是否被判定为“攻击成功”。这里的成功是“攻击者是否成功恢复出了足够多的样本”，不是训练是否成功、也不是防御是否成功。按当前默认配置，它本质上是在判断这条记录的 `budget_recovered_fraction` 是否达到 `0.05`。 |
+| `success_threshold` | float | 当前记录的成功判定阈值。做集合恢复统计后，通常对应 `attack.success_rate_threshold`。按当前默认值，它通常是 `0.05`，也就是要求 `budget_recovered_fraction >= 0.05`，`success` 才会为 `true`。 |
+| `target_type` | string | 攻击目标类型，当前仅支持 `update_payload`，表示攻击对象是一轮本地训练后上传的模型更新。 |
+| `client_id` | string | 被攻击客户端 ID。用于把攻击结果按客户端聚合。 |
+| `round_index` | int | 攻击对应的联邦轮次。用于定位这条攻击来自第几轮。 |
+| `sample_index` | int | 同一轮、同一客户端下第几次独立攻击评估。它不是训练样本下标，而是“这次攻击任务”的编号。 |
+| `artifact_path` | string | 对应张量 artifact 的相对路径，指向 `attack_artifacts/.../*.pt`。需要看真实张量、画图或离线复现时会用到它。 |
+| `primary_metric_name` | string | 当前这条记录的主指标名。系统在后处理阶段会把“最值得拿来汇总和排序”的指标放到这里。按当前默认配置，做完集合恢复统计后它通常就是 `budget_recovered_fraction`；也就是说，默认情况下系统更关心“成功恢复了多少比例的样本”，而不是单纯看优化目标残差。 |
+| `primary_metric_value` | float or null | `primary_metric_name` 对应的数值本体。它的解释完全取决于 `primary_metric_name`：如果主指标是 `budget_recovered_fraction`，它就是“成功恢复样本占已重构样本的比例”；如果主指标是 `objective_mse`，它才表示攻击优化目标残差。按当前默认配置，它通常直接等于 `budget_recovered_fraction`，所以默认读法可以理解成“这次攻击最终成功恢复了多少比例的样本”。 |
+| `objective_mse` | float | 攻击优化过程中最小化的目标残差，对应内部的 `gradient_mse`。它描述的是“重构出来的样本在多大程度上能解释目标更新”，而不是“和真实样本逐点相比的最终误差”。所以它既不等于 `primary_metric_value`，也不等于可视化里的 `loss_norm` / `loss_raw`。 |
+| `matched_reference_indices` | list[int] or null | 一对一匹配后，每个重构样本在参考集里对应到的真实样本索引。它回答的是“这次恢复结果最后被对齐到了哪些真实样本”。 |
+| `matched_reference_metric_name` | string or null | 做一对一匹配、以及后续成功判定时用的指标名，例如 `mse`、`psnr`、`ssim`。按当前默认配置，它通常是 `mse`，因此默认情况下 `matched_reference_metric_value` 也通常按“越小越好”来解释。 |
+| `matched_reference_metric_value` | float or null | 当前记录内部所有匹配样本对的平均指标值。若指标是 `mse`，越小表示平均重构误差越低；若是 `psnr` / `ssim`，则通常越大越好。按当前默认配置，它通常就是匹配后真实样本与重构样本之间的平均 MSE，因此默认可以把它理解成“匹配后的平均重构误差”。 |
+| `matched_reference_metric_min_value` | float or null | 当前记录内部最优的单个匹配值。若指标是最小化型（如 `mse`），它表示最小误差；若是最大化型（如 `psnr`、`ssim`），它通常不是主要解释口径，因此更建议优先看平均值。按当前默认配置，它通常可以理解成“这条记录里最好恢复出来的那个样本对的 MSE”。 |
+| `recovered_count` | int or null | 当前记录里被判定为“恢复成功”的样本个数。这个判定基于 `matched_reference_metric_name`、对应阈值和一对一匹配结果，不是简单地看优化是否收敛。 |
+| `reconstructed_count` | int or null | 当前记录中实际尝试恢复了多少个样本。它通常等于这次攻击任务的 batch 大小，也是 `budget_recovered_fraction` 的分母。 |
+| `reference_count` | int or null | 用来做匹配的参考集大小，通常是被攻击客户端的可参考样本集合大小。它是 `coverage_recovered_fraction` 的分母。 |
+| `budget_recovered_fraction` | float or null | 定义为 `recovered_count / reconstructed_count`。它回答的是：“攻击者这次实际重构出来的这些候选样本里，有多大比例最终被判定为恢复成功？” 例如重构了 10 个样本、其中 3 个通过阈值，则该值为 `0.3`。按当前默认配置，这就是系统最主要的攻击效果指标，也是 `primary_metric_value` 最常见的真实含义。 |
+| `coverage_recovered_fraction` | float or null | 定义为 `recovered_count / reference_count`。它回答的是：“参考集合里的真实样本，有多大比例被这次攻击覆盖恢复到了？” 例如参考集有 100 个样本，本次成功对应到了其中 3 个，则该值为 `0.03`。按当前默认配置，它通常作为辅助指标使用，用来补充说明攻击覆盖面，而不是取代 `budget_recovered_fraction`。 |
+
+对这组字段，最容易混淆的地方是：
+
+- `primary_metric_value` 不是固定某一种损失，它只是当前主指标的数值承载字段。
+- `objective_mse` 是攻击优化目标；`matched_reference_metric_value` 是和真实参考样本匹配后的质量；`budget_recovered_fraction` / `coverage_recovered_fraction` 是集合恢复层面的比例指标。
+- 如果要判断“这次攻击到底恢复得好不好”，通常需要把这几个字段一起看，而不是只看其中一个。
+
+#### 6.3.3.2 `attack_artifacts/*.pt` 字段
+
+每个 artifact 都是一个 `torch.save(...)` 写出的字典，除了记录级元信息外，还包含原始张量和画图专用张量。它的重点不是做批量统计，而是保留“这一条攻击到底恢复出了什么”。
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `name` | string | 攻击方法名。 |
+| `client_id` | string or null | 被攻击客户端 ID。 |
+| `round_index` | int or null | 联邦轮次。 |
+| `sample_index` | int or null | 本轮该客户端内的攻击任务编号。 |
+| `target_type` | string | 当前仅 `update_payload`。 |
+| `reference_label` | string or null | 当前参考样本来源标签，例如 `nearest_client_train` 表示“按最近邻选出的参考样本”，`matched_client_train` 表示“经过集合匹配后最终对齐到的参考样本”。 |
+| `primary_metric_name` | string or null | 与记录文件同口径的主指标名。它方便离线脚本在只读 artifact 时知道该按什么指标理解结果。 |
+| `primary_metric_value` | float or null | 与记录文件同口径的主指标值。它不是额外定义的新指标，只是把记录级主指标一并存到 artifact 中。 |
+| `reference_x` | tensor or null | 参考输入张量，保持训练/攻击内部使用的原始口径；对稀土时间序列通常仍是归一化域。它适合拿来做“算法口径”的误差计算，例如 `loss_norm`。 |
+| `reconstructed_x` | tensor or null | 攻击恢复出来的输入张量，和 `reference_x` 处于同一数值口径。它表示攻击器真正优化出来的结果，而不是画图时人为变换后的值。 |
+| `reference_y` | tensor or null | 参考目标张量，口径与 `reference_x` 对应。对于分类任务，它可能是离散标签；对于时间序列任务，它可能仍是连续张量。 |
+| `reconstructed_y` | tensor or null | 攻击恢复出来的目标张量。解释时要结合任务类型：分类任务更偏向看类别是否对，回归/时序任务更偏向看逐点误差。 |
+| `plot_reference_x` | tensor or null | 专门给可视化使用的参考输入张量。对稀土时间序列，这里通常已经做过反归一化，回到原始物理量纲，所以更适合拿来直接看图。 |
+| `plot_reconstructed_x` | tensor or null | 专门给可视化使用的重构输入张量，通常与 `plot_reference_x` 处在同一原始量纲。`loss_raw` 就是基于这两个字段计算的。 |
+| `plot_reference_y` | tensor or null | 专门给可视化使用的参考目标张量。若任务需要反归一化展示，这里通常已经转到展示量纲。 |
+| `plot_reconstructed_y` | tensor or null | 专门给可视化使用的重构目标张量。它主要服务于画图，不建议把它直接当成训练内部口径的误差计算输入。 |
+| `matched_reference_indices` | list[int] or null | 与记录文件同义，保存在 artifact 里便于离线回放时不必再重新做一次匹配。 |
+| `matched_reference_metric_name` | string or null | 与记录文件同义，表示这份 artifact 对应的匹配质量应该按哪个指标解释。 |
+| `matched_reference_metric_value` | float or null | 与记录文件同义，表示这份 artifact 里样本对齐后的平均匹配质量。 |
+| `matched_reference_metric_min_value` | float or null | 与记录文件同义，表示这份 artifact 里最优的单样本匹配结果。 |
+| `recovered_count` | int or null | 与记录文件同义，表示这次攻击最终恢复成功了多少个样本。 |
+| `reconstructed_count` | int or null | 与记录文件同义，表示这次攻击尝试恢复了多少个样本。 |
+| `reference_count` | int or null | 与记录文件同义，表示匹配时可供参考的真实样本池大小。 |
+| `budget_recovered_fraction` | float or null | 与记录文件同义，表示“已尝试恢复的样本里，有多少比例真的被恢复成功”。 |
+| `coverage_recovered_fraction` | float or null | 与记录文件同义，表示“参考池中的真实样本，有多少比例被这次攻击覆盖到了”。 |
+
+读 artifact 时最关键的区分是：
+
+- `reference_*` / `reconstructed_*` 更偏算法内部口径。
+- `plot_reference_*` / `plot_reconstructed_*` 更偏展示口径。
+- 两者在某些任务里可能相同，但在稀土时间序列这类带标准化的数据上，往往一个是归一化域、一个是反归一化后的原始量纲。
+
+#### 6.3.3.3 `summary.json.attack_summary` 关键字段
+
+`attack_summary` 是面向“整次实验”或“整批攻击任务”的汇总视角。它不再关心单条记录的具体张量，而是关心总体上攻击成功率有多高、平均恢复效果有多强。按当前默认配置，这里的主线通常也是围绕 `budget_recovered_fraction` 和攻击成功率展开，因此下面提到的很多默认读法都可以长期按这个口径理解。
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `primary_metric_name` | string | 整个攻击汇总当前采用的主指标名。通常它和逐条记录里的 `primary_metric_name` 保持一致，表示报告里“最主要拿来评估攻击强弱”的那个量。按当前默认配置，它通常是 `budget_recovered_fraction`。 |
+| `primary_metric_direction` | string | 主指标的解释方向。恢复率类通常体现为“越低越隐私更好”；也就是说，从防御者角度看，这个指标越高通常越危险。 |
+| `target_type` | string | 攻击对象类型，当前为 `update_payload`。 |
+| `success_rate_threshold` | float | 单条攻击记录的成功判定阈值。它先决定每条记录的 `success`，再由这些 `success` 聚合出整体成功率。按当前默认值，它通常是 `0.05`，表示单条攻击只要恢复比例达到 5% 就记为成功。 |
+| `overall_success_rate_threshold` | float | 汇总层面的通过阈值。`overall_success_rate <= overall_success_rate_threshold` 时，`overall_passes=true`。注意这里判断的是“攻击是否足够不成功”，所以方向和常见任务指标不太一样。按当前默认值，它通常也是 `0.05`，表示整体攻击成功率不超过 5% 才算通过。 |
+| `overall_avg_primary_metric_value` | float or null | 全部攻击记录主指标的平均值。若主指标是 `budget_recovered_fraction`，它就表示“平均每条攻击能恢复出多少比例的样本”；若主指标换成别的量，则含义也会随之变化。按当前默认配置，它通常可以直接读成“平均攻击恢复比例”。 |
+| `overall_best_primary_metric_value` | float or null | 全部攻击记录里最极端、最强的一次主指标值。它更像“最坏情况攻击效果”，通常比平均值更激进。按当前默认配置，它通常就是“单次攻击里最高的恢复比例”。 |
+| `overall_success_rate` | float | 全部攻击记录里 `success=true` 的比例。若共有 100 条攻击、其中 8 条成功，则这里是 `0.08`。 |
+| `overall_success_rate_percent` | float | `overall_success_rate` 的百分比形式，便于直接读报告。 |
+| `overall_passes` | bool | 是否通过整体阈值。若它为 `true`，意思是“整体攻击成功率没有超过允许阈值”；不是说攻击本身表现好。 |
+| `overall_avg_budget_recovered_fraction` | float or null | 所有记录 `budget_recovered_fraction` 的平均值。它回答的是“平均一条攻击能恢复其重构预算中的多少比例”。按当前默认配置，它通常会和 `overall_avg_primary_metric_value` 含义一致或非常接近，因为默认主指标本来就是它。 |
+| `overall_avg_coverage_recovered_fraction` | float or null | 所有记录 `coverage_recovered_fraction` 的平均值。它回答的是“平均一条攻击能覆盖参考样本池中的多少比例”。按当前默认配置，它通常用来辅助说明攻击波及范围，而不是主排序指标。 |
+| `overall_avg_objective_mse` | float or null | 所有记录 `objective_mse` 的平均值。它反映攻击优化目标整体是否容易被拟合，但并不能直接替代真正的参考样本重构质量。按当前默认配置，它通常更适合做辅助诊断，而不是最终攻击强度排序。 |
+| `methods` | object | 按攻击方法名聚合后的子摘要，如 `methods.DLG`、`methods.iDLG`。适合比较不同攻击算法谁更强。 |
+| `clients` | object | 按客户端聚合后的子摘要，如 `clients.Nd2O3`。适合比较不同客户端在隐私上是否更脆弱。 |
+
+`methods.<method>` 和 `clients.<client_id>` 的常见字段如下：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `primary_metric_name` | string | 该子集使用的主指标名。解释下面的平均值和最优值时都要先看它。 |
+| `target_type` | string | 该子集攻击对象类型。 |
+| `success_count` | int | 该子集中 `success=true` 的记录数。它是 `success_rate` 的分子。 |
+| `total_count` | int | 该子集总记录数。它是 `success_rate` 的分母。 |
+| `success_rate` | float | `success_count / total_count`。它表示该子集里攻击成功出现得有多频繁。 |
+| `success_rate_percent` | float | 百分比形式的成功率。 |
+| `avg_primary_metric_value` | float or null | 该子集主指标平均值。若主指标是 `budget_recovered_fraction`，它表示“该方法/该客户端平均每次攻击能恢复多少比例的样本”。按当前默认配置，这通常就是比较不同方法、不同客户端谁更脆弱时最先看的数。 |
+| `best_primary_metric_value` | float or null | 该子集主指标中的最强一次结果。它更偏向最坏情况分析。按当前默认配置，它通常表示“该方法或该客户端曾出现过多高的单次恢复比例峰值”。 |
+| `passes` | bool | 该子集是否通过阈值要求。对于攻击成功率这类指标，通常仍然是“越低越容易通过”。 |
+
+读汇总指标时可以用一个简单顺序：
+
+1. 先看 `overall_success_rate`，判断攻击总体是否经常得手。
+2. 再看 `overall_avg_primary_metric_value`，判断平均每次得手到什么程度。
+3. 再看 `overall_best_primary_metric_value`，判断最坏情况下能有多严重。
+4. 最后按 `methods` 和 `clients` 拆开，定位是哪种攻击或哪个客户端更脆弱。
+
+#### 6.3.3.4 攻击可视化标题字段
+
+这些字段是画图时即时计算的，默认不会写回 `attack_results.json`。它们的目的主要是帮助你在“看图”的同时快速知道当前误差大概在哪个量级。
+
+| 字段 | 口径 | 含义 |
+| --- | --- | --- |
+| `loss_norm` | 归一化域 | 用 `reference_x` 和 `reconstructed_x` 直接计算的 MSE。它更接近攻击内部的算法口径，适合比较不同实验、不同样本在统一归一化尺度下的恢复误差。 |
+| `loss_raw` | 反归一化后的展示域 | 用 `plot_reference_x` 和 `plot_reconstructed_x` 计算的 MSE。它更接近图上肉眼看到的原始量纲误差，例如稀土价格或浓度的实际数值偏差。 |
+
+这两个值经常会同时看：
+
+- 如果想比较“攻击在统一标准化尺度下到底恢复得多准”，优先看 `loss_norm`。
+- 如果想知道“放回原始量纲后，误差到底有多大、是不是业务上还能接受”，优先看 `loss_raw`。
+- 两者数值量级往往差很多，尤其是原始数据量纲本身很大时，`loss_raw` 可能远大于 `loss_norm`。
+
+如果同一个 artifact 没有单独保存 `plot_*` 字段，离线绘图脚本会回退使用 `reference_*` / `reconstructed_*`，这时 `loss_norm` 和 `loss_raw` 可能数值相同。
+
 ## 7. 进一步阅读
 
 更详细的中文说明见：
