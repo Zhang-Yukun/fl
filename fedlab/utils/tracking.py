@@ -364,6 +364,56 @@ def _render_target_panel(
     axis.set_axis_off()
 
 
+def _attack_reconstruction_mse(real_x: Any, reconstructed_x: Any) -> float | None:
+    """Return one reconstruction MSE when both tensors exist and shapes align."""
+
+    if not isinstance(real_x, torch.Tensor) or not isinstance(reconstructed_x, torch.Tensor):
+        return None
+    if real_x.shape != reconstructed_x.shape:
+        return None
+    try:
+        return float(torch.mean((real_x.detach().cpu().float() - reconstructed_x.detach().cpu().float()) ** 2).item())
+    except Exception:
+        return None
+
+
+def _attack_reconstruction_loss_text(result: Any) -> str | None:
+    """Return compact normalized/raw reconstruction-MSE labels for the x tensors."""
+
+    normalized_mse = _attack_reconstruction_mse(
+        getattr(result, 'reference_x', None),
+        getattr(result, 'reconstructed_x', None),
+    )
+    raw_mse = _attack_reconstruction_mse(
+        getattr(result, 'plot_reference_x', None),
+        getattr(result, 'plot_reconstructed_x', None),
+    )
+    parts: list[str] = []
+    if normalized_mse is not None:
+        parts.append(f'loss_norm={normalized_mse:.6f}')
+    if raw_mse is not None:
+        parts.append(f'loss_raw={raw_mse:.6f}')
+    return ' '.join(parts) or None
+
+
+def _set_shared_y_limits(*axes_and_series: tuple[Any, list[float]]) -> None:
+    """Apply one shared y-axis range across multiple line-plot axes."""
+
+    values: list[float] = []
+    for _axis, series in axes_and_series:
+        values.extend(float(value) for value in series)
+    if not values:
+        return
+    lower = min(values)
+    upper = max(values)
+    if lower == upper:
+        padding = max(abs(lower) * 0.05, 1e-6)
+        lower -= padding
+        upper += padding
+    for axis, _series in axes_and_series:
+        axis.set_ylim(lower, upper)
+
+
 def _attack_reconstruction_figure(result):
     """Return a matplotlib figure for attack reconstruction diagnostics."""
 
@@ -388,6 +438,9 @@ def _attack_reconstruction_figure(result):
         f"{getattr(result, 'name', 'attack')} client={getattr(result, 'client_id', 'na')} "
         f"round={getattr(result, 'round_index', 'na')} sample={getattr(result, 'sample_index', 'na')}"
     )
+    loss_text = _attack_reconstruction_loss_text(result)
+    if loss_text is not None:
+        title = f"{title} {loss_text}"
 
     if _image_tensor(real_x) is not None and _image_tensor(reconstructed_x) is not None:
         figure, axes = plt.subplots(2, 2, figsize=(8, 6), height_ratios=[3, 2])
@@ -410,8 +463,10 @@ def _attack_reconstruction_figure(result):
         )
     else:
         figure, axes = plt.subplots(1, 2, figsize=(12, 3))
-        axes[0].plot(_to_series(real_x), label=f"{reference_label}_x", linewidth=2.0)
-        axes[0].plot(_to_series(reconstructed_x), label='reconstructed_x', linewidth=2.0)
+        x_real_series = _to_series(real_x)
+        x_recon_series = _to_series(reconstructed_x)
+        axes[0].plot(x_real_series, label=f"{reference_label}_x", linewidth=2.0)
+        axes[0].plot(x_recon_series, label='reconstructed_x', linewidth=2.0)
         axes[0].set_title('Input reconstruction')
         _apply_integer_x_grid(axes[0])
         axes[0].grid(True, alpha=0.3)
@@ -427,6 +482,12 @@ def _attack_reconstruction_figure(result):
         axes[1].grid(True, alpha=0.3)
         if y_real_series or y_recon_series:
             axes[1].legend(loc='best')
+        _set_shared_y_limits(
+            (axes[0], x_real_series),
+            (axes[0], x_recon_series),
+            (axes[1], y_real_series),
+            (axes[1], y_recon_series),
+        )
     figure.suptitle(title)
     figure.tight_layout()
     return figure

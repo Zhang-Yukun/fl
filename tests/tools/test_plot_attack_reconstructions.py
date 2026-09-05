@@ -55,6 +55,11 @@ def test_plot_attack_reconstructions_plots_saved_artifacts(tmp_path):
     assert selected[0]["pair_index"] == 0
     assert selected[0]["matched_reference_index"] == 5
     assert selected[0]["matched_metric_value"] < selected[1]["matched_metric_value"]
+    figure = module._attack_reconstruction_figure(selected[0]['result'])
+    assert figure is not None
+    assert figure._suptitle is not None
+    assert 'loss_norm=0.020000' in figure._suptitle.get_text()
+    assert 'loss_raw=0.020000' in figure._suptitle.get_text()
 
     output_dir = run_dir / "plots"
     plotted = [module.plot_candidate(candidate, output_dir) for candidate in selected]
