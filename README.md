@@ -13,6 +13,9 @@
 - `tmux`：推荐用于多节点部署、长时间训练和断线后恢复终端会话
 - `pkill`：通常由 `procps` 或 `procps-ng` 提供，用于清理残留监控进程
 - `tcpdump`：用于抓取指定 gRPC 端口的实际 TCP 流量
+- `tshark`：分析 `tcpdump`抓取的数据包大小
+- `ip`：分析本地 ip
+- `hostname`：分析本地 ip
 
 最简单的自检方式：
 
@@ -20,6 +23,9 @@
 which tmux
 which pkill
 which tcpdump
+which tshark
+which ip
+which hostname
 ```
 
 ## 1. 工作区组织
@@ -105,19 +111,21 @@ pip install pytest
 
 如果你要在 `tmux` 里管理多进程训练，或在服务器节点上对 gRPC 端口做外部流量监控，除了 Python 依赖外，还建议系统层面提供：
 
-> 当前 `scripts/monitor_tcp_port_traffic.sh` 依赖 `tcpdump` 抓包，并使用 `tshark` 解析统计；不同发行版的安装包名可能不同，但最终需要保证这两个命令都可用。
+> 当前 `scripts/monitor_tcp_port_traffic.sh` 依赖 `tcpdump` 抓包，并使用 `tshark` 解析统计；如果你希望脚本自动探测本机服务端 IP，还会优先尝试使用 `ip` 和 `hostname -I`。不同发行版的安装包名可能不同，但最终需要保证这些命令在需要的场景下可用；如果你显式传 `--server-ip`，则不依赖 `ip` / `hostname -I` 的自动探测。
 
 
 - `tmux`
 - `tcpdump`
 - `tshark`
 - `pkill`
+- `ip`（通常来自 `iproute2`）
+- `hostname`（需要支持 `hostname -I`）
 
 在常见 Debian / Ubuntu 系统上通常对应：
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y tmux tcpdump tshark procps
+sudo apt-get install -y tmux tcpdump tshark procps iproute2 hostname
 ```
 
 在常见 CentOS / Rocky / AlmaLinux 系统上通常对应：
@@ -659,6 +667,8 @@ bash scripts/monitor_tcp_port_traffic.sh \
 说明：
 
 - `--port` 应该填服务端实际监听的 gRPC 端口
+- `--server-ip` 是可选项；显式传入后，脚本会只按这个服务端 IP 和端口联合判断收发方向，不再依赖自动探测本机 IP
+- 如果不传 `--server-ip`，脚本会自动探测本机地址，当前优先会尝试 `ip -o addr show`、`hostname -I`，并结合 Python 自身的 `socket.getaddrinfo(...)` 结果做回退
 - `--interface` 应该填服务器实际通信网卡；单机本地联调常见是 `lo`，跨机器部署常见是 `eth0`、`ens*` 或直接 `any`
 - 监控结果会输出到 `grpc_port_traffic/` 目录
 - 训练结束后在监控所在终端 `Ctrl-C` 即可，脚本会自动汇总统计结果
@@ -727,6 +737,7 @@ python -m fedlab.entrypoints.client \
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50051 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/rare/multi_sync/4096/fedavg/traffic
 ```
@@ -791,6 +802,7 @@ python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/rare/multi_s
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50052 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/rare/multi_sync/4096/topk/traffic
 ```
@@ -854,6 +866,7 @@ python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/rare/multi_s
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50053 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/rare/multi_sync/4096/ega/traffic
 ```
@@ -920,6 +933,7 @@ python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/rare/multi_s
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50061 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/mnist/multi_sync/4096/fedavg/traffic
 ```
@@ -978,6 +992,7 @@ python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/mnist/multi_
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50062 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/mnist/multi_sync/4096/topk/traffic
 ```
@@ -1037,6 +1052,7 @@ python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/mnist/multi_
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50063 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/mnist/multi_sync/4096/ega/traffic
 ```
@@ -1099,6 +1115,7 @@ python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/mnist/multi_
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50071 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/cifar10/multi_sync/4096/fedavg/traffic
 ```
@@ -1157,6 +1174,7 @@ python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/cifar10/mult
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50072 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/cifar10/multi_sync/4096/topk/traffic
 ```
@@ -1215,6 +1233,7 @@ python -m fedlab.tools.replay_saved_model_evaluation ../outputs/exp/cifar10/mult
 cd workspace/src
 bash scripts/monitor_tcp_port_traffic.sh \
   --port 50073 \
+  --server-ip 127.0.0.1 \
   --interface any \
   --output-dir ../outputs/exp/cifar10/multi_sync/4096/ega/traffic
 ```

@@ -257,6 +257,7 @@ def test_port_traffic_monitor_script_captures_tcpdump_and_writes_summary():
         'INTERFACE="${INTERFACE:-any}"',
         '--port PORT',
         '--output-dir DIR',
+        '--server-ip IP',
         'RAW_PCAP_NAME="${RAW_PCAP_NAME:-grpc_port_traffic.pcap}"',
         'SUMMARY_NAME="${SUMMARY_NAME:-grpc_port_traffic.summary.json}"',
         'summarize_capture() {',
@@ -266,6 +267,8 @@ def test_port_traffic_monitor_script_captures_tcpdump_and_writes_summary():
         'received_tcp_payload_bytes',
         'tcp.len',
         'capture_stderr',
+        'server_ip',
+        'local_ips',
         '"${TCPDUMP_BIN}" -n -U -i "${INTERFACE}" -s 0 -w "${RAW_PCAP}" "tcp port ${PORT}"',
         'trap cleanup EXIT HUP INT TERM',
     ):
