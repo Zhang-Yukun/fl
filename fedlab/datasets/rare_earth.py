@@ -352,7 +352,7 @@ def build_federated_loaders_from_split_dir(data_cfg: dict[str, Any], seed: int |
     """Build loaders from ``split_dir/clients/<client>/{train,val,test}.csv``.
 
     Example:
-        Configure ``data.split_dir: ../data/rare_earth_rawdata2`` to use
+        Configure ``data.split_dir: ../data/rare`` to use
         preprocessed chronological 8:1:1 splits.
     """
 

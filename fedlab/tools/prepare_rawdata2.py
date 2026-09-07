@@ -163,7 +163,7 @@ def prepare_rawdata2(raw_dir: Path, output_dir: Path) -> dict[str, dict[str, int
     """Prepare all rawdata2 Excel files into client and server CSV files.
 
     Example:
-        ``prepare_rawdata2(Path("raw_data"), Path("data/rare_earth_rawdata2"))``.
+        ``prepare_rawdata2(Path("raw_data"), Path("data/rare"))``.
     """
 
     raw_files = _discover_raw_excel_files(raw_dir)
@@ -232,7 +232,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Prepare rawdata2 rare-earth data for federated training")
     parser.add_argument("--raw-dir", default="../data/raw_data")
-    parser.add_argument("--output-dir", default="../data/rare_earth_rawdata2")
+    parser.add_argument("--output-dir", default="../data/rare")
     args = parser.parse_args()
     summary = prepare_rawdata2(Path(args.raw_dir), Path(args.output_dir))
     print(json.dumps(summary, ensure_ascii=False, indent=2))

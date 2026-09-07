@@ -122,7 +122,7 @@ def test_prepare_classification_role_dataset_materializes_minimal_role_dirs(tmp_
 def test_prepare_role_datasets_supports_all_tasks(tmp_path):
     source_root = tmp_path / 'data'
     output_root = tmp_path / 'role_datasets'
-    _prepare_rare_split_dir(source_root / 'rare_earth_rawdata2')
+    _prepare_rare_split_dir(source_root / 'rare')
     _prepare_mnist_split_dir(source_root / 'mnist')
     _prepare_mnist_split_dir(source_root / 'cifar10')
 

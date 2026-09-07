@@ -11,7 +11,7 @@ from typing import Any
 
 
 _TASK_SOURCE_DIRS = {
-    'rare': 'rare_earth_rawdata2',
+    'rare': 'rare',
     'mnist': 'mnist',
     'cifar10': 'cifar10',
 }
