@@ -148,6 +148,23 @@ def _prepare_forecasting_test_only_split(source_root: Path, target_root: Path, *
         (client_dir / 'test.csv').write_text(source.read_text(encoding='utf-8'), encoding='utf-8')
 
 
+def _prepare_classification_test_only_split(source_root: Path, target_root: Path, *, client_ids: list[str], copy_server_test: bool) -> None:
+    target_root.mkdir(parents=True, exist_ok=True)
+    (target_root / 'summary.json').write_text((source_root / 'summary.json').read_text(encoding='utf-8'), encoding='utf-8')
+    if copy_server_test:
+        server_dir = target_root / 'server'
+        server_dir.mkdir(parents=True, exist_ok=True)
+        torch.save(torch.load(source_root / 'server' / 'test.pt', map_location='cpu', weights_only=False), server_dir / 'test.pt')
+        return
+    for client_id in client_ids:
+        client_dir = target_root / 'clients' / client_id
+        client_dir.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            torch.load(source_root / 'clients' / client_id / 'test.pt', map_location='cpu', weights_only=False),
+            client_dir / 'test.pt',
+        )
+
+
 def test_replay_saved_model_evaluation_matches_online_test_results(tmp_path):
     split_dir = tmp_path / 'split'
     online_dir = tmp_path / 'online'
@@ -169,6 +186,34 @@ def test_replay_saved_model_evaluation_matches_online_test_results(tmp_path):
     assert replay_summary['evaluation_mode'] == 'offline_saved_model_test'
     assert replay_summary['mode'] == 'federated'
     assert replay_summary['task_type'] == 'classification'
+
+
+@pytest.mark.parametrize('copy_server_test', [True, False])
+def test_replay_saved_model_evaluation_classification_uses_test_only_data(tmp_path, copy_server_test):
+    split_dir = tmp_path / 'split_full'
+    online_dir = tmp_path / 'online_test_only'
+    replay_data_dir = tmp_path / 'classification_test_only'
+    replay_dir = tmp_path / 'replay_test_only'
+    _prepare_classification_split_dir(split_dir, client_ids=['m1', 'm2', 'm3'], image_shape=(1, 4, 4), num_classes=3)
+    _prepare_classification_test_only_split(split_dir, replay_data_dir, client_ids=['m1', 'm2', 'm3'], copy_server_test=copy_server_test)
+    config = _classification_config(split_dir, online_dir)
+
+    summary = run_federated(config)
+    payload = _run_script(
+        online_dir / 'model.pt',
+        replay_dir,
+        '--config', str(online_dir / 'config.yaml'),
+        '--data-dir', str(replay_data_dir),
+    )
+
+    replay_metrics = json.loads((replay_dir / 'test_metrics.json').read_text(encoding='utf-8'))
+    replay_summary = json.loads((replay_dir / 'test_summary.json').read_text(encoding='utf-8'))
+
+    assert replay_metrics == pytest.approx(summary['test'])
+    assert replay_summary['test'] == pytest.approx(summary['test'])
+    assert replay_summary['protocol_test'] == pytest.approx(summary['protocol_test'])
+    assert replay_summary['task_type'] == 'classification'
+    assert payload['test_summary_path'] == str(replay_dir / 'test_summary.json')
 
 
 def test_replay_saved_model_evaluation_script_exists():

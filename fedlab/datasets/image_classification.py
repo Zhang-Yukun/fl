@@ -131,6 +131,26 @@ def _load_server_or_merged_eval_payloads(split_dir: Path, clients: list[str]) ->
     )
 
 
+def _load_test_only_payload(split_dir: Path, clients: list[str]) -> dict[str, torch.Tensor]:
+    """Load one detached classification test payload without requiring train/val splits."""
+
+    server_test = split_dir / 'server' / 'test.pt'
+    if server_test.exists():
+        return read_split_payload(server_test)
+    test_images = []
+    test_labels = []
+    for client_id in clients:
+        client_test = split_dir / 'clients' / client_id / 'test.pt'
+        if not client_test.exists():
+            raise FileNotFoundError(f'Missing offline classification test split: {client_test}')
+        payload = read_split_payload(client_test)
+        test_images.append(payload['images'])
+        test_labels.append(payload['labels'])
+    if not test_images:
+        raise FileNotFoundError(f'No offline classification test split found under {split_dir}')
+    return {'images': torch.cat(test_images, dim=0), 'labels': torch.cat(test_labels, dim=0)}
+
+
 def build_server_image_classification_evaluation_loaders(config: dict[str, Any]) -> tuple[DataLoader, DataLoader | None]:
     """Build only the server-side validation/test loaders for classification."""
 
@@ -164,6 +184,33 @@ def build_server_image_classification_evaluation_loaders(config: dict[str, Any])
             class_names=class_names,
         )
     return val_loader, test_loader
+
+
+def build_saved_model_image_classification_test_loader(
+    config: dict[str, Any],
+    *,
+    data_dir: str | Path | None = None,
+) -> DataLoader:
+    """Build a detached classification test loader for offline saved-model evaluation."""
+
+    data_cfg = config.get('data', {})
+    split_dir = Path(data_dir if data_dir is not None else data_cfg['split_dir'])
+    clients = list(data_cfg.get('clients', ['client1', 'client2', 'client3']))
+    batch_size = int(data_cfg.get('batch_size', 64))
+    num_workers = int(data_cfg.get('num_workers', 0))
+    seed = config.get('runtime', {}).get('seed')
+    summary = _read_split_summary(split_dir)
+    class_names = summary.get('class_names')
+    test_payload = _load_test_only_payload(split_dir, clients)
+    return _build_loader_from_payload(
+        test_payload,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        seed=seed,
+        identity='offline:test',
+        class_names=class_names,
+    )
 
 
 def build_federated_image_classification_loaders(config: dict[str, Any]) -> tuple[dict[str, DataLoader], Any, Any]:

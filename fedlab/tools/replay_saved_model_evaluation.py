@@ -13,6 +13,7 @@ import torch
 from loguru import logger
 
 from fedlab.datasets import build_federated_loaders
+from fedlab.datasets.image_classification import build_saved_model_image_classification_test_loader
 from fedlab.datasets.rare_earth import build_saved_model_rare_earth_test_loader
 from fedlab.engine.training import evaluate
 from fedlab.utils.runtime import configure_random_seed, configure_torch_runtime, resolve_device
@@ -40,6 +41,11 @@ def _build_saved_model_test_loader(
     """Build the detached offline test loader, using task-specific shortcuts when available."""
 
     task_type = str(config.get('task', {}).get('type', 'forecasting')).lower()
+    if task_type == 'classification' and 'split_dir' in config.get('data', {}):
+        return build_saved_model_image_classification_test_loader(
+            config,
+            data_dir=data_dir,
+        )
     if task_type == 'forecasting' and 'split_dir' in config.get('data', {}):
         context = None
         if evaluation_context_path is not None and evaluation_context_path.exists():
