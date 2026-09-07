@@ -238,3 +238,34 @@ def test_federated_run_supports_classification_without_test_split(tmp_path):
     assert summary['test_checkpoint'] is None
     assert (output_dir / 'model.pt').exists()
     assert (output_dir / 'summary.json').exists()
+
+
+def test_centralized_run_supports_classification_without_test_split(tmp_path):
+    split_dir = tmp_path / 'centralized_split_no_test'
+    output_dir = tmp_path / 'centralized_output_no_test'
+    for client_index, client_id in enumerate(['m1', 'm2', 'm3'], start=1):
+        _write_split(split_dir, client_id, 'train', torch.full((6, 1, 4, 4), float(client_index), dtype=torch.float32), torch.arange(6, dtype=torch.long) % 3)
+        _write_split(split_dir, client_id, 'val', torch.full((3, 1, 4, 4), float(client_index + 10), dtype=torch.float32), torch.arange(3, dtype=torch.long) % 3)
+    (split_dir / 'summary.json').write_text(json.dumps({'class_names': [str(index) for index in range(3)]}), encoding='utf-8')
+    config = _classification_config(
+        split_dir,
+        output_dir,
+        client_ids=['m1', 'm2', 'm3'],
+        image_shape=(1, 4, 4),
+        num_classes=3,
+        algorithm='fedavg',
+    )
+    config['experiment']['mode'] = 'centralized'
+
+    result = run_centralized(config)
+    summary = json.loads((output_dir / 'summary.json').read_text(encoding='utf-8'))
+    metrics = json.loads((output_dir / 'metrics.json').read_text(encoding='utf-8'))
+
+    assert result == {}
+    assert summary['test'] is None
+    assert summary['final_test_executed'] is False
+    assert summary['test_checkpoint'] is None
+    assert metrics['test'] is None
+    assert metrics['final_test_executed'] is False
+    assert metrics['test_checkpoint'] is None
+    assert (output_dir / 'model.pt').exists()

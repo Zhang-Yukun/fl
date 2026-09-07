@@ -581,9 +581,10 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
     model.load_state_dict(best_state)
     logger.info("Restored best centralized checkpoint from round {} for final test", best_round)
     torch.save(model.state_dict(), output_dir / "model.pt")
-    test_metrics = evaluate(model, test_loader, device)
+    test_metrics = None if test_loader is None else evaluate(model, test_loader, device)
     final_test_step = max(len(history), best_round + 1)
     total_elapsed = time.perf_counter() - start_time
+    final_test_executed = test_metrics is not None
     with (output_dir / "metrics.json").open("w", encoding="utf-8") as handle:
         json.dump(
             {
@@ -595,33 +596,38 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
                 "best_val": best_metrics,
                 "best_val_metric_name": primary_metric_name,
                 "best_val_metric_value": best_metrics[primary_metric_name],
-                "test_checkpoint": "best_validation",
+                "test_checkpoint": "best_validation" if final_test_executed else None,
+                "final_test_executed": final_test_executed,
             },
             handle,
             ensure_ascii=False,
             indent=2,
         )
     tracker.log({
-        **{f"test/{key}": value for key, value in test_metrics.items()},
         "run/total_time_seconds": total_elapsed,
+        "run/final_test_executed": final_test_executed,
         "run/best_round": best_round,
         "run/best_val_metric_name": primary_metric_name,
         "run/best_val_metric_value": best_metrics[primary_metric_name],
         **{f"run/best_val_{key}": value for key, value in best_metrics.items()},
+        **({} if test_metrics is None else {f"test/{key}": value for key, value in test_metrics.items()}),
     })
-    try:
-        _log_prediction_views(
-            tracker,
-            "prediction/centralized/test",
-            "centralized test prediction",
-            model,
-            test_loader,
-            device,
-            step=final_test_step,
-            client_ids=client_ids,
-        )
-    except Exception as exc:
-        logger.debug("Skip centralized prediction plot: {}", exc)
+    if test_metrics is not None and test_loader is not None:
+        try:
+            _log_prediction_views(
+                tracker,
+                "prediction/centralized/test",
+                "centralized test prediction",
+                model,
+                test_loader,
+                device,
+                step=final_test_step,
+                client_ids=client_ids,
+            )
+        except Exception as exc:
+            logger.debug("Skip centralized prediction plot: {}", exc)
+    else:
+        logger.info("Skip final centralized test because no test loader is available")
     tracker.finish()
     with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
         summary_payload = {
@@ -632,7 +638,8 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
             "best_val": best_metrics,
             "best_val_metric_name": primary_metric_name,
             "best_val_metric_value": best_metrics[primary_metric_name],
-            "test_checkpoint": "best_validation",
+            "test_checkpoint": "best_validation" if final_test_executed else None,
+            "final_test_executed": final_test_executed,
         }
         for key, value in best_metrics.items():
             summary_payload[f"best_val_{key}"] = value
@@ -643,7 +650,7 @@ def run_centralized(config: dict[str, Any]) -> dict[str, float]:
             indent=2,
         )
     logger.info("Centralized training finished in {:.2f}s with test metrics {}", total_elapsed, test_metrics)
-    return test_metrics
+    return {} if test_metrics is None else test_metrics
 
 
 def run_federated(config: dict[str, Any]) -> dict[str, Any]:
