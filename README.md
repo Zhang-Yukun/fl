@@ -566,6 +566,64 @@ workspace/data/test/rare/test
 
 如果你选择直接保留 `role_datasets/<task>/server`、`role_datasets/<task>/client/<client_id>` 这种新根目录不变，那也可以，只是运行命令里需要显式覆盖 `data.split_dir`。
 
+#### 3.5.5 `mnist` / `cifar10` 六节点部署时的最小数据清单
+
+如果你把图像分类任务拆成 6 类节点：`server`、`client1`、`client2`、`client3`、`attack`、`predict`，那么默认配置下最小需要的数据可以直接按下面理解。
+
+默认配置里：
+
+- `mnist` 的 `data.split_dir=../data/mnist`，客户端固定是 `m1`、`m2`、`m3`
+- `cifar10` 的 `data.split_dir=../data/cifar10`，客户端固定是 `c1`、`c2`、`c3`
+
+这些默认值分别见 `configs/common/data/mnist.yaml` 和 `configs/common/data/cifar10.yaml`。代码实际读取图像分类数据时：训练客户端只读 `clients/<client_id>/train.pt`；服务端验证/测试优先读 `server/val.pt`、`server/test.pt`；离线攻击回放会读被攻击客户端对应的 `clients/<client_id>/train.pt`；离线测试会把 `--data-dir` 当成新的 `split_dir`，优先读其中的 `server/test.pt`。
+
+##### `mnist` 的最小数据
+
+| 节点 | 最小需要的数据 | 推荐部署后的路径 |
+| --- | --- | --- |
+| `server` | `val.pt`；若希望训练结束后直接做最终测试，再额外加 `test.pt` | `../data/mnist/server/val.pt`，可选 `../data/mnist/server/test.pt` |
+| `client1` | 仅 `m1` 的训练集 | `../data/mnist/clients/m1/train.pt` |
+| `client2` | 仅 `m2` 的训练集 | `../data/mnist/clients/m2/train.pt` |
+| `client3` | 仅 `m3` 的训练集 | `../data/mnist/clients/m3/train.pt` |
+| `attack` | 默认攻击配置下会攻击全部客户端，因此最少需要 `m1/m2/m3` 三个客户端的 `train.pt` | `../data/attack/mnist/attack/clients/m1/train.pt`、`../data/attack/mnist/attack/clients/m2/train.pt`、`../data/attack/mnist/attack/clients/m3/train.pt` |
+| `predict` | 推荐只保留测试集；最稳妥的是单独准备 `server/test.pt` | `../data/test/mnist/test/server/test.pt` |
+
+按当前默认攻击配置，`attack.client_selection=all`，而且 `mnist` 一共只有 `m1/m2/m3` 三个客户端，所以攻击机默认需要三份 `train.pt` 都在。如果你后续显式把攻击客户端改少，那么攻击机才可以相应减少到只保留被攻击客户端的数据。
+
+##### `cifar10` 的最小数据
+
+| 节点 | 最小需要的数据 | 推荐部署后的路径 |
+| --- | --- | --- |
+| `server` | `val.pt`；若希望训练结束后直接做最终测试，再额外加 `test.pt` | `../data/cifar10/server/val.pt`，可选 `../data/cifar10/server/test.pt` |
+| `client1` | 仅 `c1` 的训练集 | `../data/cifar10/clients/c1/train.pt` |
+| `client2` | 仅 `c2` 的训练集 | `../data/cifar10/clients/c2/train.pt` |
+| `client3` | 仅 `c3` 的训练集 | `../data/cifar10/clients/c3/train.pt` |
+| `attack` | 默认攻击配置下会攻击全部客户端，因此最少需要 `c1/c2/c3` 三个客户端的 `train.pt` | `../data/attack/cifar10/attack/clients/c1/train.pt`、`../data/attack/cifar10/attack/clients/c2/train.pt`、`../data/attack/cifar10/attack/clients/c3/train.pt` |
+| `predict` | 推荐只保留测试集；最稳妥的是单独准备 `server/test.pt` | `../data/test/cifar10/test/server/test.pt` |
+
+##### 为什么这些文件就够
+
+- 服务端训练时只需要共享验证集；图像任务下代码优先读 `split_dir/server/val.pt`，最终测试优先读 `split_dir/server/test.pt`
+- 每个训练客户端只会读取自己的 `split_dir/clients/<client_id>/train.pt`
+- 离线攻击回放会根据 `data.split_dir` 重新加载被攻击客户端本地训练集，所以攻击机需要能访问对应客户端的 `train.pt`
+- 离线预测/离线测试会把 `--data-dir` 作为新的 `data.split_dir`，然后按图像任务测试加载逻辑去读 `server/test.pt` 或回退到 `clients/*/test.pt`
+
+##### 和 `prepare_role_datasets` 的关系
+
+如果你先运行了第 3.5.4 节里的 `prepare_role_datasets`，图像任务会生成类似下面的中间目录：
+
+- `role_datasets/mnist/server/server/val.pt`
+- `role_datasets/mnist/client/m1/clients/m1/train.pt`
+- `role_datasets/mnist/attack/clients/m1/train.pt`
+- `role_datasets/mnist/test/server/test.pt`
+
+`cifar10` 结构同理，只是 `m1/m2/m3` 换成 `c1/c2/c3`。
+
+真正分发到各机器时，更推荐把对应角色目录里的内容整体复制到目标机器最终要读取的 `split_dir` 根目录下，而不是强行保留 `role_datasets/...` 这一层。这样通常就不需要再额外修改默认路径；即便你想把 `attack` 和 `predict` 节点放到别的目录，也只需要在命令里显式覆盖：
+
+- 攻击机：`--override data.split_dir=../data/attack/mnist/attack` 或 `../data/attack/cifar10/attack`
+- 测试机：`--data-dir ../data/test/mnist/test` 或 `../data/test/cifar10/test`
+
 ## 4. 训练方式
 
 ### 4.1 单机直接训练（一般只用集中式训练）
@@ -701,7 +759,79 @@ pkill -f 'tcpdump -n -U -i'
 pkill -f 'tcpdump -n -U -i .* tcp port 50051'
 ```
 
-#### 4.2.0.2 启动顺序与轮询间隔
+
+#### 4.2.0.2 框架内通信统计与外部抓包口径说明
+
+当前仓库里和“通信量”相关的数字，至少有三套口径：
+
+- 框架内 `parameter_*`
+- 框架内 `transport_*`
+- 外部监控脚本 `grpc_port_traffic.summary.json`
+
+这三套数字不要求相等，也不应该直接混用。
+
+`parameter_*` 统计的是算法语义层面的通信量，也就是“为了让接收方恢复当前联邦协议语义，必须传出去的参数内容”：
+
+- 下载侧会统计 `download_state` 本身的 tensor 字节数
+- 同时还会把 `round_context` 里算法真正需要的非字符串辅助内容算进去，例如标量、tensor、编码上下文等
+- 上传侧由各个联邦算法自己定义。例如：
+  - `fedavg` 统计 dense update 本体
+  - `topk/randomk` 统计稀疏索引和值，再加上必要的 dense buffer
+  - `ega` 统计编码后的 `ega_payload`，再加上必要的 dense buffer
+
+因此 `parameter_*` 更接近“协议里真正传了多少模型/更新相关内容”，适合做算法间通信压缩比比较。默认情况下，`summary.json`、`metrics.json`、wandb 中的通信压缩比也都应优先按这套口径理解。
+
+`transport_*` 统计的是框架侧序列化消息体大小，比 `parameter_*` 多算了一层外部封装：
+
+- 下载时，框架会把 `round`、`state`、`compressed`、`round_context`、`stop` 这些字段一起封进消息
+- 上传时，框架会把 `round` 和整个 `ClientResult` 一起封进消息
+- 所以 `transport_*` 除了模型更新本体，还会包含字段名、外层包裹结构、`client_id`、`num_samples`、`loss`、压缩器标签、统计字段等元信息
+
+在单机模式下，`transport_*` 来自本地 pickle 封装估算；在多节点 gRPC 模式下，下载侧更接近框架记录到的 RPC body 大小，上传侧仍然是基于框架消息结构的估算值。它适合做框架内部“消息体大小”对比，但不等于网卡上真实经过的 TCP/IP 字节数。
+
+外部脚本 `scripts/monitor_tcp_port_traffic.sh` 统计的是指定 gRPC 端口上的抓包结果，属于网络侧口径：
+
+- `sent_bytes` / `received_bytes`：按 `frame.len` 汇总，包含链路层/网络层/传输层开销
+- `sent_tcp_payload_bytes` / `received_tcp_payload_bytes`：按 `tcp.len` 汇总，只统计 TCP payload，更接近应用层承载量
+- 它会统计这个端口上的所有 TCP 流量，而不只是某一轮联邦更新本体
+
+也就是说，外部抓包默认可能同时包含：
+
+- 客户端注册 `RegisterClient`
+- 轮询拉取全局状态 `GetGlobal`
+- 正式提交更新 `SubmitUpdate`
+- 停机确认 `AckStop`
+- readiness 等待阶段的重复轮询
+
+所以抓包值通常会比框架 round 内记录的单轮 `parameter_*` 更大；`frame.len` 又通常会比 `tcp.len` 更大。
+
+可以用一个 `ega` round 直观理解。假设客户端第 0 轮运行 `configs/cifar10/ega.yaml` 或 `configs/rare/ega.yaml`：
+
+- `parameter_download_bytes`
+  - 统计本轮下发的模型语义内容
+  - 再加上 `round_context` 里 EGA 真正需要的内容，例如 `ega_normalization`
+  - 第 0 轮如果还伴随一次性 `ega_codec_payload` 下发，这部分算法必需内容也会计入
+- `transport_download_bytes`
+  - 在上面的基础上，再加上整条下载消息外层封装后的序列化开销
+- `parameter_upload_bytes`
+  - 统计 EGA 编码后的 `ega_payload`
+  - 再加上必要的 dense buffer
+- `transport_upload_bytes`
+  - 在上面的基础上，再加上 `round`、`ClientResult` 外层结构及元信息的序列化开销
+- 外部抓包 `sent_tcp_payload_bytes` / `received_tcp_payload_bytes`
+  - 看到的是端口上真实分包后的 TCP payload 总和
+  - 其中还可能包含注册、停机确认和轮询消息
+
+因此实际解读时建议这样用：
+
+- 比较算法通信压缩效果时，优先看框架内 `parameter_*`
+- 比较框架消息体额外封装开销时，看 `transport_*`
+- 排查机器间网络负载、异常突增、是否存在明显额外往返时，再看外部抓包结果
+
+如果三者不一致，通常不是 bug，而是统计口径不同。只有在同一口径内部前后对比异常变化时，才值得继续排查。
+
+
+#### 4.2.0.3 启动顺序与轮询间隔
 
 推荐启动顺序：
 
