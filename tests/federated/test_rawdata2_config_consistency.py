@@ -15,9 +15,9 @@ def test_retained_rare_configs_share_expected_training_schedule():
     ]
 
     assert configs[0]["training"]["patience"] == 500
-    assert configs[0]["training"]["epochs"] == 300
+    assert configs[0]["training"]["epochs"] == 150
     for config in configs[1:]:
-        assert config["federated"]["rounds"] == 300
+        assert config["federated"]["rounds"] == 150
         assert config["training"]["epochs"] == 1
         assert "local_epochs" not in config["federated"]
 
@@ -54,10 +54,10 @@ def test_centralized_and_federated_rare_bases_keep_separate_epoch_defaults():
     centralized = load_config(CONFIG_DIR / "rare/centralized.yaml")
     fedavg = load_config(CONFIG_DIR / "rare/fedavg.yaml")
 
-    assert centralized["training"]["epochs"] == 300
+    assert centralized["training"]["epochs"] == 150
     assert centralized["federated"]["rounds"] == 20
     assert fedavg["training"]["epochs"] == 1
-    assert fedavg["federated"]["rounds"] == 300
+    assert fedavg["federated"]["rounds"] == 150
 
 
 def test_retained_rare_ega_config_uses_shared_common_preset_without_stale_keys():
@@ -65,18 +65,18 @@ def test_retained_rare_ega_config_uses_shared_common_preset_without_stale_keys()
 
     assert ega["ega"]["artifact_path"] == "artifacts/ega/ega_h240_v1.pt"
     assert ega["ega"]["block_size"] == 256
-    assert ega["ega"]["encoded_dim"] == 168
+    assert ega["ega"]["encoded_dim"] == 144
     assert ega["ega"]["hidden_dim"] == 2048
     assert ega["ega"]["residual_blocks"] == 4
     assert ega["ega"]["quantization_level"] == 159
     assert ega["ega"]["normalization_ema"] == 0.98
     assert ega["ega"]["pretrain"]["epochs"] == 220
-    assert ega["ega"]["pretrain"]["patience"] == 44
+    assert ega["ega"]["pretrain"]["patience"] == 50
     assert ega["ega"]["pretrain"]["lr"] == 0.0002
     assert ega["ega"]["pretrain"]["train_groups"] == 50000
     assert ega["ega"]["pretrain"]["val_groups"] == 25000
     assert ega["ega"]["pretrain"]["batch_size"] == 128
-    assert ega["ega"]["pretrain"]["seed"] == 2026
+    assert ega["ega"]["pretrain"]["seed"] == 4096
     assert ega["ega"]["pretrain"]["device"] == "same"
     assert "download_dtype" not in ega["ega"]
     assert "download_method" not in ega["ega"]
