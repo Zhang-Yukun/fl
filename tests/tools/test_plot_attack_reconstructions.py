@@ -46,6 +46,8 @@ def test_plot_attack_reconstructions_plots_saved_artifacts(tmp_path):
             "artifact_path": "attack_artifacts/round_0000/Nd2O3/sample_0000/dlg_00000.pt",
             "primary_metric_value": 0.12,
             "primary_metric_name": "budget_recovered_fraction",
+            "budget_recovered_fraction": 0.12,
+            "coverage_recovered_fraction": 0.25,
         }
     ]
     (run_dir / "attack_results.json").write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -134,3 +136,31 @@ def test_plot_attack_reconstructions_supports_unknown_attack_policy_defaults():
     record = {"name": "CustomAttack"}
     assert module.should_plot_real_y(record) is True
     assert module.should_plot_reconstructed_y(record) is True
+
+
+def test_plot_attack_reconstructions_builds_metric_summary_and_trends(tmp_path):
+    run_dir = tmp_path / "run_summary"
+    records = [
+        {"name": "DLG", "client_id": "Nd2O3", "round_index": 0, "sample_index": 0, "budget_recovered_fraction": 0.10, "coverage_recovered_fraction": 0.20},
+        {"name": "DLG", "client_id": "Nd2O3", "round_index": 1, "sample_index": 1, "budget_recovered_fraction": 0.35, "coverage_recovered_fraction": 0.30},
+        {"name": "DLG", "client_id": "CeO2", "round_index": 0, "sample_index": 0, "budget_recovered_fraction": 0.22, "coverage_recovered_fraction": 0.15},
+        {"name": "DLG", "client_id": "CeO2", "round_index": 2, "sample_index": 2, "budget_recovered_fraction": 0.18, "coverage_recovered_fraction": 0.42},
+        {"name": "DLG", "client_id": "La2O3", "round_index": 1, "sample_index": 0, "budget_recovered_fraction": 0.40, "coverage_recovered_fraction": 0.12},
+        {"name": "DLG", "client_id": "La2O3", "round_index": 3, "sample_index": 1, "budget_recovered_fraction": 0.28, "coverage_recovered_fraction": 0.55},
+    ]
+
+    summary = module.build_metric_summary(records)
+    assert summary[0] == "attack metric summary"
+    nd2o3_line = next(line for line in summary if "client=Nd2O3" in line)
+    assert "budget=0.350000" in nd2o3_line
+    assert "coverage=0.300000" in nd2o3_line
+    assert "overall:" in summary[-1]
+    assert "budget=0.400000" in summary[-1]
+    assert "coverage=0.550000" in summary[-1]
+
+    output_dir = run_dir / "plots"
+    trend_paths = module.plot_metric_trends(records, output_dir)
+    assert len(trend_paths) == 6
+    assert all(path.exists() for path in trend_paths)
+    assert any("Nd2O3_budget_recovered_fraction" in path.name for path in trend_paths)
+    assert any("La2O3_coverage_recovered_fraction" in path.name for path in trend_paths)

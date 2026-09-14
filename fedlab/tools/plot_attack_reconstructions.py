@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -46,6 +47,16 @@ def _filter_records(
     if round_index is not None:
         filtered = [record for record in filtered if int(record.get("round_index", -1)) == round_index]
     return filtered
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(resolved):
+        return None
+    return resolved
 
 
 def select_records(
@@ -298,6 +309,121 @@ def plot_one_artifact(
     return plot_candidate(selected[0], output_dir)
 
 
+def _best_metric_record(records: list[dict[str, Any]], metric_key: str) -> dict[str, Any] | None:
+    best_record: dict[str, Any] | None = None
+    best_value: float | None = None
+    for record in records:
+        value = _finite_float(record.get(metric_key))
+        if value is None:
+            continue
+        if best_value is None or value > best_value:
+            best_value = value
+            best_record = record
+    return best_record
+
+
+def build_metric_summary(records: list[dict[str, Any]]) -> list[str]:
+    """Build text lines summarizing best budget/coverage records."""
+
+    metric_keys = ("budget_recovered_fraction", "coverage_recovered_fraction")
+    metric_labels = {
+        "budget_recovered_fraction": "budget",
+        "coverage_recovered_fraction": "coverage",
+    }
+    lines = ["attack metric summary"]
+    client_ids = sorted({str(record.get("client_id")) for record in records if record.get("client_id") is not None})
+    if not client_ids:
+        lines.append("- no client-specific attack records found")
+    for client_id in client_ids:
+        client_records = [record for record in records if str(record.get("client_id")) == client_id]
+        parts = []
+        for metric_key in metric_keys:
+            best_record = _best_metric_record(client_records, metric_key)
+            best_value = None if best_record is None else _finite_float(best_record.get(metric_key))
+            if best_value is None:
+                parts.append(f"{metric_labels[metric_key]}=N/A")
+                continue
+            round_index = int(best_record.get("round_index", -1) or -1)
+            attack_name = best_record.get("name", "unknown")
+            sample_index = int(best_record.get("sample_index", -1) or -1)
+            parts.append(
+                f"{metric_labels[metric_key]}={best_value:.6f} (round={round_index} attack={attack_name} sample={sample_index})"
+            )
+        lines.append(f"- client={client_id}: " + ", ".join(parts))
+    overall_parts = []
+    for metric_key in metric_keys:
+        best_record = _best_metric_record(records, metric_key)
+        best_value = None if best_record is None else _finite_float(best_record.get(metric_key))
+        if best_value is None:
+            overall_parts.append(f"{metric_labels[metric_key]}=N/A")
+            continue
+        client_id = best_record.get("client_id", "unknown")
+        round_index = int(best_record.get("round_index", -1) or -1)
+        attack_name = best_record.get("name", "unknown")
+        sample_index = int(best_record.get("sample_index", -1) or -1)
+        overall_parts.append(
+            f"{metric_labels[metric_key]}={best_value:.6f} (client={client_id} round={round_index} attack={attack_name} sample={sample_index})"
+        )
+    lines.append("- overall: " + ", ".join(overall_parts))
+    return lines
+
+
+def _round_metric_series(records: list[dict[str, Any]], metric_key: str) -> list[tuple[int, float]]:
+    per_round_best: dict[int, float] = {}
+    for record in records:
+        round_index = record.get("round_index")
+        if round_index is None:
+            continue
+        value = _finite_float(record.get(metric_key))
+        if value is None:
+            continue
+        resolved_round = int(round_index)
+        current = per_round_best.get(resolved_round)
+        if current is None or value > current:
+            per_round_best[resolved_round] = value
+    return sorted(per_round_best.items())
+
+
+def _sanitize_filename_component(value: str) -> str:
+    return "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value)
+
+
+def plot_metric_trends(records: list[dict[str, Any]], output_dir: Path) -> list[Path]:
+    """Plot one best-per-round trend line for each client and metric."""
+
+    metric_specs = (
+        ("budget_recovered_fraction", "Budget Recovery Fraction"),
+        ("coverage_recovered_fraction", "Coverage Recovery Fraction"),
+    )
+    plotted_paths: list[Path] = []
+    client_ids = sorted({str(record.get("client_id")) for record in records if record.get("client_id") is not None})
+    for client_id in client_ids:
+        client_records = [record for record in records if str(record.get("client_id")) == client_id]
+        for metric_key, metric_title in metric_specs:
+            series = _round_metric_series(client_records, metric_key)
+            if not series:
+                continue
+            rounds = [round_index for round_index, _ in series]
+            values = [value for _, value in series]
+            figure, axis = plt.subplots(figsize=(7.2, 4.0))
+            axis.plot(rounds, values, marker="o", linewidth=1.8)
+            axis.set_title(f"{client_id} {metric_title} by Round")
+            axis.set_xlabel("Attack round")
+            axis.set_ylabel(metric_title)
+            axis.set_xticks(sorted(set(rounds)))
+            axis.set_ylim(bottom=0.0)
+            axis.grid(True, axis="x", which="major")
+            axis.grid(True, axis="y", linestyle="--", alpha=0.4)
+            figure.tight_layout()
+            filename = f"trend_client_{_sanitize_filename_component(client_id)}_{metric_key}.png"
+            output_path = output_dir / filename
+            output_dir.mkdir(parents=True, exist_ok=True)
+            figure.savefig(output_path, dpi=180)
+            plt.close(figure)
+            plotted_paths.append(output_path)
+    return plotted_paths
+
+
 def build_report(candidates: list[dict[str, Any]], plotted_paths: list[Path]) -> list[str]:
     """Build a small markdown-style report for generated plots."""
 
@@ -342,7 +468,20 @@ def main() -> None:
     )
     output_dir = args.output_dir or (run_dir / "attack_plots")
     plotted = [plot_candidate(candidate, output_dir) for candidate in selected]
-    report_lines = build_report(selected, plotted)
+    filtered_records = _filter_records(
+        attack_results,
+        attack_name=args.attack_name,
+        client_id=args.client_id,
+        round_index=args.round_index,
+    )
+    trend_plots = plot_metric_trends(filtered_records, output_dir)
+    summary_lines = build_metric_summary(filtered_records)
+    report_lines = summary_lines + [""] + build_report(selected, plotted)
+    if trend_plots:
+        report_lines.append("")
+        report_lines.append(f"plotted {len(trend_plots)} attack metric trend figures")
+        for path in trend_plots:
+            report_lines.append(f"- {path.name}")
     (output_dir / "report.md").write_text("\n".join(report_lines) + "\n", encoding="utf-8")
     print("\n".join(report_lines))
 
