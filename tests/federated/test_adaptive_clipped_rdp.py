@@ -56,8 +56,6 @@ def test_grpc_adaptive_clipped_rdp_records_privacy_summary(tmp_path):
     config = load_config(CONFIG_DIR / "test.yaml", _base_overrides(tmp_path))
 
     coordinator = GrpcFederatedCoordinator(config)
-    global_payload = coordinator.get_global()
-    assert global_payload["compressed"] is False
 
     from fedlab.datasets.rare_earth import build_federated_loaders
     from fedlab.federated.algorithms import resolve_device
@@ -65,10 +63,24 @@ def test_grpc_adaptive_clipped_rdp_records_privacy_summary(tmp_path):
 
     train_loaders, _, _ = build_federated_loaders(config)
     device = resolve_device(config)
+    clients = [FederatedClient(client_id, loader, config, device) for client_id, loader in train_loaders.items()]
+    for client in clients:
+        registration = coordinator.register_client(client.registration_payload())
+        assert registration["accepted"] is True
+
+    global_payload = coordinator.get_global()
+    assert global_payload["ready"] is True
+    assert global_payload["compressed"] is False
+    assert global_payload["state"] is not None
+
     response = None
-    for client_id, loader in train_loaders.items():
-        client = FederatedClient(client_id, loader, config, device)
-        result = client.train(global_payload["state"], compressed=global_payload["compressed"], round_index=0)
+    for client in clients:
+        result = client.train(
+            global_payload["state"],
+            compressed=global_payload["compressed"],
+            round_index=0,
+            round_context=global_payload["round_context"],
+        )
         response = coordinator.submit_update({"round": 0, "result": result})
     assert response is not None and response["stop"] is True
     coordinator.finalize_if_requested()

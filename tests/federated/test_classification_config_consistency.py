@@ -33,7 +33,7 @@ def test_image_classification_configs_match_expected_dataset_and_algorithm(confi
         assert config['model']['name'] == 'medium_cnn'
         assert config['model']['hidden_channels'] == 32
     else:
-        assert config['model']['name'] == 'medium_cnn'
+        assert config['model']['name'] == 'medium_resnet'
         assert config['model']['hidden_channels'] == 32
 
 
@@ -52,13 +52,13 @@ def test_image_classification_centralized_configs_match_expected_dataset(config_
     assert config['data']['split_dir'] == dataset_dir
     assert config['data']['clients'] == client_ids
     assert config['training']['loss'] == 'cross_entropy'
-    assert config['training']['epochs'] == 300
+    assert config['training']['epochs'] == 150
     assert config['evaluation']['metrics'] == ['accuracy']
     if 'mnist/' in config_name:
         assert config['model']['name'] == 'medium_cnn'
         assert config['model']['hidden_channels'] == 32
     else:
-        assert config['model']['name'] == 'medium_cnn'
+        assert config['model']['name'] == 'medium_resnet'
         assert config['model']['hidden_channels'] == 32
 
 
@@ -77,10 +77,10 @@ def test_image_classification_configs_load_data_from_dedicated_common_files(conf
     assert config['data']['batch_size'] == 128
     assert config['training']['epochs'] == 1
     assert config['training']['optimizer'] == 'adam'
-    assert config['federated']['rounds'] == 300
+    assert config['federated']['rounds'] == 150
     assert config['attack']['frequency_rounds'] == 30
     assert config['attack']['methods'] == ['dlg', 'idlg']
-    assert config['tracking']['enabled'] is True
+    assert config['tracking']['enabled'] is False
     assert config['tracking']['offline'] is True
     assert config['artifacts']['config_formats'] == ['yaml', 'json']
 
@@ -110,18 +110,18 @@ def test_all_task_ega_configs_share_the_same_common_preset_without_stale_keys():
     assert rare == mnist == cifar
     assert rare['artifact_path'] == 'artifacts/ega/ega_h240_v1.pt'
     assert rare['block_size'] == 256
-    assert rare['encoded_dim'] == 168
+    assert rare['encoded_dim'] == 144
     assert rare['hidden_dim'] == 2048
     assert rare['residual_blocks'] == 4
     assert rare['quantization_level'] == 159
     assert rare['normalization_ema'] == 0.98
     assert rare['pretrain']['epochs'] == 220
-    assert rare['pretrain']['patience'] == 44
+    assert rare['pretrain']['patience'] == 50
     assert rare['pretrain']['lr'] == 0.0002
     assert rare['pretrain']['train_groups'] == 50000
     assert rare['pretrain']['val_groups'] == 25000
     assert rare['pretrain']['batch_size'] == 128
-    assert rare['pretrain']['seed'] == 2026
+    assert rare['pretrain']['seed'] == 4096
     assert rare['pretrain']['device'] == 'same'
     assert 'download_dtype' not in rare
     assert 'download_method' not in rare

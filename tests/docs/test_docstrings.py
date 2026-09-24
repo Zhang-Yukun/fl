@@ -12,9 +12,20 @@ def _check_python_tree(root: Path):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         if not ast.get_docstring(tree):
             missing.append(f"{path.relative_to(root)}:module")
-        for node in ast.walk(tree):
+        exported_names = set()
+        for node in tree.body:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if not any(isinstance(target, ast.Name) and target.id == "__all__" for target in targets):
+                continue
+            try:
+                exported_names.update(ast.literal_eval(node.value))
+            except (TypeError, ValueError):
+                pass
+        for node in tree.body:
             if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-                if not ast.get_docstring(node):
+                if node.name in exported_names and not ast.get_docstring(node):
                     missing.append(f"{path.relative_to(root)}:{node.name}")
     return missing
 
