@@ -4,18 +4,9 @@
 
 ## 1. 攻击方与攻击时机
 
-当前攻击方是服务器端，假设为 honest-but-curious server。
+攻击方建模为 honest-but-curious server，但攻击不在联邦训练进程中执行。训练阶段只保存服务器可见的 `round_base_state` 与客户端更新到 `saved_updates/`；训练结束后，独立 replay 工具读取这些快照执行攻击。
 
-每轮联邦训练中的关键顺序是：
-
-1. 服务器保存聚合前全局模型 `round_base_state`
-2. 客户端基于该模型做本地训练
-3. 客户端上传本轮更新 payload
-4. 服务器完成聚合
-5. 服务器做验证评测
-6. 服务器对选中的客户端执行同步或异步攻击
-
-因此攻击发生在每轮客户端上传之后，不参与聚合，也不改变本轮验证指标。
+因此攻击和后续评估都不参与聚合，也不改变训练、验证或测试指标。
 
 ## 2. 当前攻击目标
 
@@ -32,15 +23,9 @@
 
 ## 3. 真实参考样本与恢复集合
 
-对于被攻击客户端，攻击任务会保存：
+攻击阶段通过 `attack.max_samples` 和张量 shape 构造占位模板，不读取真实样本。内置任务可从 `data.seq_len`、`data.pred_len` 或 `data.image_shape` 推导 shape，也可用 `attack.input_shape` 和 `attack.target_shape` 显式指定。
 
-- 攻击任务快照里的 `sample_x_shape`、`sample_y_shape`、`sample_x_dtype`、`sample_y_dtype`：本次攻击批次的输入/目标模板元信息，用于在线攻击执行和离线回放
-- `reference_inputs`、`reference_targets`：该客户端完整训练集参考集合，用于恢复率计算与可视化参考选择
-
-
-`max_samples` 控制单次攻击联合重构多少个样本；当前每个被攻击客户端每轮只生成一个攻击样本集合，当配置为 `auto` 时，会取该客户端可用训练样本数，并再受 `max_samples_cap` 限制。
-
-因此当前评估语义是：服务器基于一次上传 payload，尝试恢复一个给定预算大小的样本集合，再与客户端训练参考集合做匹配。
+独立评估阶段才加载 `reference_inputs`、`reference_targets`，把给定预算大小的重构集合与客户端训练参考集合做匹配，并计算恢复率和可视化字段。
 
 ## 4. DLG 与 iDLG 的当前含义
 

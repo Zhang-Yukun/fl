@@ -152,8 +152,7 @@ Result artifacts no longer store `upload_mode` or `download_mode`, because the p
 | `client_selection` | string | Attacked-client selection strategy: `all`, `first`, or `round_robin`. |
 | `clients_per_round` | int | Number of attacked clients on each attacked round. |
 | `frequency_rounds` | int | Attack frequency in communication rounds. |
-| `max_samples` | string or int | Number of samples jointly reconstructed in one attack evaluation. `auto` uses the attacked client's training-sample count. |
-| `max_samples_cap` | int | Cap applied when `max_samples=auto`. |
+| `max_samples` | int | Explicit positive number of samples jointly reconstructed by one attack. |
 | `model_mode` | string | Attack model mode, `train` or `eval`. |
 | `local_optimizer` | string | Assumed local optimizer for `update_payload` inversion. |
 | `local_lr` | float | Assumed local learning rate for `update_payload` inversion. |

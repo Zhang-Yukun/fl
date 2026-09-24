@@ -167,8 +167,9 @@ A:
 | `attack.client_selection` | `all` | `all`, `first`, `round_robin` | 被攻击客户端选择策略。 |
 | `attack.clients_per_round` | `1` | 正整数 | 每个攻击轮次攻击多少客户端。 |
 | `attack.frequency_rounds` | `1` | 正整数 | 每隔多少轮触发一次攻击。 |
-| `attack.max_samples` | `auto` | `auto` 或正整数 | 单次攻击联合重构多少样本。 |
-| `attack.max_samples_cap` | `8` | 正整数 | `max_samples=auto` 时的上限。 |
+| `attack.max_samples` | `128` | 正整数 | 单次攻击联合重构多少样本；`auto` 已废弃。 |
+| `attack.input_shape` | 按任务推导 | 正整数列表 | 可显式指定不含 batch 维的攻击输入形状。 |
+| `attack.target_shape` | 按任务推导 | 正整数列表 | 可显式指定不含 batch 维的回归目标形状。 |
 | `attack.model_mode` | `train` | `train`, `eval` | 攻击时模型工作模式。 |
 | `attack.local_optimizer` | `adam` | `adam`, `sgd` | `update_payload` 一步近似时假设的本地优化器。 |
 | `attack.local_lr` | `0.001` | 正浮点数 | 一步近似本地更新学习率。 |
