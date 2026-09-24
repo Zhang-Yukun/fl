@@ -1666,8 +1666,8 @@ PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/ra
 | `attack.local_optimizer` | `adam`、`sgd` | `adam` | 一步局部更新近似使用的优化器。 |
 | `attack.local_lr` | 正浮点数 | `0.001` | 一步局部更新近似学习率。 |
 | `attack.local_optimizer_eps` | 正浮点数 | `1e-8` | `adam` 近似的 `eps`。 |
-| `attack.recovery_match_metric` | `mse`、`psnr`、`ssim` | `mse` | 恢复后做一对一匹配时使用的指标。 |
-| `attack.recovery_success_metric` | `mse`、`psnr`、`ssim` | `mse` | 判定恢复成功时使用的指标。 |
+| `attack.recovery_match_metric` | `mse`、`smape`、`psnr`、`ssim` | `mse` | 恢复后做一对一匹配时使用的指标。`smape` 与 `mse` 一样，直接在当前归一化域上计算。 |
+| `attack.recovery_success_metric` | `mse`、`smape`、`psnr`、`ssim` | `mse` | 判定恢复成功时使用的指标。`smape` 与 `mse` 一样，直接在当前归一化域上计算。 |
 | `attack.recovery_success_threshold` | `null` 或浮点数 | `null` | 恢复成功阈值；为空时按指标自动推导。 |
 | `attack.success_rate_threshold` | `[0,1]` 浮点数 | `0.05` | 单次攻击成功率阈值。 |
 | `attack.overall_success_rate_threshold` | `[0,1]` 浮点数 | `0.05` | 汇总层面成功率阈值。 |

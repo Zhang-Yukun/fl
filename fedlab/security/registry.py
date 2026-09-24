@@ -555,6 +555,15 @@ def _pairwise_mse_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Te
     return torch.mean((recon[:, None, :] - refs[None, :, :]) ** 2, dim=-1)
 
 
+def _pairwise_smape_matrix(reconstructed: torch.Tensor, reference_inputs: torch.Tensor, _data_range: float) -> torch.Tensor:
+    recon = reconstructed.detach().cpu().float().reshape(reconstructed.shape[0], -1)
+    refs = reference_inputs.detach().cpu().float().reshape(reference_inputs.shape[0], -1)
+    eps = torch.finfo(recon.dtype).eps
+    numerator = 2.0 * torch.abs(recon[:, None, :] - refs[None, :, :])
+    denominator = torch.abs(recon[:, None, :]) + torch.abs(refs[None, :, :]) + eps
+    return torch.mean(numerator / denominator, dim=-1)
+
+
 def _compute_psnr_from_mse(mse_value: float, data_range: float) -> float:
     if mse_value <= 0:
         return float('inf')
@@ -635,13 +644,14 @@ def recovery_metric_plugin(
 
 
 def _ensure_builtin_recovery_metrics_registered() -> None:
-    """Register builtin mse/psnr/ssim recovery metrics once."""
+    """Register builtin mse/smape/psnr/ssim recovery metrics once."""
 
     global _BUILTIN_RECOVERY_METRICS_LOADED
     if _BUILTIN_RECOVERY_METRICS_LOADED:
         return
     _BUILTIN_RECOVERY_METRICS_LOADED = True
     register_recovery_metric('mse', _pairwise_mse_matrix, default_objective='min', default_threshold=lambda config, _data_range: _attack_threshold(config))
+    register_recovery_metric('smape', _pairwise_smape_matrix, default_objective='min', default_threshold=lambda config, _data_range: _attack_threshold(config))
     register_recovery_metric('psnr', _pairwise_psnr_matrix, default_objective='max', default_threshold=lambda config, data_range: _compute_psnr_from_mse(_attack_threshold(config), data_range))
     register_recovery_metric('ssim', _pairwise_ssim_matrix, default_objective='max', default_threshold=lambda config, _data_range: 0.0 if _attack_ssim_threshold(config) is None else float(_attack_ssim_threshold(config)))
 
