@@ -13,9 +13,8 @@ attack:
   recovery_success_threshold: 0.1
   # Attack trigger frequency in rounds.
   frequency_rounds: 30
-  # auto means recover up to the attacked client's training-set size, capped below.
-  max_samples: auto
-  max_samples_cap: 128
+  # Concrete number of samples reconstructed by each attack; "auto" is unsupported.
+  max_samples: 128
   steps: 300
   lr: 0.001
   # Attack optimizer supports adam and lbfgs.

@@ -11,11 +11,10 @@ from typing import Sequence
 from loguru import logger
 
 from fedlab.replay_capture.artifacts import load_captured_update_records
-from fedlab.attack.data import load_client_reference_set
 from fedlab.attack.runner import execute_attack_round_task, resolve_attack_device
 from fedlab.attack.tasks import build_update_attack_round_task
 from fedlab.utils.runtime import configure_random_seed, configure_torch_runtime
-from fedlab.security.attack_common import save_attack_artifacts, summarize_attack_results
+from fedlab.security.attack_common import save_attack_artifacts
 from fedlab.utils.artifacts import save_experiment_config
 from fedlab.utils.config import load_config
 from fedlab.utils.logging import setup_logging
@@ -120,7 +119,6 @@ def replay_saved_update_attacks(
             replay_config,
             task,
             attack_device,
-            reference_loader=lambda client_id: load_client_reference_set(replay_config, client_id),
         )
         attack_results.extend(round_result.attacks)
         logger.info(
@@ -132,28 +130,23 @@ def replay_saved_update_attacks(
     attack_records = save_attack_artifacts(output_dir, attack_results)
     with (output_dir / "attack_results.json").open("w", encoding="utf-8") as handle:
         json.dump(attack_records, handle, ensure_ascii=False, indent=2)
-    attack_summary = summarize_attack_results(
-        attack_results,
-        float(replay_config.get("attack", {}).get("success_rate_threshold", 0.05)),
-        float(
-            replay_config.get("attack", {}).get(
-                "overall_success_rate_threshold",
-                replay_config.get("attack", {}).get("success_rate_threshold", 0.05),
-            )
-        ),
-    )
-    with (output_dir / "attack_summary.json").open("w", encoding="utf-8") as handle:
-        json.dump(attack_summary, handle, ensure_ascii=False, indent=2)
-    replay_summary = build_replay_summary(run_dir, attack_records, attack_summary)
-    with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
-        json.dump(replay_summary, handle, ensure_ascii=False, indent=2)
-    return {
+    objective_values = [float(result.gradient_mse) for result in attack_results]
+    execution_summary = {
         "source_run_dir": str(run_dir),
         "output_dir": str(output_dir),
         "attack_count": len(attack_records),
-        "attack_summary_path": str(output_dir / "attack_summary.json"),
-        "summary_path": str(output_dir / "summary.json"),
+        "evaluation_status": "pending",
+        "training_data_used": False,
+        "primary_metric_name": "objective_mse",
+        "average_objective_mse": (
+            None if not objective_values else sum(objective_values) / len(objective_values)
+        ),
+        "attack_results_path": str(output_dir / "attack_results.json"),
+        "evaluation_command": "python -m fedlab.tools.evaluate_saved_attacks {}".format(output_dir),
     }
+    with (output_dir / "attack_execution_summary.json").open("w", encoding="utf-8") as handle:
+        json.dump(execution_summary, handle, ensure_ascii=False, indent=2)
+    return execution_summary
 
 
 def run_replay_cli(*, description: str, forced_methods: Sequence[str] | None = None) -> None:

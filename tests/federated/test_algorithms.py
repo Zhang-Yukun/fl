@@ -699,15 +699,28 @@ def test_federated_run_ignores_online_attack_execution_flags(tmp_path):
     assert not (tmp_path / 'attack_results.json').exists()
 
 
-def test_attack_max_samples_auto_defaults_to_capped_training_set_size():
-    attack_cfg = {
-        "max_samples": "auto",
-        "max_samples_cap": 8,
+def test_attack_max_samples_requires_an_explicit_positive_integer():
+    with pytest.raises(ValueError, match="explicit positive integer"):
+        runner_module._resolve_attack_max_samples({"attack": {"max_samples": "auto"}})
+    with pytest.raises(ValueError, match="positive integer"):
+        runner_module._resolve_attack_max_samples({"attack": {"max_samples": 0}})
+    assert runner_module._resolve_attack_max_samples({"attack": {"max_samples": 3}}) == 3
+
+
+def test_attack_placeholders_accept_explicit_tensor_shapes():
+    config = {
+        "task": {"type": "custom"},
+        "attack": {
+            "max_samples": 3,
+            "input_shape": [5, 2],
+            "target_shape": [4, 1],
+        },
     }
 
-    assert runner_module._resolve_attack_max_samples({"attack": attack_cfg}, available_samples=18000) == 8
-    assert runner_module._resolve_attack_max_samples({"attack": {"max_samples": "auto", "max_samples_cap": 32}}, available_samples=20) == 20
-    assert runner_module._resolve_attack_max_samples({"attack": {"max_samples": 3}}, available_samples=18000) == 3
+    sample_x, sample_y = runner_module._build_attack_placeholders(config)
+
+    assert sample_x.shape == (3, 5, 2)
+    assert sample_y.shape == (3, 4, 1)
 
 
 

@@ -9,6 +9,7 @@ import pytest
 import torch
 
 import fedlab.federated.methods.encoded as encoded_methods
+from fedlab.attack.evaluation import evaluate_saved_attacks
 from fedlab.replay_capture.artifacts import load_captured_update_records
 from fedlab.federated.algorithms import run_federated
 from fedlab.utils.config import load_config
@@ -127,6 +128,7 @@ SCRIPT_PATH = TOOLS_DIR / "replay_saved_update_attacks.py"
 DLG_SCRIPT_PATH = TOOLS_DIR / "replay_saved_update_dlg.py"
 IDLG_SCRIPT_PATH = TOOLS_DIR / "replay_saved_update_idlg.py"
 COMMON_SCRIPT_PATH = TOOLS_DIR / "replay_saved_update_common.py"
+EVALUATION_SCRIPT_PATH = TOOLS_DIR / "evaluate_saved_attacks.py"
 
 
 def _load_module(path: Path, module_name: str):
@@ -167,8 +169,8 @@ def _deterministic_overrides(output_dir: Path) -> list[str]:
     ]
 
 
-def _run_script(entry_module, script_name: str, source_dir: Path, replay_dir: Path) -> dict[str, object]:
-    argv = [script_name, str(source_dir), "--output-dir", str(replay_dir)]
+def _run_script(entry_module, script_name: str, source_dir: Path, replay_dir: Path, extra_args=None) -> dict[str, object]:
+    argv = [script_name, str(source_dir), "--output-dir", str(replay_dir), *(extra_args or [])]
     stdout = io.StringIO()
     old_argv = sys.argv
     try:
@@ -196,33 +198,45 @@ def test_replay_saved_update_attacks_runs_from_saved_updates_only(tmp_path):
     assert "reference_inputs" not in captures[0]
     assert "reference_targets" not in captures[0]
 
-    payload = _run_script(module, "replay_saved_update_attacks", source_dir, replay_dir)
+    payload = _run_script(
+        module,
+        "replay_saved_update_attacks",
+        source_dir,
+        replay_dir,
+        ["--override", f"data.split_dir={tmp_path / 'missing_training_data'}"],
+    )
     assert payload["attack_count"] == 2
-    assert payload["summary_path"] == str(replay_dir / "summary.json")
+    assert payload["evaluation_status"] == "pending"
+    assert payload["training_data_used"] is False
+    assert not (replay_dir / "attack_summary.json").exists()
 
-    source_summary = json.loads((source_dir / "summary.json").read_text(encoding="utf-8"))
     replay_results = json.loads((replay_dir / "attack_results.json").read_text(encoding="utf-8"))
-    replay_summary = json.loads((replay_dir / "attack_summary.json").read_text(encoding="utf-8"))
-    replay_run_summary = json.loads((replay_dir / "summary.json").read_text(encoding="utf-8"))
-
     assert len(replay_results) == 2
     assert {record["name"] for record in replay_results} == {"DLG", "iDLG"}
-    assert {record["target_type"] for record in replay_results} == {"update_payload"}
+    assert {record["primary_metric_name"] for record in replay_results} == {"objective_mse"}
+    raw_artifact = torch.load(
+        replay_dir / replay_results[0]["artifact_path"],
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert raw_artifact["reference_x"] is None
+    assert raw_artifact["reconstructed_x"].shape == (1, 21, 1)
+
+    evaluation_dir = tmp_path / "evaluation"
+    evaluated = evaluate_saved_attacks(
+        replay_dir,
+        output_dir=evaluation_dir,
+        config_path=source_dir / "config.yaml",
+        overrides=[],
+    )
+    assert evaluated["evaluation_status"] == "complete"
+    replay_summary = json.loads((evaluation_dir / "attack_summary.json").read_text(encoding="utf-8"))
     assert replay_summary["primary_metric_name"] == "budget_recovered_fraction"
-    assert replay_run_summary["test"] == source_summary["test"]
-    assert replay_run_summary["rounds"] == source_summary["rounds"]
-    assert replay_run_summary["attack_primary_metric_name"] == replay_summary["primary_metric_name"]
-    assert replay_run_summary["attack_primary_metric_direction"] == replay_summary["primary_metric_direction"]
-    assert replay_run_summary["attack_overall_avg_primary_metric_value"] == pytest.approx(
-        replay_summary["overall_avg_primary_metric_value"]
-    )
-    assert replay_run_summary["attack_overall_best_primary_metric_value"] == pytest.approx(
-        replay_summary["overall_best_primary_metric_value"]
-    )
-    assert replay_run_summary["attack_success_rate"] == pytest.approx(replay_summary["overall_success_rate"])
-    assert replay_run_summary["attack_evaluations"] == len(replay_results)
-    assert replay_run_summary["attack_summary"] == replay_summary
-    assert sorted((replay_dir / "attack_artifacts").rglob("*.pt"))
+    assert replay_summary["evaluation_status"] == "complete"
+    source_summary = json.loads((source_dir / "summary.json").read_text(encoding="utf-8"))
+    evaluated_run = json.loads((evaluation_dir / "summary.json").read_text(encoding="utf-8"))
+    assert evaluated_run["test"] == source_summary["test"]
+    assert evaluated_run["rounds"] == source_summary["rounds"]
 
 
 def test_dedicated_replay_scripts_filter_methods(tmp_path):
@@ -248,7 +262,7 @@ def test_dedicated_replay_scripts_filter_methods(tmp_path):
 
 
 def test_replay_saved_update_scripts_exist():
-    for path in (SCRIPT_PATH, DLG_SCRIPT_PATH, IDLG_SCRIPT_PATH, COMMON_SCRIPT_PATH):
+    for path in (SCRIPT_PATH, DLG_SCRIPT_PATH, IDLG_SCRIPT_PATH, COMMON_SCRIPT_PATH, EVALUATION_SCRIPT_PATH):
         assert path.exists()
 
     wrapper_content = SCRIPT_PATH.read_text(encoding="utf-8")
@@ -258,7 +272,7 @@ def test_replay_saved_update_scripts_exist():
     assert "replay_saved_update_attacks" in common_content
 
 
-def test_replay_saved_update_attacks_loads_classification_reference_data(tmp_path, monkeypatch):
+def test_classification_attack_and_evaluation_are_separate(tmp_path, monkeypatch):
     split_dir = tmp_path / 'split'
     source_dir = tmp_path / 'source_cls'
     replay_dir = tmp_path / 'replay_cls'
@@ -275,6 +289,16 @@ def test_replay_saved_update_attacks_loads_classification_reference_data(tmp_pat
 
     payload = _run_script(module, 'replay_saved_update_attacks', source_dir, replay_dir)
     assert payload['attack_count'] == 6
-    replay_summary = json.loads((replay_dir / 'attack_summary.json').read_text(encoding='utf-8'))
+    assert payload['evaluation_status'] == 'pending'
+
+    evaluation_dir = tmp_path / 'evaluation_cls'
+    evaluated = evaluate_saved_attacks(
+        replay_dir,
+        output_dir=evaluation_dir,
+        config_path=replay_dir / 'config.yaml',
+        overrides=[],
+    )
+    assert evaluated['evaluation_status'] == 'complete'
+    replay_summary = json.loads((evaluation_dir / 'attack_summary.json').read_text(encoding='utf-8'))
     assert replay_summary['target_type'] == 'update_payload'
     assert replay_summary['primary_metric_name'] == 'budget_recovered_fraction'

@@ -438,10 +438,11 @@ def _ensure_builtin_attack_artifact_fields_registered() -> None:
     if _BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED:
         return
     _BUILTIN_ATTACK_ARTIFACT_FIELDS_LOADED = True
-    for key in ('name', 'client_id', 'round_index', 'sample_index', 'target_type', 'reference_label'):
+    for key in ('name', 'client_id', 'round_index', 'sample_index', 'target_type', 'reference_label', 'iterations', 'time_seconds'):
         register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None))
     register_attack_artifact_field('primary_metric_name', lambda result: getattr(result, 'metric_name', None))
     register_attack_artifact_field('primary_metric_value', lambda result: getattr(result, 'mse', None))
+    register_attack_artifact_field('objective_mse', lambda result: getattr(result, 'gradient_mse', None))
     for key in ('reference_x', 'reference_y', 'reconstructed_x', 'reconstructed_y'):
         register_attack_artifact_field(key, lambda result, attr=key: getattr(result, attr, None), tensor_to_cpu=True)
     for key in ('plot_reference_x', 'plot_reference_y', 'plot_reconstructed_x', 'plot_reconstructed_y'):
