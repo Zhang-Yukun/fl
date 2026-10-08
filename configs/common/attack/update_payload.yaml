@@ -10,7 +10,7 @@ attack:
   # Success metric used after one-to-one matching.
   recovery_success_metric: mse
   recovery_success_objective: auto
-  recovery_success_threshold: 0.1
+  recovery_success_threshold: 0.0025
   # Concrete number of samples reconstructed by each attack; "auto" is unsupported.
   max_samples: 128
   steps: 300
