@@ -11,8 +11,6 @@ attack:
   recovery_success_metric: mse
   recovery_success_objective: auto
   recovery_success_threshold: 0.1
-  # Attack trigger frequency in rounds.
-  frequency_rounds: 30
   # Concrete number of samples reconstructed by each attack; "auto" is unsupported.
   max_samples: 128
   steps: 300
@@ -36,9 +34,6 @@ attack:
   local_optimizer: adam
   local_lr: 0.001
   local_optimizer_eps: 1.0e-8
-  async_enabled: false
-  async_workers: 1
-  async_max_pending_rounds: 5
   # same inherits runtime.device.
   device: same
   seed: 4096

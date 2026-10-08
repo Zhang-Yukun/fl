@@ -112,7 +112,7 @@ def _classification_config(
         'centralized': {},
         'federated': {'algorithm': algorithm, 'rounds': 1},
         'replay_capture': {'enabled': True, 'frequency_rounds': 1},
-        'attack': {'enabled': False, 'max_samples': 1, 'target_type': 'update_payload', 'steps': 1, 'async_enabled': False, 'device': 'same'},
+        'attack': {'enabled': False, 'max_samples': 1, 'target_type': 'update_payload', 'steps': 1, 'device': 'same'},
         'tracking': {'enabled': False},
         'evaluation': {'metrics': ['accuracy']},
         'artifacts': {'config_formats': ['yaml'], 'save_every_rounds': 0},

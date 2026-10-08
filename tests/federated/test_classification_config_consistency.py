@@ -78,7 +78,6 @@ def test_image_classification_configs_load_data_from_dedicated_common_files(conf
     assert config['training']['epochs'] == 1
     assert config['training']['optimizer'] == 'adam'
     assert config['federated']['rounds'] == 150
-    assert config['attack']['frequency_rounds'] == 30
     assert config['attack']['methods'] == ['dlg', 'idlg']
     assert config['tracking']['enabled'] is False
     assert config['tracking']['offline'] is True

@@ -91,6 +91,17 @@ def test_deprecated_transport_mode_keys_are_rejected():
         load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["transport.download_mode=model"])
 
 
+def test_deprecated_attack_schedule_keys_are_rejected():
+    with pytest.raises(ValueError, match=r"attack\.frequency_rounds"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["attack.frequency_rounds=3"])
+    with pytest.raises(ValueError, match=r"attack\.async_enabled"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["attack.async_enabled=true"])
+    with pytest.raises(ValueError, match=r"attack\.async_workers"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["attack.async_workers=2"])
+    with pytest.raises(ValueError, match=r"attack\.async_max_pending_rounds"):
+        load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["attack.async_max_pending_rounds=4"])
+
+
 def test_training_epochs_key_is_supported():
     config = load_config(Path(__file__).parents[2] / "configs" / "test.yaml", ["training.epochs=3"])
     assert config["training"]["epochs"] == 3
@@ -123,13 +134,16 @@ def test_load_config_materializes_runtime_defaults_for_saved_snapshots():
     assert config["attack"]["input_parameterization"] == "identity"
     assert config["attack"]["lr"] == 0.001
     assert config["attack"]["max_samples"] == 128
-    assert config["attack"]["frequency_rounds"] == 30
     assert config["attack"]["tv_weight"] == 0.0
     assert config["attack"]["recovery_match_metric"] == "mse"
     assert config["attack"]["recovery_success_metric"] == "mse"
     assert config["attack"]["recovery_success_threshold"] == 0.5
     assert config["grpc"]["max_message_mb"] == 384.0
     assert config["artifacts"]["config_formats"] == ["yaml"]
+    assert "frequency_rounds" not in config["attack"]
+    assert "async_enabled" not in config["attack"]
+    assert "async_workers" not in config["attack"]
+    assert "async_max_pending_rounds" not in config["attack"]
 
 
 

@@ -58,7 +58,6 @@ _RUNTIME_DEFAULTS = {
         "data_range": 1.0,
         "client_selection": "all",
         "clients_per_round": 1,
-        "frequency_rounds": 30,
         "max_samples": 128,
         "recovery_match_metric": "mse",
         "recovery_match_objective": "auto",
@@ -69,9 +68,6 @@ _RUNTIME_DEFAULTS = {
         "local_optimizer": "adam",
         "local_lr": 1e-3,
         "local_optimizer_eps": 1e-8,
-        "async_enabled": False,
-        "async_workers": 1,
-        "async_max_pending_rounds": 5,
         "device": "same",
     },
     "tracking": {
@@ -238,6 +234,25 @@ def _validate_no_legacy_transport_keys(config: dict[str, Any]) -> None:
         raise ValueError("Deprecated config key transport.download_mode is no longer supported")
 
 
+def _validate_no_legacy_attack_keys(config: dict[str, Any]) -> None:
+    """Reject removed online-attack scheduling keys."""
+
+    attack_cfg = config.get("attack")
+    if not isinstance(attack_cfg, dict):
+        return
+    if attack_cfg.get("frequency_rounds") is not None:
+        raise ValueError(
+            "Deprecated config key attack.frequency_rounds is no longer supported; "
+            "use replay_capture.frequency_rounds to control saved-update capture cadence"
+        )
+    if attack_cfg.get("async_enabled") is not None:
+        raise ValueError("Deprecated config key attack.async_enabled is no longer supported")
+    if attack_cfg.get("async_workers") is not None:
+        raise ValueError("Deprecated config key attack.async_workers is no longer supported")
+    if attack_cfg.get("async_max_pending_rounds") is not None:
+        raise ValueError("Deprecated config key attack.async_max_pending_rounds is no longer supported")
+
+
 def _sanitize_algorithm_config(config: dict[str, Any]) -> dict[str, Any]:
     """Drop method-specific config blocks that do not apply to the active plugin."""
 
@@ -281,6 +296,7 @@ def load_config(path: str | Path, overrides: Iterable[str] | None = None) -> dic
     config = _materialize_runtime_defaults(config)
     config = _materialize_attack_threshold_defaults(config)
     _validate_no_legacy_transport_keys(config)
+    _validate_no_legacy_attack_keys(config)
     config = _sanitize_algorithm_config(config)
     logger.info("Loaded config from {}", path)
     return config
