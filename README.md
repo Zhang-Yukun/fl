@@ -385,7 +385,8 @@ CIFAR-10 同理，只是客户端目录为 `c1/c2/c3`。
 
 - 服务端：准备验证集；如果需要训练结束后立刻做最终测试，再额外准备测试集
 - 客户端 `i`：只准备自己的本地训练集
-- 如果后续还要在某台机器上做离线攻击回放，那台机器还需要能访问被攻击客户端对应的训练集
+- 离线攻击回放：只需要训练输出目录里的 `saved_updates/`、`config.*` 和模型结构相关配置，不需要训练集或原始数据
+- 离线攻击评测：才需要被评估客户端对应的训练集；不需要原始数据、验证集或测试集
 
 #### 3.5.4 使用 `prepare_role_datasets` 直接生成按角色部署的目录
 
@@ -526,7 +527,9 @@ workspace/data/attack/rare/attack
 └── summary.json
 ```
 
-也就是说，把 `../data/role_datasets/rare/attack/` 的内容整体复制到你真正打算给攻击脚本读取的那个目录即可。部署后，这个目录本身就是攻击回放原生可读的标准 `split_dir` 格式，可以直接传：
+也就是说，把 `../data/role_datasets/rare/attack/` 的内容整体复制到你真正打算给**攻击评测**脚本读取的那个目录即可。这个目录提供的是客户端训练参考集，供 `evaluate_saved_attacks` 在重放结束后做一对一匹配和恢复率统计；单纯执行 `replay_saved_update_attacks` 时并不读取这里的数据。
+
+部署后，执行攻击评测时可以直接传：
 
 ```bash
 --override data.split_dir=../data/attack/rare/attack
@@ -555,7 +558,8 @@ workspace/data/test/rare/test
 因此：
 
 - 服务端和训练客户端如果仍然沿用配置里的默认 `split_dir`，可以尽量保持原路径不变
-- 攻击机和测试机则完全可以把数据放在任意别的位置，只要在攻击/测试命令里显式传入对应路径即可
+- 仅做攻击回放的机器不需要任何数据目录，只需要训练输出目录
+- 做攻击评测或离线测试的机器则可以把所需数据放在任意位置，再在命令里显式传入路径
 
 `mnist` 和 `cifar10` 同理，只是文件从 `.csv` 变成 `.pt`：
 
@@ -575,7 +579,7 @@ workspace/data/test/rare/test
 - `mnist` 的 `data.split_dir=../data/mnist`，客户端固定是 `m1`、`m2`、`m3`
 - `cifar10` 的 `data.split_dir=../data/cifar10`，客户端固定是 `c1`、`c2`、`c3`
 
-这些默认值分别见 `configs/common/data/mnist.yaml` 和 `configs/common/data/cifar10.yaml`。代码实际读取图像分类数据时：训练客户端只读 `clients/<client_id>/train.pt`；服务端验证/测试优先读 `server/val.pt`、`server/test.pt`；离线攻击回放会读被攻击客户端对应的 `clients/<client_id>/train.pt`；离线测试会把 `--data-dir` 当成新的 `split_dir`，优先读其中的 `server/test.pt`。
+这些默认值分别见 `configs/common/data/mnist.yaml` 和 `configs/common/data/cifar10.yaml`。代码实际读取图像分类数据时：训练客户端只读 `clients/<client_id>/train.pt`；服务端验证/测试优先读 `server/val.pt`、`server/test.pt`；离线攻击回放只读训练输出目录里的 `saved_updates/` 与配置，不读取任何 `train.pt`；离线攻击评测才会按 `data.split_dir` 重新加载被攻击客户端的 `clients/<client_id>/train.pt`；离线测试会把 `--data-dir` 当成新的 `split_dir`，优先读其中的 `server/test.pt`。
 
 ##### `mnist` 的最小数据
 
@@ -585,10 +589,10 @@ workspace/data/test/rare/test
 | `client1` | 仅 `m1` 的训练集 | `../data/mnist/clients/m1/train.pt` |
 | `client2` | 仅 `m2` 的训练集 | `../data/mnist/clients/m2/train.pt` |
 | `client3` | 仅 `m3` 的训练集 | `../data/mnist/clients/m3/train.pt` |
-| `attack` | 默认攻击配置下会攻击全部客户端，因此最少需要 `m1/m2/m3` 三个客户端的 `train.pt` | `../data/attack/mnist/attack/clients/m1/train.pt`、`../data/attack/mnist/attack/clients/m2/train.pt`、`../data/attack/mnist/attack/clients/m3/train.pt` |
+| `attack` | 如果只做攻击回放，不需要任何数据；如果还要立刻做攻击评测，则需要被评估客户端的 `train.pt` | 评测时可放在 `../data/attack/mnist/attack/clients/m1/train.pt`、`../data/attack/mnist/attack/clients/m2/train.pt`、`../data/attack/mnist/attack/clients/m3/train.pt` |
 | `predict` | 推荐只保留测试集；最稳妥的是单独准备 `server/test.pt` | `../data/test/mnist/test/server/test.pt` |
 
-按当前默认攻击配置，`attack.client_selection=all`，而且 `mnist` 一共只有 `m1/m2/m3` 三个客户端，所以攻击机默认需要三份 `train.pt` 都在。如果你后续显式把攻击客户端改少，那么攻击机才可以相应减少到只保留被攻击客户端的数据。
+按当前默认攻击配置，`attack.client_selection=all`，而且 `mnist` 一共只有 `m1/m2/m3` 三个客户端，所以如果你要在攻击回放之后立刻执行攻击评测，评测机默认需要三份 `train.pt` 都在。如果你后续显式把攻击客户端改少，那么评测机才可以相应减少到只保留被评估客户端的数据。
 
 ##### `cifar10` 的最小数据
 
@@ -598,14 +602,15 @@ workspace/data/test/rare/test
 | `client1` | 仅 `c1` 的训练集 | `../data/cifar10/clients/c1/train.pt` |
 | `client2` | 仅 `c2` 的训练集 | `../data/cifar10/clients/c2/train.pt` |
 | `client3` | 仅 `c3` 的训练集 | `../data/cifar10/clients/c3/train.pt` |
-| `attack` | 默认攻击配置下会攻击全部客户端，因此最少需要 `c1/c2/c3` 三个客户端的 `train.pt` | `../data/attack/cifar10/attack/clients/c1/train.pt`、`../data/attack/cifar10/attack/clients/c2/train.pt`、`../data/attack/cifar10/attack/clients/c3/train.pt` |
+| `attack` | 如果只做攻击回放，不需要任何数据；如果还要立刻做攻击评测，则需要被评估客户端的 `train.pt` | 评测时可放在 `../data/attack/cifar10/attack/clients/c1/train.pt`、`../data/attack/cifar10/attack/clients/c2/train.pt`、`../data/attack/cifar10/attack/clients/c3/train.pt` |
 | `predict` | 推荐只保留测试集；最稳妥的是单独准备 `server/test.pt` | `../data/test/cifar10/test/server/test.pt` |
 
 ##### 为什么这些文件就够
 
 - 服务端训练时只需要共享验证集；图像任务下代码优先读 `split_dir/server/val.pt`，最终测试优先读 `split_dir/server/test.pt`
 - 每个训练客户端只会读取自己的 `split_dir/clients/<client_id>/train.pt`
-- 离线攻击回放会根据 `data.split_dir` 重新加载被攻击客户端本地训练集，所以攻击机需要能访问对应客户端的 `train.pt`
+- 离线攻击回放只读取训练输出目录里的 `saved_updates/` 和配置，不读取任何数据目录
+- 离线攻击评测会根据 `data.split_dir` 重新加载被评估客户端本地训练集
 - 离线预测/离线测试会把 `--data-dir` 作为新的 `data.split_dir`，然后按图像任务测试加载逻辑去读 `server/test.pt` 或回退到 `clients/*/test.pt`
 
 ##### 和 `prepare_role_datasets` 的关系
@@ -1629,13 +1634,12 @@ PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/ra
 
 #### 6.2.3 离线攻击回放参数
 
-这些参数由 `python -m fedlab.tools.replay_saved_update_attacks`、`replay_saved_update_dlg`、`replay_saved_update_idlg` 读取，不参与联邦训练本身。
+这些参数由 `python -m fedlab.tools.replay_saved_update_attacks`、`replay_saved_update_dlg`、`replay_saved_update_idlg` 读取，不参与联邦训练本身，也不要求本地存在训练集或原始数据。
 
 | 参数 | 取值范围 | 默认值 | 作用 |
 | --- | --- | --- | --- |
 | `attack.target_type` | 当前仅支持 `update_payload` | `update_payload` | 指定攻击对象类型。 |
 | `attack.methods` | `dlg`、`idlg`、列表 | `[dlg,idlg]` | 选择回放哪些攻击方法。 |
-| `attack.frequency_rounds` | 正整数 | `30` | 统计上每隔多少轮挑选一次攻击轮；真正可回放轮次仍取决于训练阶段保存了哪些 `saved_updates`。 |
 | `attack.max_samples` | 正整数 | `128` | 每次联合恢复多少样本；`auto` 已废弃。 |
 | `attack.input_shape` | 正整数列表或空 | 按任务推导 | 可显式指定不含 batch 维的输入形状。 |
 | `attack.target_shape` | 正整数列表或空 | 按任务推导 | 可显式指定不含 batch 维的预测目标形状。 |
@@ -1650,19 +1654,26 @@ PYTHONPATH=. python -m fedlab.tools.analyze_experiment_suite   ../outputs/exp/ra
 | `attack.tv_weight` | 非负浮点数 | `0.0` | 总变差正则权重。 |
 | `attack.seed` | 任意整数 | 配置默认 `4096` | 攻击随机种子。 |
 | `attack.model_mode` | `train`、`eval` | 配置默认 `eval` | 攻击时模型工作模式。 |
+| `attack.device` | `same`、`cpu`、`cuda:*` | `same` | 攻击回放使用的设备；`same` 表示继承 `runtime.device`。 |
 | `attack.local_optimizer` | `adam`、`sgd` | `adam` | 一步局部更新近似使用的优化器。 |
 | `attack.local_lr` | 正浮点数 | `0.001` | 一步局部更新近似学习率。 |
 | `attack.local_optimizer_eps` | 正浮点数 | `1e-8` | `adam` 近似的 `eps`。 |
-| `attack.recovery_match_metric` | `mse`、`smape`、`psnr`、`ssim` | `mse` | 恢复后做一对一匹配时使用的指标。`smape` 与 `mse` 一样，直接在当前归一化域上计算。 |
-| `attack.recovery_success_metric` | `mse`、`smape`、`psnr`、`ssim` | `mse` | 判定恢复成功时使用的指标。`smape` 与 `mse` 一样，直接在当前归一化域上计算。 |
+
+#### 6.2.4 离线攻击评测参数
+
+这些参数由 `python -m fedlab.tools.evaluate_saved_attacks` 读取。它会消费攻击回放阶段已经生成的 `attack_results.json` / `attack_artifacts/`，再结合 `data.split_dir` 指向的客户端训练参考集计算恢复率、成功率和匹配指标。
+
+| 参数 | 取值范围 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `data.split_dir` | 合法路径 | 配置文件中的默认 `split_dir` | 指向攻击评测所需的客户端训练参考集目录。 |
+| `attack.recovery_match_metric` | `mse`、`smape`、`psnr`、`ssim` | `mse` | 做一对一匹配时的代价指标。 |
+| `attack.recovery_match_objective` | `auto`、`min`、`max` | `auto` | 匹配指标越小越好还是越大越好。 |
+| `attack.recovery_success_metric` | `mse`、`smape`、`psnr`、`ssim` | `mse` | 判定匹配后样本是否恢复成功的指标。 |
+| `attack.recovery_success_objective` | `auto`、`min`、`max` | `auto` | 恢复成功指标的方向。 |
 | `attack.recovery_success_threshold` | `null` 或浮点数 | `null` | 恢复成功阈值；为空时按指标自动推导。 |
-| `attack.success_rate_threshold` | `[0,1]` 浮点数 | `0.05` | 单次攻击成功率阈值。 |
-| `attack.overall_success_rate_threshold` | `[0,1]` 浮点数 | `0.05` | 汇总层面成功率阈值。 |
-| `attack.data_range` | 正浮点数 | `1.0` | PSNR / SSIM 使用的数据范围。 |
-| `attack.async_enabled` | `true`、`false` | `false` | 是否异步执行攻击。 |
-| `attack.async_workers` | 正整数 | `1` | 异步攻击 worker 数。 |
-| `attack.async_max_pending_rounds` | 正整数 | `5` | 异步模式下允许积压的最大轮数。 |
-| `attack.device` | `same`、`cpu`、`cuda:*` | `same` | 攻击设备。 |
+| `attack.success_rate_threshold` | `[0,1]` 浮点数 | `0.05` | 单条攻击记录的成功率阈值。 |
+| `attack.overall_success_rate_threshold` | `[0,1]` 浮点数 | `0.05` | 汇总层面的成功率阈值。 |
+| `attack.data_range` | 正浮点数 | `1.0` | `psnr` / `ssim` 等指标使用的数据范围。 |
 
 ### 6.3 `summary.json` 指标说明
 
