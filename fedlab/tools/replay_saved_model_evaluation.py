@@ -7,7 +7,7 @@ import copy
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import torch
 from loguru import logger
@@ -72,6 +72,44 @@ def build_evaluation_config(config_path: Path, overrides: list[str], data_dir: P
     return replay_config
 
 
+@torch.no_grad()
+def _predict_loader(model, loader: Iterable, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return concatenated predictions and targets for one loader."""
+
+    model.eval()
+    predictions = []
+    targets = []
+    for x, y in loader:
+        predictions.append(model(x.to(device)).cpu())
+        targets.append(y.cpu())
+    return torch.cat(predictions), torch.cat(targets)
+
+
+def _prediction_artifacts(config: dict[str, Any], model, loader: Iterable, device: torch.device) -> dict[str, dict[str, torch.Tensor]]:
+    """Build detached prediction artifacts keyed by client or global scope."""
+
+    task_type = str(config.get('task', {}).get('type', 'forecasting')).lower()
+    if task_type == 'forecasting' and hasattr(loader, 'loaders'):
+        client_ids = list(config.get('data', {}).get('clients', []))
+        subloaders = list(getattr(loader, 'loaders', []))
+        if len(client_ids) == len(subloaders):
+            artifacts: dict[str, dict[str, torch.Tensor]] = {}
+            for client_id, subloader in zip(client_ids, subloaders):
+                predictions, targets = _predict_loader(model, subloader, device)
+                artifacts[str(client_id)] = {
+                    'predictions': predictions,
+                    'targets': targets,
+                }
+            return artifacts
+    predictions, targets = _predict_loader(model, loader, device)
+    return {
+        'global': {
+            'predictions': predictions,
+            'targets': targets,
+        }
+    }
+
+
 def evaluate_saved_model(
     model_path: Path,
     *,
@@ -96,6 +134,7 @@ def evaluate_saved_model(
     model.load_state_dict(state)
     start = time.perf_counter()
     metrics = evaluate(model, test_loader, device)
+    prediction_artifacts = _prediction_artifacts(config, model, test_loader, device)
     elapsed = time.perf_counter() - start
     mode = str(config.get('experiment', {}).get('mode', 'federated')).lower()
     summary = {
@@ -114,6 +153,7 @@ def evaluate_saved_model(
         json.dump(metrics, handle, ensure_ascii=False, indent=2)
     with (output_dir / 'test_summary.json').open('w', encoding='utf-8') as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)
+    torch.save(prediction_artifacts, output_dir / 'test_predictions.pt')
     logger.info('Offline saved-model evaluation finished in {:.4f}s with metrics {}', elapsed, metrics)
     return {
         'model_path': str(model_path),
@@ -122,6 +162,7 @@ def evaluate_saved_model(
         'test_metrics': metrics,
         'test_metrics_path': str(output_dir / 'test_metrics.json'),
         'test_summary_path': str(output_dir / 'test_summary.json'),
+        'test_predictions_path': str(output_dir / 'test_predictions.pt'),
     }
 
 

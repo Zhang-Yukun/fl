@@ -177,9 +177,13 @@ def test_replay_saved_model_evaluation_matches_online_test_results(tmp_path):
 
     replay_metrics = json.loads((replay_dir / 'test_metrics.json').read_text(encoding='utf-8'))
     replay_summary = json.loads((replay_dir / 'test_summary.json').read_text(encoding='utf-8'))
+    prediction_artifacts = torch.load(replay_dir / 'test_predictions.pt', map_location='cpu', weights_only=False)
 
     assert payload['test_metrics_path'] == str(replay_dir / 'test_metrics.json')
     assert payload['test_summary_path'] == str(replay_dir / 'test_summary.json')
+    assert payload['test_predictions_path'] == str(replay_dir / 'test_predictions.pt')
+    assert set(prediction_artifacts.keys()) == {'global'}
+    assert set(prediction_artifacts['global'].keys()) == {'predictions', 'targets'}
     assert replay_metrics == pytest.approx(summary['test'])
     assert replay_summary['test'] == pytest.approx(summary['test'])
     assert replay_summary['protocol_test'] == pytest.approx(summary['protocol_test'])
@@ -208,7 +212,10 @@ def test_replay_saved_model_evaluation_classification_uses_test_only_data(tmp_pa
 
     replay_metrics = json.loads((replay_dir / 'test_metrics.json').read_text(encoding='utf-8'))
     replay_summary = json.loads((replay_dir / 'test_summary.json').read_text(encoding='utf-8'))
+    prediction_artifacts = torch.load(replay_dir / 'test_predictions.pt', map_location='cpu', weights_only=False)
 
+    assert set(prediction_artifacts.keys()) == {'global'}
+    assert all(set(prediction_artifacts[key].keys()) == {'predictions', 'targets'} for key in prediction_artifacts)
     assert replay_metrics == pytest.approx(summary['test'])
     assert replay_summary['test'] == pytest.approx(summary['test'])
     assert replay_summary['protocol_test'] == pytest.approx(summary['protocol_test'])
@@ -241,7 +248,10 @@ def test_replay_saved_model_evaluation_rare_uses_saved_scalers_with_test_only_da
 
     replay_metrics = json.loads((replay_dir / 'test_metrics.json').read_text(encoding='utf-8'))
     replay_summary = json.loads((replay_dir / 'test_summary.json').read_text(encoding='utf-8'))
+    prediction_artifacts = torch.load(replay_dir / 'test_predictions.pt', map_location='cpu', weights_only=False)
 
+    assert set(prediction_artifacts.keys()) == {'Nd2O3', 'CeO2', 'La2O3'}
+    assert all(set(prediction_artifacts[key].keys()) == {'predictions', 'targets'} for key in prediction_artifacts)
     assert replay_metrics == pytest.approx(summary['test'])
     assert replay_summary['test'] == pytest.approx(summary['test'])
     assert replay_summary['protocol_test'] == pytest.approx(summary['protocol_test'])
