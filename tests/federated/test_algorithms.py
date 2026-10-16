@@ -31,7 +31,71 @@ from fedlab.federated.algorithms import (
 )
 from fedlab.replay_capture.artifacts import load_captured_update_records
 from fedlab.utils.config import load_config
+
 from fedlab.utils.consistency import compare_fedavg_runs
+
+
+def test_server_parameter_upload_metrics_recompute_dense_sparse_and_ega_payloads():
+    dense_state = OrderedDict([("weight", torch.tensor([1.0, 2.0], dtype=torch.float32))])
+    dense_result = ClientResult(
+        client_id="c_dense",
+        num_samples=1,
+        loss=0.0,
+        aggregation_state=dense_state,
+        aggregation_payload_kind="dense_update",
+        parameter_upload_bytes=999,
+        parameter_upload_parameters=999,
+    )
+    assert server_module._server_parameter_upload_metrics(dense_result) == (
+        server_module.state_num_bytes(dense_state),
+        server_module.state_num_parameters(dense_state),
+    )
+
+    sparse_update = compress_topk(OrderedDict([("weight", torch.tensor([1.0, 0.0, 2.0], dtype=torch.float32))]), 0.5)
+    sparse_buffer_state = OrderedDict([("buffer", torch.tensor([0.5], dtype=torch.float32))])
+    sparse_result = ClientResult(
+        client_id="c_sparse",
+        num_samples=1,
+        loss=0.0,
+        aggregation_state=sparse_buffer_state,
+        sparse_update=sparse_update,
+        aggregation_payload_kind="sparse_update",
+        parameter_upload_bytes=999,
+        parameter_upload_parameters=999,
+    )
+    assert server_module._server_parameter_upload_metrics(sparse_result) == (
+        sparse_update.algorithm_num_bytes + server_module.state_num_bytes(sparse_buffer_state),
+        sparse_update.algorithm_num_parameters + server_module.state_num_parameters(sparse_buffer_state),
+    )
+
+    ega_payload = server_module.EncodedStatePayload(
+        names=["weight"],
+        shapes=[(2,)],
+        encoded_blocks=torch.tensor([[1, 2]], dtype=torch.int8),
+        original_numel=2,
+        block_size=2,
+        encoded_dim=2,
+        quantization_level=16,
+        normalization=1.0,
+        contribution_scale=1.0,
+        encoded_dtype="int8",
+        observed_update_absmax=2.0,
+    )
+    ega_buffer_state = OrderedDict([("buffer", torch.tensor([0.25], dtype=torch.float32))])
+    ega_result = ClientResult(
+        client_id="c_ega",
+        num_samples=1,
+        loss=0.0,
+        aggregation_state=ega_buffer_state,
+        ega_payload=ega_payload,
+        aggregation_payload_kind="ega_encoded_update",
+        parameter_upload_bytes=999,
+        parameter_upload_parameters=999,
+    )
+    assert server_module._server_parameter_upload_metrics(ega_result) == (
+        ega_payload.algorithm_num_bytes + server_module.state_num_bytes(ega_buffer_state),
+        ega_payload.algorithm_num_parameters + server_module.state_num_parameters(ega_buffer_state),
+    )
 
 
 def test_one_round_federated_run(tmp_path):

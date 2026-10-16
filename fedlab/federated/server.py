@@ -51,6 +51,41 @@ def _format_num_bytes(num_bytes: int) -> str:
         value /= 1024.0
     return f"{value:.2f}TB"
 
+
+def _state_metrics(state: StateDict | None) -> tuple[int, int]:
+    """Return byte and parameter counts for one optional state payload."""
+
+    if state is None:
+        return 0, 0
+    return state_num_bytes(state), state_num_parameters(state)
+
+
+def _server_parameter_upload_metrics(result) -> tuple[int, int]:
+    """Recompute semantic upload size from the payload visible to the server."""
+
+    payload_kind = str(getattr(result, "aggregation_payload_kind", "dense_update"))
+    buffer_bytes, buffer_parameters = _state_metrics(getattr(result, "aggregation_state", None))
+    if payload_kind == "dense_update":
+        return buffer_bytes, buffer_parameters
+    if payload_kind == "sparse_update":
+        sparse_update = getattr(result, "sparse_update", None)
+        if sparse_update is None:
+            raise ValueError(f"Missing sparse_update for payload kind {payload_kind!r}")
+        return (
+            int(sparse_update.algorithm_num_bytes) + buffer_bytes,
+            int(sparse_update.algorithm_num_parameters) + buffer_parameters,
+        )
+    if payload_kind == "ega_encoded_update":
+        ega_payload = getattr(result, "ega_payload", None)
+        if ega_payload is None:
+            raise ValueError(f"Missing ega_payload for payload kind {payload_kind!r}")
+        return (
+            int(ega_payload.algorithm_num_bytes) + buffer_bytes,
+            int(ega_payload.algorithm_num_parameters) + buffer_parameters,
+        )
+    return int(getattr(result, "parameter_upload_bytes", 0)), int(getattr(result, "parameter_upload_parameters", 0))
+
+
 def _server_evaluation_context(server: "FederatedServer") -> dict[str, Any] | None:
     """Build task-specific offline evaluation metadata when needed."""
 
@@ -402,12 +437,16 @@ class FederatedServer:
         model_parameters = state_num_parameters(self.global_state)
         total_parameter_download_bytes = sum(result.parameter_download_bytes for result in results)
         total_parameter_download_parameters = sum(result.parameter_download_parameters for result in results)
-        total_parameter_upload_bytes = sum(result.parameter_upload_bytes for result in results)
-        total_parameter_upload_parameters = sum(result.parameter_upload_parameters for result in results)
+        server_parameter_upload = [_server_parameter_upload_metrics(result) for result in results]
+        total_parameter_upload_bytes = sum(num_bytes for num_bytes, _num_parameters in server_parameter_upload)
+        total_parameter_upload_parameters = sum(num_parameters for _num_bytes, num_parameters in server_parameter_upload)
         total_transport_download_bytes = sum(result.transport_download_bytes for result in results)
         total_transport_upload_bytes = sum(result.transport_upload_bytes for result in results)
         total_transport_download_overhead_bytes = sum(result.transport_download_overhead_bytes for result in results)
-        total_transport_upload_overhead_bytes = sum(result.transport_upload_overhead_bytes for result in results)
+        total_transport_upload_overhead_bytes = sum(
+            max(0, int(result.transport_upload_bytes) - num_bytes)
+            for result, (num_bytes, _num_parameters) in zip(results, server_parameter_upload)
+        )
         total_download_bytes = total_parameter_download_bytes
         total_download_parameters = total_parameter_download_parameters
         total_upload_bytes = total_parameter_upload_bytes
@@ -437,14 +476,14 @@ class FederatedServer:
                 parameter_download_parameters=result.parameter_download_parameters,
                 dense_download_reference_bytes=result.dense_download_reference_bytes,
                 dense_download_reference_parameters=result.dense_download_reference_parameters,
-                upload_bytes=result.parameter_upload_bytes,
-                upload_parameters=result.parameter_upload_parameters,
-                parameter_upload_bytes=result.parameter_upload_bytes,
-                parameter_upload_parameters=result.parameter_upload_parameters,
+                upload_bytes=parameter_upload_bytes,
+                upload_parameters=parameter_upload_parameters,
+                parameter_upload_bytes=parameter_upload_bytes,
+                parameter_upload_parameters=parameter_upload_parameters,
                 transport_download_bytes=result.transport_download_bytes,
                 transport_upload_bytes=result.transport_upload_bytes,
                 transport_download_overhead_bytes=result.transport_download_overhead_bytes,
-                transport_upload_overhead_bytes=result.transport_upload_overhead_bytes,
+                transport_upload_overhead_bytes=max(0, int(result.transport_upload_bytes) - parameter_upload_bytes),
                 dense_upload_reference_bytes=result.dense_bytes,
                 dense_upload_reference_parameters=result.dense_parameters,
                 compressor=result.compressor,
@@ -452,7 +491,11 @@ class FederatedServer:
                 privacy_noise_multiplier=result.privacy_noise_multiplier,
                 aggregation_weight=aggregation_weight,
             )
-            for result, aggregation_weight in zip(results, aggregation_weights)
+            for result, aggregation_weight, (parameter_upload_bytes, parameter_upload_parameters) in zip(
+                results,
+                aggregation_weights,
+                server_parameter_upload,
+            )
         ]
         protocol_metrics = metrics if protocol_metrics is None else protocol_metrics
         primary_metric_name = task_primary_metric(self.config)
