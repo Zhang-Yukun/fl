@@ -463,6 +463,11 @@ class GrpcFederatedCoordinator:
         self.tracker.finish()
         with (self.output_dir / 'summary.json').open('w', encoding='utf-8') as handle:
             json.dump(summary, handle, ensure_ascii=False, indent=2)
+        logger.info(
+            'gRPC federated final total_parameter_upload_bytes={} ({})',
+            int(summary.get('total_parameter_upload_bytes', 0)),
+            _format_num_bytes(int(summary.get('total_parameter_upload_bytes', 0))),
+        )
         logger.info('gRPC federated training finished: {}', summary)
 
     def submit_update(self, payload: dict[str, Any]) -> dict[str, Any]:

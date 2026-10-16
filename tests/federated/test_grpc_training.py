@@ -312,6 +312,41 @@ def test_grpc_coordinator_aggregates_one_round_and_saves_summary(tmp_path):
     assert summary["total_transport_bytes"] == metrics[0]["total_transport_bytes"]
 
 
+
+
+def test_grpc_coordinator_logs_total_parameter_upload_bytes_on_finalize(tmp_path, monkeypatch):
+    messages: list[str] = []
+
+    def _fake_info(message, *args):
+        rendered = str(message)
+        if args:
+            try:
+                rendered = rendered.format(*args)
+            except Exception:
+                rendered = ' '.join([rendered, *[str(item) for item in args]])
+        messages.append(rendered)
+
+    monkeypatch.setattr(grpc_training_module.logger, 'info', _fake_info)
+
+    config = load_config(
+        Path(__file__).parents[2] / "configs" / "test.yaml",
+        [
+            "experiment.output_dir=" + str(tmp_path),
+            "federated.algorithm=fedavg",
+            "federated.rounds=1",
+            "attack.enabled=false",
+            "tracking.enabled=false",
+            "runtime.device=cpu",
+        ],
+    )
+    coordinator = GrpcFederatedCoordinator(config)
+    response = _submit_one_round(coordinator, config)
+
+    assert response["stop"] is True
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    expected = f"gRPC federated final total_parameter_upload_bytes={summary['total_parameter_upload_bytes']}"
+    assert any(expected in message for message in messages)
+
 def test_grpc_coordinator_saves_periodic_snapshot(tmp_path):
     config = load_config(
         Path(__file__).parents[2] / "configs" / "test.yaml",
